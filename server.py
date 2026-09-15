@@ -221,7 +221,7 @@ class Gateway:
         if encoder:
             encoder.close()
         client["opus_encoder"] = None
-        client["opus_pending"] = []
+        client["opus_pending"] = bytearray()
         client["opus_sequence"] = 0
         client["adpcm_state"] = (0, 0)
 
@@ -233,20 +233,21 @@ class Gateway:
         if profile == "original":
             self.publish(bytes([2])+data, ident)
             return
-        samples = pcm16le_samples(data)
         if profile.startswith("opus-"):
             if client["opus_encoder"] is None:
                 client["opus_encoder"] = OpusEncoder(32000 if profile == "opus-high" else 12000,
                                                        profile == "opus-low")
             pending = client["opus_pending"]
-            pending.extend(samples)
-            while len(pending) >= OpusEncoder.FRAME_SAMPLES:
-                packet = client["opus_encoder"].encode(pending[:OpusEncoder.FRAME_SAMPLES])
-                del pending[:OpusEncoder.FRAME_SAMPLES]
+            pending.extend(data)
+            frame_bytes = OpusEncoder.FRAME_SAMPLES * 2
+            while len(pending) >= frame_bytes:
+                packet = client["opus_encoder"].encode_pcm16le(pending[:frame_bytes])
+                del pending[:frame_bytes]
                 sequence = client["opus_sequence"]
                 client["opus_sequence"] = (sequence+1) & 0xffffffff
                 self.publish(bytes([10 if profile == "opus-high" else 11])+struct.pack("<I",sequence)+packet, ident)
             return
+        samples = pcm16le_samples(data)
         if profile == "mobile":
             samples = downsample_2(samples)
         encoded, client["adpcm_state"] = encode_ima_adpcm(samples, client["adpcm_state"])
@@ -491,7 +492,7 @@ class Gateway:
                   "waterfall_speed": 1,
                   "congestion": 0, "stable_intervals": 0, "sent_bytes": 0, "last_sent": 0,
                   "audio_enabled": False, "audio_profile": "original", "adpcm_state": (0, 0),
-                  "opus_encoder": None, "opus_pending": [], "opus_sequence": 0}
+                  "opus_encoder": None, "opus_pending": bytearray(), "opus_sequence": 0}
         self.clients[ident] = client
         sender = None
         try:

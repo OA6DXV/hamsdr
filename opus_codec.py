@@ -78,8 +78,18 @@ class OpusEncoder:
         if len(samples) != self.FRAME_SAMPLES:
             raise ValueError("Opus requires exactly 20 ms / 320 samples")
         pcm = (ctypes.c_int16 * len(samples))(*samples)
+        return self._encode_buffer(pcm, len(samples))
+
+    def encode_pcm16le(self, payload):
+        """Encode one native little-endian frame without creating Python integers."""
+        if len(payload) != self.FRAME_SAMPLES * 2:
+            raise ValueError("Opus requires exactly 20 ms / 640 PCM16LE bytes")
+        pcm = (ctypes.c_int16 * self.FRAME_SAMPLES).from_buffer_copy(payload)
+        return self._encode_buffer(pcm, self.FRAME_SAMPLES)
+
+    def _encode_buffer(self, pcm, sample_count):
         output = (ctypes.c_ubyte * 512)()
-        size = LIBOPUS.opus_encode(self._encoder, pcm, len(samples), output, len(output))
+        size = LIBOPUS.opus_encode(self._encoder, pcm, sample_count, output, len(output))
         if size < 0:
             raise RuntimeError(f"opus encode failed: {size}")
         return bytes(output[:size])

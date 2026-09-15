@@ -1,5 +1,6 @@
 import math
 from pathlib import Path
+import struct
 import sys
 import unittest
 
@@ -14,6 +15,8 @@ class OpusCodecTests(unittest.TestCase):
         for bitrate,narrow,maximum in ((32000,False,130),(12000,True,50)):
             encoder,decoder=OpusEncoder(bitrate,narrow),OpusDecoder()
             packets=[encoder.encode(pcm) for _ in range(8)]
+            direct=encoder.encode_pcm16le(struct.pack("<"+"h"*len(pcm),*pcm))
+            self.assertGreater(len(direct),0)
             decoded=[sample for packet in packets for sample in decoder.decode(packet)]
             steady=decoded[1600:]
             self.assertTrue(all(0<len(packet)<=maximum for packet in packets))
