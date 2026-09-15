@@ -131,31 +131,27 @@ def load_listen_config(requested=None):
 def load_site_config(requested=None):
     """Load operator branding separately from application code and assets."""
     data, path = read_site_config(requested)
+    html = data.get("html", data)
+    if not isinstance(html, dict):
+        raise ValueError("site config: invalid html")
 
     def text(name, limit, default=""):
-        value = data.get(name, default)
+        value = html.get(name, default)
         if not isinstance(value, str) or not value.strip() or len(value) > limit or any(ord(c) < 32 for c in value):
             raise ValueError(f"site config: invalid {name}")
         return value.strip()
 
-    description = data.get("description", [])
+    description = html.get("description", [])
     if not isinstance(description, list) or len(description) > 4 or any(
             not isinstance(line, str) or not line.strip() or len(line) > 240 or any(ord(c) < 32 for c in line)
             for line in description):
         raise ValueError("site config: invalid description")
-    administrator = data.get("administrator", {})
-    if not isinstance(administrator, dict):
-        raise ValueError("site config: invalid administrator")
-    admin_name = administrator.get("name", "Administrator")
-    admin_url = administrator.get("url", "")
-    if not isinstance(admin_name, str) or not admin_name.strip() or len(admin_name) > 80:
-        raise ValueError("site config: invalid administrator name")
-    if not isinstance(admin_url, str) or len(admin_url) > 300:
-        raise ValueError("site config: invalid administrator url")
-    if admin_url:
-        parsed = urlsplit(admin_url)
-        if parsed.scheme not in ("http", "https") or not parsed.netloc:
-            raise ValueError("site config: administrator url must use http or https")
+    legacy_administrator = data.get("administrator", {})
+    legacy_callsign = legacy_administrator.get("name", "Administrator") if isinstance(legacy_administrator, dict) else "Administrator"
+    callsign = text("callsign", 80, legacy_callsign)
+    show_admin = html.get("show_admin", True)
+    if not isinstance(show_admin, bool):
+        raise ValueError("site config: show_admin must be true or false")
 
     logo = data.get("logo", {})
     if not isinstance(logo, dict):
@@ -176,12 +172,10 @@ def load_site_config(requested=None):
         raise ValueError("site config: invalid logo alt text")
 
     public = {
-        "language": text("language", 12, "en"),
         "receiver_name": text("receiver_name", 120, "HamSDR"),
         "description": [line.strip() for line in description],
-        "administrator_label": text("administrator_label", 80, "Maintained by"),
-        "administrator": {"name": admin_name.strip(), "url": admin_url},
-        "footer_administrator_label": text("footer_administrator_label", 40, "Administrator"),
+        "callsign": callsign,
+        "show_admin": show_admin,
         "version": VERSION,
         "logo": {"enabled": logo_path is not None, "url": "./site-logo" if logo_path else "", "alt": logo_alt},
     }

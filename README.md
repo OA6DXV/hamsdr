@@ -96,8 +96,8 @@ cp site.example.toml site.toml
 ```
 
 `site.toml` is ignored by Git. It defines the HTTP listener and connection
-limits under `[server]`, the SDR connector under `[receiver]`, persistence under
-`[storage]`, and the receiver's public identity. Only `receiver.type = "rtltcp"`
+limits under `[server]`, browser identity under `[html]`, the SDR connector under
+`[receiver]`, and persistence under `[storage]`. Only `receiver.type = "rtltcp"`
 is implemented currently. Logo files may be SVG, PNG, JPEG or WebP up to 2 MB.
 Equivalent command-line options override the file when supplied. An external
 configuration may be supplied with:

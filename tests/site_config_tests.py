@@ -12,6 +12,8 @@ class SiteConfigTests(unittest.TestCase):
     def test_generic_example(self):
         generic, logo = load_site_config(ROOT / "site.example.toml")
         self.assertEqual(generic["receiver_name"], "HamSDR")
+        self.assertEqual(generic["callsign"], "N0CALL")
+        self.assertTrue(generic["show_admin"])
         self.assertEqual(generic["version"], "0.2.10-unstable")
         self.assertNotIn("footer_text", generic)
         self.assertIsNone(logo)
@@ -37,15 +39,14 @@ class SiteConfigTests(unittest.TestCase):
     def test_rejects_unsafe_or_missing_branding(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "site.json"
-            data = {"language":"en", "receiver_name":"HamSDR", "description":[],
-                    "administrator_label":"Maintained by", "footer_administrator_label":"Administrator",
-                    "administrator":{"name":"Administrator", "url":""},
+            data = {"html":{"receiver_name":"HamSDR", "description":[],
+                    "callsign":"N0CALL", "show_admin":True},
                     "logo":{"file":"", "alt":"Receiver logo"}}
-            data["administrator"]["url"] = "javascript:alert(1)"
+            data["html"]["show_admin"] = "yes"
             path.write_text(json.dumps(data))
-            with self.assertRaisesRegex(ValueError, "administrator url"):
+            with self.assertRaisesRegex(ValueError, "show_admin"):
                 load_site_config(path)
-            data["administrator"]["url"] = ""
+            data["html"]["show_admin"] = True
             data["logo"]["file"] = "missing.svg"
             path.write_text(json.dumps(data))
             with self.assertRaisesRegex(ValueError, "logo must"):

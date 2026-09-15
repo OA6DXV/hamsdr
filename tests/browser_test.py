@@ -28,12 +28,13 @@ async def main():
             site=await page.evaluate("window.hamSdrSiteConfig")
             assert site and await page.locator('#site-name').text_content()==site['receiver_name']
             assert await page.title()==f"{site['receiver_name']} · Unstable"
-            assert await page.locator('html').get_attribute('lang')==site['language']
-            assert await page.locator('#site-footer-operator').text_content()==site['administrator']['name']
+            assert await page.locator('html').get_attribute('lang')=='es'
+            assert await page.locator('#site-footer-operator').text_content()==site['callsign']
+            assert await page.locator('#site-footer-operator-row').is_visible()==site['show_admin']
             assert await page.locator('#site-logo').is_visible()==site['logo']['enabled']
             assert await page.locator('[name="view"],#allowkeys,#audio-format').count()==0
             await expect(page.locator('#site-footer-text')).to_have_text(f"HamSDR v{site['version']}")
-            await expect(page.locator('#site-footer-operator-label')).to_have_text('Administrador: ' if site['language']=='es' else 'Administrator: ')
+            assert await page.locator('#site-operator-row').count()==0
             await expect(page.locator('label').filter(has=page.locator('#wfmode'))).to_contain_text('Gráfico:')
             await expect(page.locator('label').filter(has=page.locator('#waterfall-quality'))).to_contain_text('Cascada:')
             await expect(page.locator('label').filter(has=page.locator('#audio-quality'))).to_contain_text('Audio:')
