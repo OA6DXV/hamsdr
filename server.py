@@ -47,14 +47,18 @@ def read_site_config(requested=None):
         raise ValueError("site config: root must be an object")
     return data, path
 
-def load_listen_config(requested=None):
-    """Return the configured HTTP listener without exposing it to browsers."""
-    data, _ = read_site_config(requested)
+def load_runtime_config(requested=None):
+    """Return validated private server, receiver and storage settings."""
+    data, path = read_site_config(requested)
     server = data.get("server", {})
     if not isinstance(server, dict):
         raise ValueError("site config: invalid server")
     bind = server.get("bind", "127.0.0.1")
     port = server.get("port", 18093)
+    origin = server.get("origin", "")
+    trusted_proxy = server.get("trusted_proxy", "")
+    max_clients = server.get("max_clients", 10)
+    max_clients_per_ip = server.get("max_clients_per_ip", 3)
     if not isinstance(bind, str):
         raise ValueError("site config: invalid server bind")
     try:
@@ -63,7 +67,66 @@ def load_listen_config(requested=None):
         raise ValueError("site config: server bind must be an IP address") from error
     if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
         raise ValueError("site config: server port must be 1..65535")
-    return bind, port
+    if not isinstance(origin, str):
+        raise ValueError("site config: invalid server origin")
+    if origin and origin != "*":
+        parsed = urlsplit(origin)
+        if (parsed.scheme not in ("http", "https") or not parsed.netloc or parsed.path or
+                parsed.query or parsed.fragment or parsed.username or parsed.password):
+            raise ValueError("site config: server origin must be an exact http(s) origin")
+    if not isinstance(trusted_proxy, str):
+        raise ValueError("site config: invalid trusted proxy")
+    if trusted_proxy:
+        try:
+            trusted_proxy = ipaddress.ip_address(trusted_proxy.strip()).compressed
+        except ValueError as error:
+            raise ValueError("site config: trusted proxy must be an IP address") from error
+    if (isinstance(max_clients, bool) or not isinstance(max_clients, int) or
+            isinstance(max_clients_per_ip, bool) or not isinstance(max_clients_per_ip, int) or
+            not 1 <= max_clients <= 20 or not 1 <= max_clients_per_ip <= max_clients):
+        raise ValueError("site config: clients must be 1..20 and per-IP must not exceed total")
+
+    receiver = data.get("receiver", {})
+    if not isinstance(receiver, dict):
+        raise ValueError("site config: invalid receiver")
+    receiver_type = receiver.get("type", "rtltcp")
+    source_host = receiver.get("host", "127.0.0.1")
+    source_port = receiver.get("port", 1231)
+    if receiver_type != "rtltcp":
+        raise ValueError("site config: receiver type must currently be rtltcp")
+    if not isinstance(source_host, str):
+        raise ValueError("site config: invalid receiver host")
+    try:
+        source_host = ipaddress.ip_address(source_host.strip()).compressed
+    except ValueError as error:
+        raise ValueError("site config: receiver host must be an IP address") from error
+    if isinstance(source_port, bool) or not isinstance(source_port, int) or not 1 <= source_port <= 65535:
+        raise ValueError("site config: receiver port must be 1..65535")
+
+    storage = data.get("storage", {})
+    if not isinstance(storage, dict):
+        raise ValueError("site config: invalid storage")
+    database = storage.get("database", str(ROOT / "var/community.sqlite3"))
+    retention_days = storage.get("retention_days", 90)
+    if not isinstance(database, str) or not database.strip() or "\0" in database:
+        raise ValueError("site config: invalid database path")
+    database = Path(database).expanduser()
+    if not database.is_absolute():
+        database = path.parent / database
+    if (isinstance(retention_days, bool) or not isinstance(retention_days, int) or
+            not 1 <= retention_days <= 3650):
+        raise ValueError("site config: retention days must be 1..3650")
+    return {
+        "bind": bind, "port": port, "origin": origin, "trusted_proxy": trusted_proxy,
+        "max_clients": max_clients, "max_clients_per_ip": max_clients_per_ip,
+        "receiver_type": receiver_type, "source_host": source_host, "source_port": source_port,
+        "database": database, "retention_days": retention_days,
+    }
+
+def load_listen_config(requested=None):
+    """Compatibility helper returning the configured HTTP listener."""
+    config = load_runtime_config(requested)
+    return config["bind"], config["port"]
 
 def load_site_config(requested=None):
     """Load operator branding separately from application code and assets."""
@@ -495,8 +558,9 @@ class Gateway:
         origin = request.headers.get("Origin", "")
         parsed = urlsplit(origin)
         # Explicit optional origin for proxy deployments; never rewrite Origin.
-        allowed = origin == self.args.origin if self.args.origin else (
+        allowed = self.args.origin == "*" or (origin == self.args.origin if self.args.origin else (
             parsed.scheme in ("http", "https") and parsed.netloc == request.host)
+        )
         if not allowed:
             raise web.HTTPForbidden(text="Origin not allowed")
         address = self.client_address(request)
@@ -684,33 +748,43 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--bind", help="Listener IP (overrides site config)")
     parser.add_argument("--port", type=int, help="Listener port (overrides site config)")
-    parser.add_argument("--source-host", default="127.0.0.1")
-    parser.add_argument("--source-port", type=int, default=1231)
-    parser.add_argument("--max-clients", type=int, default=10)
-    parser.add_argument("--max-clients-per-ip", type=int, default=3)
-    parser.add_argument("--trusted-proxy", default="", help="Proxy IP allowed to set X-HamSDR-Client-IP")
-    parser.add_argument("--origin", default="", help="Exact public HTTPS origin when behind a proxy")
+    parser.add_argument("--receiver-type", choices=("rtltcp",), help="Receiver connector (overrides site config)")
+    parser.add_argument("--source-host", help="Receiver IP (overrides site config)")
+    parser.add_argument("--source-port", type=int, help="Receiver port (overrides site config)")
+    parser.add_argument("--max-clients", type=int, help="Global connection limit (overrides site config)")
+    parser.add_argument("--max-clients-per-ip", type=int, help="Per-IP limit (overrides site config)")
+    parser.add_argument("--trusted-proxy", help="Proxy IP allowed to set X-HamSDR-Client-IP")
+    parser.add_argument("--origin", help="Exact public origin, or * to disable origin protection")
     parser.add_argument("--demo", action="store_true")
-    parser.add_argument("--database", type=Path, default=ROOT / "var/community.sqlite3")
-    parser.add_argument("--retention-days", type=int, default=90)
+    parser.add_argument("--database", type=Path, help="Community database path (overrides site config)")
+    parser.add_argument("--retention-days", type=int, help="History retention (overrides site config)")
     parser.add_argument("--site-config", type=Path, help="Site configuration TOML (defaults to ./site.toml, then generic example)")
     args = parser.parse_args()
     try:
-        configured_bind, configured_port = load_listen_config(args.site_config)
+        configured = load_runtime_config(args.site_config)
     except ValueError as error:
         parser.error(str(error))
-    args.bind = args.bind if args.bind is not None else configured_bind
-    args.port = args.port if args.port is not None else configured_port
-    if not 1 <= args.retention_days <= 3650:
-        parser.error("retention-days: 1..3650")
+    for name, value in configured.items():
+        if getattr(args, name) is None:
+            setattr(args, name, value)
     try:
         args.bind = ipaddress.ip_address(args.bind).compressed
-        ipaddress.ip_address(args.source_host)
+        args.source_host = ipaddress.ip_address(args.source_host).compressed
     except ValueError as error:
         parser.error(f"invalid IP address: {error}")
     if args.trusted_proxy:
-        args.trusted_proxy = ipaddress.ip_address(args.trusted_proxy).compressed
+        try:
+            args.trusted_proxy = ipaddress.ip_address(args.trusted_proxy).compressed
+        except ValueError as error:
+            parser.error(f"invalid trusted proxy: {error}")
+    if args.origin and args.origin != "*":
+        parsed_origin = urlsplit(args.origin)
+        if (parsed_origin.scheme not in ("http", "https") or not parsed_origin.netloc or
+                parsed_origin.path or parsed_origin.query or parsed_origin.fragment or
+                parsed_origin.username or parsed_origin.password):
+            parser.error("origin must be an exact http(s) origin, or *")
     if (not 1 <= args.source_port <= 65535 or not 1 <= args.port <= 65535 or
-            not 1 <= args.max_clients <= 20 or not 1 <= args.max_clients_per_ip <= args.max_clients):
-        parser.error("Ports: 1..65535; max clients: 1..20; per-IP: 1..max clients")
+            not 1 <= args.max_clients <= 20 or not 1 <= args.max_clients_per_ip <= args.max_clients or
+            not 1 <= args.retention_days <= 3650):
+        parser.error("Ports: 1..65535; clients: 1..20; retention: 1..3650")
     web.run_app(application(args), host=args.bind, port=args.port, access_log=None)

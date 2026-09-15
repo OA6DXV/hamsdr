@@ -11,6 +11,20 @@ footer_administrator_label = "Administrator"
 [server]
 bind = "127.0.0.1"
 port = 18093
+origin = ""
+trusted_proxy = ""
+max_clients = 10
+max_clients_per_ip = 3
+
+# Receiver connector. Only rtltcp is implemented currently.
+[receiver]
+type = "rtltcp"
+host = "127.0.0.1"
+port = 1234
+
+[storage]
+database = "var/community.sqlite3"
+retention_days = 90
 
 [administrator]
 name = "Administrator"

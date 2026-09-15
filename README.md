@@ -95,10 +95,11 @@ Copy the generic configuration and edit the copy:
 cp site.example.toml site.toml
 ```
 
-`site.toml` is ignored by Git. It defines the HTTP listener (`server.bind` and
-`server.port`), receiver name, descriptive text, language, administrator and
-optional logo. Logo files may be SVG, PNG, JPEG or WebP up to 2 MB. Command-line
-`--bind` and `--port` values override the file when supplied. An external
+`site.toml` is ignored by Git. It defines the HTTP listener and connection
+limits under `[server]`, the SDR connector under `[receiver]`, persistence under
+`[storage]`, and the receiver's public identity. Only `receiver.type = "rtltcp"`
+is implemented currently. Logo files may be SVG, PNG, JPEG or WebP up to 2 MB.
+Equivalent command-line options override the file when supplied. An external
 configuration may be supplied with:
 
 ```sh
@@ -106,6 +107,8 @@ configuration may be supplied with:
 ```
 
 Legacy `.json` configuration files remain readable for compatibility.
+Using `server.origin = "*"` disables browser Origin protection and is intended
+only for controlled diagnostics.
 
 ## Verification
 

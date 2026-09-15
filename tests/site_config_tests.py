@@ -5,7 +5,7 @@ import tempfile
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from server import ROOT, load_listen_config, load_site_config
+from server import ROOT, load_listen_config, load_runtime_config, load_site_config
 
 
 class SiteConfigTests(unittest.TestCase):
@@ -16,6 +16,11 @@ class SiteConfigTests(unittest.TestCase):
         self.assertNotIn("footer_text", generic)
         self.assertIsNone(logo)
         self.assertEqual(load_listen_config(ROOT / "site.example.toml"), ("127.0.0.1", 18093))
+        runtime = load_runtime_config(ROOT / "site.example.toml")
+        self.assertEqual(runtime["receiver_type"], "rtltcp")
+        self.assertEqual((runtime["source_host"], runtime["source_port"]), ("127.0.0.1", 1234))
+        self.assertEqual(runtime["database"], ROOT / "var/community.sqlite3")
+        self.assertEqual(runtime["retention_days"], 90)
 
     def test_listener_configuration_and_validation(self):
         with tempfile.TemporaryDirectory() as directory:
