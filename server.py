@@ -13,6 +13,7 @@ import sqlite3
 from pathlib import Path
 import struct
 import time
+import tomllib
 from urllib.parse import urlsplit
 
 from aiohttp import web, WSMsgType
@@ -28,12 +29,19 @@ MODES = {"USB": (300, 2700), "LSB": (-2700, -300), "AM": (-4000, 4000),
 
 def read_site_config(requested=None):
     """Read the installation-specific configuration outside application code."""
-    path = Path(requested).expanduser() if requested else ROOT / "site.json"
+    path = Path(requested).expanduser() if requested else ROOT / "site.toml"
     if not path.exists() and not requested:
-        path = ROOT / "site.example.json"
+        legacy = ROOT / "site.json"
+        path = legacy if legacy.exists() else ROOT / "site.example.toml"
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
+        if path.suffix.lower() == ".toml":
+            with path.open("rb") as stream:
+                data = tomllib.load(stream)
+        elif path.suffix.lower() == ".json":
+            data = json.loads(path.read_text(encoding="utf-8"))
+        else:
+            raise ValueError("site config: file must use .toml or .json")
+    except (OSError, json.JSONDecodeError, tomllib.TOMLDecodeError) as error:
         raise ValueError(f"site config: {error}") from error
     if not isinstance(data, dict):
         raise ValueError("site config: root must be an object")
@@ -685,7 +693,7 @@ if __name__ == "__main__":
     parser.add_argument("--demo", action="store_true")
     parser.add_argument("--database", type=Path, default=ROOT / "var/community.sqlite3")
     parser.add_argument("--retention-days", type=int, default=90)
-    parser.add_argument("--site-config", type=Path, help="Site identity JSON (defaults to ./site.json, then generic example)")
+    parser.add_argument("--site-config", type=Path, help="Site configuration TOML (defaults to ./site.toml, then generic example)")
     args = parser.parse_args()
     try:
         configured_bind, configured_port = load_listen_config(args.site_config)

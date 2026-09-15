@@ -10,33 +10,32 @@ from server import ROOT, load_listen_config, load_site_config
 
 class SiteConfigTests(unittest.TestCase):
     def test_generic_example(self):
-        generic, logo = load_site_config(ROOT / "site.example.json")
+        generic, logo = load_site_config(ROOT / "site.example.toml")
         self.assertEqual(generic["receiver_name"], "HamSDR")
         self.assertEqual(generic["version"], "0.2.10-unstable")
         self.assertNotIn("footer_text", generic)
         self.assertIsNone(logo)
-        self.assertEqual(load_listen_config(ROOT / "site.example.json"), ("127.0.0.1", 18093))
+        self.assertEqual(load_listen_config(ROOT / "site.example.toml"), ("127.0.0.1", 18093))
 
     def test_listener_configuration_and_validation(self):
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "site.json"
-            data = json.loads((ROOT / "site.example.json").read_text())
-            data["server"] = {"bind": "0.0.0.0", "port": 18099}
-            path.write_text(json.dumps(data))
+            path = Path(directory) / "site.toml"
+            path.write_text('language="en"\nreceiver_name="Test"\ndescription=[]\nadministrator_label="By"\nfooter_administrator_label="Admin"\n[server]\nbind="0.0.0.0"\nport=18099\n[administrator]\nname="Admin"\nurl=""\n[logo]\nfile=""\nalt="Logo"\n')
             self.assertEqual(load_listen_config(path), ("0.0.0.0", 18099))
-            data["server"]["port"] = 70000
-            path.write_text(json.dumps(data))
+            path.write_text('[server]\nbind="0.0.0.0"\nport=70000\n')
             with self.assertRaisesRegex(ValueError, "server port"):
                 load_listen_config(path)
-            data["server"] = {"bind": "not-an-address", "port": 18099}
-            path.write_text(json.dumps(data))
+            path.write_text('[server]\nbind="not-an-address"\nport=18099\n')
             with self.assertRaisesRegex(ValueError, "server bind"):
                 load_listen_config(path)
 
     def test_rejects_unsafe_or_missing_branding(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "site.json"
-            data = json.loads((ROOT / "site.example.json").read_text())
+            data = {"language":"en", "receiver_name":"HamSDR", "description":[],
+                    "administrator_label":"Maintained by", "footer_administrator_label":"Administrator",
+                    "administrator":{"name":"Administrator", "url":""},
+                    "logo":{"file":"", "alt":"Receiver logo"}}
             data["administrator"]["url"] = "javascript:alert(1)"
             path.write_text(json.dumps(data))
             with self.assertRaisesRegex(ValueError, "administrator url"):

@@ -20,7 +20,7 @@ from waterfall_codec import decode
 class RadioTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.args = SimpleNamespace(demo=True, source_host='127.0.0.1',source_port=1231,max_clients=5,origin='')
-        self.args.site_config=Path(__file__).resolve().parents[1]/'site.example.json'
+        self.args.site_config=Path(__file__).resolve().parents[1]/'site.example.toml'
         self.temp = tempfile.TemporaryDirectory()
         self.args.database=Path(self.temp.name)/'community.sqlite3'
         await self.start_server()

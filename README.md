@@ -92,18 +92,20 @@ from arbitrary peers.
 Copy the generic configuration and edit the copy:
 
 ```sh
-cp site.example.json site.json
+cp site.example.toml site.toml
 ```
 
-`site.json` is ignored by Git. It defines the HTTP listener (`server.bind` and
+`site.toml` is ignored by Git. It defines the HTTP listener (`server.bind` and
 `server.port`), receiver name, descriptive text, language, administrator and
 optional logo. Logo files may be SVG, PNG, JPEG or WebP up to 2 MB. Command-line
 `--bind` and `--port` values override the file when supplied. An external
 configuration may be supplied with:
 
 ```sh
-.venv/bin/python server.py --site-config /etc/hamsdr/site.json
+.venv/bin/python server.py --site-config /etc/hamsdr/site.toml
 ```
+
+Legacy `.json` configuration files remain readable for compatibility.
 
 ## Verification
 
