@@ -81,6 +81,8 @@ async def main():
                 assert abs(layout['main']['x']-(viewport['width']-layout['main']['w'])/2)<=1,'page is not centered'
             await page.locator('#waterfall-quality').select_option('balanced')
             await expect(page.locator('#waterfall')).to_have_attribute('data-profile','balanced')
+            await page.locator('#waterfall-quality').select_option('classic')
+            await expect(page.locator('#waterfall')).to_have_attribute('data-profile','classic')
             await page.locator('#waterfall-quality').select_option('auto')
             await expect(page.locator('#waterfall')).to_have_attribute('data-profile',expected_profile)
             await page.locator('[data-mode="USB"]:not([data-narrow])').click()

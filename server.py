@@ -24,7 +24,7 @@ from opus_codec import OPUS_AVAILABLE, OpusEncoder
 from waterfall_codec import encode as encode_waterfall
 
 ROOT = Path(__file__).resolve().parent
-VERSION = "0.3.2-dev"
+VERSION = "0.3.3-dev"
 MODES = {"USB": (300, 2700), "LSB": (-2700, -300), "AM": (-4000, 4000),
          "CW": (450, 950), "NFM": (-5000, 5000)}
 
@@ -430,7 +430,7 @@ class Gateway:
             self.metrics = {"cpu_percent": round(max(0, current-previous)/elapsed*100, 1),
                             "kbps": round((self.sent_bytes-sent)*8/elapsed/1000, 1)}
             previous, last, sent = current, now, self.sent_bytes
-            levels = ["mobile", "balanced", "raw"]
+            levels = ["mobile", "classic", "balanced", "raw"]
             for ident, client in tuple(self.clients.items()):
                 rate = round((client["sent_bytes"]-client["last_sent"])*8/elapsed/1000, 1)
                 client["last_sent"] = client["sent_bytes"]
@@ -665,7 +665,7 @@ class Gateway:
                         continue
                     if update.get("type") == "waterfall":
                         preference, profile = update.get("preference"), update.get("profile")
-                        if preference not in ("auto", "mobile", "balanced", "raw") or profile not in ("mobile", "balanced", "raw"):
+                        if preference not in ("auto", "mobile", "classic", "balanced", "raw") or profile not in ("mobile", "classic", "balanced", "raw"):
                             raise ValueError("Perfil de cascada desconocido")
                         if preference != "auto" and preference != profile:
                             raise ValueError("Perfil de cascada inconsistente")

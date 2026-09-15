@@ -25,11 +25,21 @@ class WaterfallCodecTests(unittest.TestCase):
         code,sequence,lower,span,decoded=decode(packet)
         self.assertEqual((code,sequence,lower,span,len(decoded)),(1,7,7092500,16000,1024))
 
+    def test_classic_profile_is_lossless_and_variable_length(self):
+        smooth=bytes(90+(index//16)%12 for index in range(4096))
+        packet=encode(smooth,'classic',8,lower_hz=6588500,span_hz=1024000)
+        code,sequence,lower,span,decoded=decode(packet)
+        expected=bytes(max(smooth[index:index+4]) for index in range(0,len(smooth),4))
+        self.assertEqual((code,sequence,lower,span),(4,8,6588500,1024000))
+        self.assertEqual(decoded,expected)
+        self.assertLess(len(packet),600)
+
     def test_rejects_invalid_input(self):
         with self.assertRaises(ValueError):encode(b'bad','mobile',0)
         with self.assertRaises(ValueError):encode(bytes(4096),'unknown',0)
         packet=encode(bytes(4096),'balanced',1,lower_hz=1,span_hz=1)
-        for invalid in [packet[:-1],b'',bytes([1])+packet[1:]]:
+        classic=encode(bytes(range(256))*16,'classic',1,lower_hz=1,span_hz=1)
+        for invalid in [packet[:-1],b'',bytes([1])+packet[1:],classic[:-2]]:
             with self.assertRaises(ValueError):decode(invalid)
 
 if __name__=='__main__':unittest.main()
