@@ -6,8 +6,8 @@ trusted_proxy = ""
 max_clients = 10
 max_clients_per_ip = 3
 
-# Secure mode enables native HTTPS/WSS. In insecure mode, same-origin WebSockets
-# and the classic low-latency audio fallback are used for direct HTTP access.
+# Modes: false = direct HTTP with classic audio; true = native HTTPS/WSS using
+# the certificate below; "proxy" = HTTP behind an HTTPS reverse proxy.
 [secure]
 enable = false
 certificate = "tls/fullchain.pem"

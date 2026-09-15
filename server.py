@@ -81,12 +81,13 @@ def load_runtime_config(requested=None):
         raise ValueError("site config: clients must be 1..20 and per-IP must not exceed total")
     if not isinstance(secure, dict):
         raise ValueError("site config: invalid secure")
-    tls_enabled = secure.get("enable", secure.get("enabled", False))
+    secure_enable = secure.get("enable", secure.get("enabled", False))
     tls_certificate = secure.get("certificate", "")
     tls_private_key = secure.get("private_key", "")
     secure_origin = secure.get("origin", server.get("origin", ""))
-    if not isinstance(tls_enabled, bool):
-        raise ValueError("site config: secure enable must be true or false")
+    if type(secure_enable) is not bool and secure_enable != "proxy":
+        raise ValueError('site config: secure enable must be false, true or "proxy"')
+    tls_enabled = secure_enable is True
     if not isinstance(tls_certificate, str) or not isinstance(tls_private_key, str):
         raise ValueError("site config: invalid TLS certificate path")
     if not isinstance(secure_origin, str):
@@ -135,7 +136,7 @@ def load_runtime_config(requested=None):
             not 1 <= retention_days <= 3650):
         raise ValueError("site config: retention days must be 1..3650")
     return {
-        "bind": bind, "port": port, "origin": secure_origin if tls_enabled else "",
+        "bind": bind, "port": port, "origin": secure_origin if secure_enable is not False else "",
         "max_clients": max_clients, "max_clients_per_ip": max_clients_per_ip,
         "tls_enabled": tls_enabled, "tls_certificate": tls_certificate,
         "tls_private_key": tls_private_key,

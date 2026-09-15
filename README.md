@@ -81,11 +81,11 @@ Use HTTPS for remote access because AudioWorklet requires a secure context
 outside localhost. Set `--origin` to the public HTTPS origin when deploying
 behind a reverse proxy.
 
-HamSDR can also terminate HTTPS and WSS itself. Set `enable = true` under
-`[secure]` in
-`site.toml` and provide a PEM certificate chain and private key. Relative paths
-are resolved from the directory containing the configuration file. Native TLS
-and a reverse proxy should not be enabled on the same listener.
+`[secure].enable` accepts three states: `false` for direct HTTP and classic
+audio, `true` for native HTTPS/WSS with the configured PEM certificate and
+private key, or `"proxy"` when an HTTPS reverse proxy terminates TLS. Relative
+certificate paths are resolved from the directory containing `site.toml`.
+Native TLS and a reverse proxy should not be enabled on the same listener.
 
 When `[secure].enable` is false and the page is opened directly over HTTP,
 HamSDR falls back to the deprecated but widely compatible ScriptProcessor Web

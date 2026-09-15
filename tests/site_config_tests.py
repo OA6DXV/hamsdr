@@ -47,8 +47,15 @@ class SiteConfigTests(unittest.TestCase):
             self.assertTrue(runtime["tls_enabled"])
             self.assertEqual(runtime["origin"], "https://radio.example.test:8443")
             self.assertEqual(runtime["tls_certificate"], Path(directory) / "cert.pem")
+            path.write_text('[server]\nbind="127.0.0.1"\nport=8080\n[secure]\nenable="proxy"\ncertificate=""\nprivate_key=""\norigin="https://radio.example.test"\n')
+            runtime = load_runtime_config(path)
+            self.assertFalse(runtime["tls_enabled"])
+            self.assertEqual(runtime["origin"], "https://radio.example.test")
             path.write_text('[server]\nbind="127.0.0.1"\nport=8080\n[secure]\nenable=false\ncertificate=""\nprivate_key=""\norigin="https://ignored.example"\n')
             self.assertEqual(load_runtime_config(path)["origin"], "")
+            path.write_text('[server]\nbind="127.0.0.1"\nport=8080\n[secure]\nenable="invalid"\n')
+            with self.assertRaisesRegex(ValueError, "false, true"):
+                load_runtime_config(path)
 
     def test_rejects_unsafe_or_missing_branding(self):
         with tempfile.TemporaryDirectory() as directory:
