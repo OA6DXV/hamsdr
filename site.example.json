@@ -1,0 +1,17 @@
+{
+  "language": "en",
+  "receiver_name": "HamSDR",
+  "description": [
+    "Software-defined radio receiver"
+  ],
+  "administrator_label": "Maintained by",
+  "administrator": {
+    "name": "Administrator",
+    "url": ""
+  },
+  "footer_administrator_label": "Administrator",
+  "logo": {
+    "file": "",
+    "alt": "Receiver logo"
+  }
+}

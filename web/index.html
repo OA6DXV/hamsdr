@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#c0c0c0">
+<title>HamSDR · Unstable</title>
+<link rel="stylesheet" href="./style.css"><link rel="stylesheet" href="./zoom.css"><script src="./site-config.js" defer></script><script src="./site.js" defer></script><script src="./palette.js" defer></script><script src="./waterfall-codec.js" defer></script><script src="./community.js" defer></script><script src="./app.js" defer></script>
+</head>
+<body><main>
+<header><h1><img id="site-logo" class="flag" width="148" height="84" alt=""><span id="site-name">HamSDR</span></h1>
+<ul id="site-details"><li id="site-operator-row"><span id="site-operator-label">Maintained by </span><a id="site-operator">Administrator</a></li></ul></header><hr>
+<div class="top-controls">
+<div class="ctl audio-control"><button id="listen" class="audio-initial" aria-pressed="false">Iniciar audio</button><span id="client-traffic" aria-label="Ancho de banda de esta conexión">— kb/s</span><span id="audio-status-top" role="status">Audio detenido</span></div>
+<div class="ctl"><b id="listeners">0</b> usuarios(s) conectados.</div></div>
+<p id="demo" hidden>Señales de prueba: USB 7100 kHz · LSB 7090 kHz · AM 7108 kHz (tono de 1 kHz).</p>
+<section class="receiver" aria-label="Receptor">
+<div class="ctl identity-control"><label><b>Nombre o indicativo / callsign:</b> <input id="username" maxlength="32" autocomplete="nickname" placeholder="Sin identificar"></label></div>
+<div id="panorama"><canvas id="waterfall" width="1024" height="100" aria-label="Cascada de señales. Pulse para sintonizar."></canvas>
+<div id="spectrum-axis" hidden aria-label="Escala vertical del espectro en dBFS"></div>
+<canvas id="scale" width="1024" height="44" tabindex="0" role="slider" aria-label="Dial de sintonía" aria-valuemin="6600.5" aria-valuemax="7600.5" aria-valuenow="7100"></canvas><div id="markers" aria-label="Etiquetas de frecuencias"></div></div>
+<div id="users-panel" aria-label="Oyentes y frecuencias de sintonía"><div id="users"></div><canvas id="users-scale" width="1024" height="24" aria-label="Escala de frecuencias de los oyentes"></canvas></div>
+<div class="controls">
+<section class="ctl frequency-panel" aria-label="Frecuencia y modos">
+<div class="frequency-line"><label><input id="frequency" type="number" min="6600.5" max="7600.5" step="0.01" value="7100.00" inputmode="decimal" aria-label="Frecuencia"> kHz</label><label><input id="labels" type="checkbox" checked> labels</label><output id="mode-display" hidden>LSB</output></div>
+<div class="tuning" aria-label="Disminuir frecuencia"><button data-step="-10000">- 10 kHz</button><button data-step="-5000">- 5 kHz</button><button data-step="-1000">- 1 kHz</button><button data-step="-100">- 0.1 kHz</button><button data-step="-10">- 0.01 kHz</button><button data-fix>0 fix</button></div>
+<div class="tuning" aria-label="Aumentar frecuencia"><button data-step="10000">+ 10 kHz</button><button data-step="5000">+ 5 kHz</button><button data-step="1000">+ 1 kHz</button><button data-step="100">+ 0.1 kHz</button><button data-step="10">+ 0.01 kHz</button><button data-fix>0 fix</button></div>
+<div class="modes" id="modes"><button data-mode="CW">CW</button><button data-mode="LSB" aria-pressed="true">LSB</button><button data-mode="USB">USB</button><button data-mode="AM">AM</button><button data-mode="NFM">FM</button><button data-mode="CW" data-narrow="true">CW-nrw</button><button data-mode="LSB" data-narrow="true">LSB-nrw</button><button data-mode="USB" data-narrow="true">USB-nrw</button><button data-mode="AM" data-narrow="true">AM-nrw</button><button data-mode="NFM" data-narrow="true">FM-nrw</button></div>
+<b>Memorias:</b><div class="memories"><select id="memories" aria-label="Memorias guardadas"><option value="">(new)</option></select><button id="recall">recall</button><button id="delete">erase</button><button id="save">store</button><input id="memory-name" maxlength="32" placeholder="Nombre" aria-label="Nombre de memoria"></div></section>
+<section class="ctl waterfall-panel" aria-label="Opciones de cascada">Zoom Cascada
+<div><button id="zoom-out">Zoom −</button> <button id="zoom-in">Zoom +</button></div><div><button id="full-band">Min</button> <button id="max-zoom">Max</button> <output id="zoom-label">1×</output></div>
+<label>Velocidad: <select id="wfspeed"><option value="1" selected>normal</option><option value="2">lento</option><option value="6">muy lento</option></select></label>
+<label>Tamaño: <select id="wfsize"><option value="50">pequeño</option><option value="100" selected>medio</option><option value="200">grande</option><option value="400">muy grande</option><option value="600">máximo</option></select></label>
+<label>Gráfico: <select id="wfmode"><option value="spectrum-fixed">espectro fijo</option><option value="spectrum-dynamic">espectro dinámico</option><option value="waterfall" selected>cascada</option><option value="weak">señales débiles</option><option value="strong">señales fuertes</option></select></label>
+<label>Conexión: <select id="waterfall-quality"><option value="auto">automático</option><option value="mobile">bajo consumo</option><option value="balanced" selected>balanceado</option><option value="raw">sin pérdida</option></select></label><small id="waterfall-profile-status">Negociando perfil…</small>
+<details><summary>Ajuste de nivel</summary><label>Brillo <input type="range" id="brightness" min="-30" max="30" value="0"></label><label><input type="checkbox" id="pause"> detener cascada</label></details></section>
+<section class="ctl signal-panel" aria-label="Señal y volumen">
+<div class="smeter"><meter id="meter" min="-120" max="0" value="-120" aria-label="Nivel de señal"></meter><span id="peak-bar"></span><div class="meter-labels"><span>S1</span><span>S3</span><span>S5</span><span>S7</span><span>S9</span><span>+20</span><span>+40</span><span>+60</span></div></div>
+<output id="power">— dBFS</output>; peak <output id="peak">— dBFS</output><small class="meter-note">Escala S orientativa, sin calibración RF.</small><hr>
+<label>Volumen: <input id="volume" type="range" min="-40" max="6" step="1" value="-7"></label> <label><input id="mute" type="checkbox" aria-pressed="false"> mute</label><hr>
+<label>Gráfico de señal: <select id="sgraphchoice"><option value="0">ninguno</option><option value="1">rápido</option><option value="10">lento</option><option value="100">muy lento</option></select></label><canvas id="sgraph" width="260" height="90" hidden aria-label="Historial de señal"></canvas><hr>
+<div class="dsp-control"><b>DSP reducción de ruido:</b> <select id="nr" aria-label="Nivel de reducción de ruido"><option value="0">Apagado</option><option value="1">Bajo</option><option value="2">Medio</option><option value="3">Alto</option><option value="4">Muy Alto</option></select></div></section>
+<section class="ctl filter-panel" aria-label="Filtro y grabación">
+Filter: <b><output id="bandwidth">2.40</output> kHz</b> <button id="filter-narrow">-</button> <button id="filter-wide">+</button>
+<details><summary>Límites del filtro</summary><label>Inferior <input id="low" type="number" min="-6000" max="5900" step="50" value="-2700"> Hz</label><label>Superior <input id="high" type="number" min="-5900" max="6000" step="50" value="-300"> Hz</label></details><hr>
+<label><input id="squelch" type="checkbox"> squelch</label> <label><input id="notch" type="checkbox"> autonotch</label>
+<details><summary>Umbral squelch</summary><input id="threshold" type="range" min="-110" max="-10" value="-70" aria-label="Umbral squelch"></details><hr>
+Grabar audio<br><button id="record">iniciar</button> <span id="record-status" role="status"></span><a id="download" hidden>Descargar grabación</a></section></div></section>
+<p id="message" role="alert"></p><hr>
+<div class="community-layout">
+<section class="ctl community-panel" aria-label="Chat en vivo"><b>Chatbox:</b>
+<p class="chat-notice">Este chatbox es para discutir la operación del HamSDR. El nombre es elegido por cada oyente. Los mensajes son públicos y se conservan durante 90 días, hasta 10 000 mensajes.</p>
+<button id="older-chat" class="small" hidden>Ver mensajes anteriores</button><div id="chatbox" role="log" aria-live="polite" aria-label="Mensajes del chat"></div>
+<form id="chatform"><input id="chat-text" maxlength="500" aria-label="Mensaje de chat" autocomplete="off" required><button class="primary" id="send-chat">Enviar comentarios</button></form><p id="chat-status" role="status">Conectando al chat…</p></section>
+<section class="ctl community-panel" aria-label="Logbook"><b>Logbook:</b>
+<form id="logform"><label>Indicativo de la estación: <input id="log-call" maxlength="32" required></label><label>Comentarios: <input id="log-text" maxlength="500" required></label><button class="primary" id="send-log">Enviar</button></form>
+<small>Hora UTC, frecuencia, modo y nombre del oyente se agregan automáticamente.</small><details id="log-details"><summary>Ver las últimas entradas del logbook</summary><button id="older-log" class="small" hidden>Ver entradas anteriores</button><div id="logbook" role="log" aria-label="Entradas del logbook"></div></details></section></div>
+<div class="diagnostics"><span id="connection" role="status">Conectando al receptor…</span><br><span id="stats"></span><br><span id="audio-status" role="status">Pulsa Iniciar Sonido para escuchar.</span></div>
+<footer><span id="site-footer-operator-label">Administrator: </span><a id="site-footer-operator">Administrator</a><br><span id="site-footer-text">HamSDR</span></footer>
+</main></body></html>

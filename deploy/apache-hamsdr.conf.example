@@ -1,0 +1,22 @@
+<VirtualHost *:443>
+    ServerName radio.example.com
+
+    SSLEngine on
+    SSLCertificateFile /etc/ssl/certs/radio.example.com.pem
+    SSLCertificateKeyFile /etc/ssl/private/radio.example.com.key
+
+    ProxyPreserveHost On
+    RequestHeader set Origin "https://radio.example.com"
+
+    RewriteEngine On
+    RewriteCond %{HTTP:Upgrade} =websocket [NC]
+    RewriteCond %{HTTP:Connection} upgrade [NC]
+    RewriteRule ^/?(.*)$ ws://127.0.0.1:18093/$1 [P,L]
+
+    ProxyPass / http://127.0.0.1:18093/ connectiontimeout=5 timeout=600 retry=0
+    ProxyPassReverse / http://127.0.0.1:18093/
+</VirtualHost>
+
+# Enable proxy, proxy_http, proxy_wstunnel, rewrite, headers and ssl. Launch
+# server.py with --origin https://radio.example.com and replace certificate
+# paths with those managed by your TLS provider.

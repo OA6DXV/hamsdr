@@ -1,0 +1,279 @@
+"""Protocol, multi-user isolation, restart, and invalid-control regression tests."""
+import asyncio
+import contextlib
+import json
+import math
+from pathlib import Path
+import struct
+import sys
+from types import SimpleNamespace
+import unittest
+import tempfile
+import uuid
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from aiohttp import ClientSession, WSServerHandshakeError, WSMsgType, web
+from server import application, GATEWAY
+from waterfall_codec import decode
+
+class RadioTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.args = SimpleNamespace(demo=True, source_host='127.0.0.1',source_port=1231,max_clients=5,origin='')
+        self.args.site_config=Path(__file__).resolve().parents[1]/'site.example.json'
+        self.temp = tempfile.TemporaryDirectory()
+        self.args.database=Path(self.temp.name)/'community.sqlite3'
+        await self.start_server()
+        self.session=ClientSession()
+        self.sockets=[]
+
+    async def start_server(self):
+        self.app=application(self.args)
+        self.runner=web.AppRunner(self.app)
+        await self.runner.setup()
+        site=web.TCPSite(self.runner,'127.0.0.1',0)
+        await site.start()
+        port=site._server.sockets[0].getsockname()[1]
+        self.url=f'http://127.0.0.1:{port}'
+
+    async def asyncTearDown(self):
+        for ws in self.sockets: await ws.close()
+        await self.session.close()
+        await self.runner.cleanup()
+        self.temp.cleanup()
+
+    async def connect(self):
+        ws=await self.session.ws_connect(self.url+'/ws',origin=self.url)
+        self.sockets.append(ws)
+        return ws
+
+    async def event(self, ws, kind, predicate=lambda x: True):
+        async with asyncio.timeout(10):
+            while True:
+                msg = await ws.receive()
+                if msg.type == WSMsgType.TEXT:
+                    data = json.loads(msg.data)
+                    if data.get('type') == kind and predicate(data):
+                        return data
+
+    async def identify(self, ws, name, key=None):
+        key = key or uuid.uuid4().hex
+        await ws.send_json({'type':'identify','name':name,'key':key})
+        result=await self.event(ws,'identified')
+        return key,result['id']
+
+    async def test_presence_chat_log_restart_and_idempotence(self):
+        alice,bob=await self.connect(),await self.connect()
+        key,alice_id=await self.identify(alice,'OA6TEST')
+        await self.identify(bob,'OYENTE')
+        await self.tune(alice,'USB',7101000)
+        presence=await self.event(bob,'presence',lambda x:any(u['id']==alice_id and u['frequency']==7101000 for u in x['users']))
+        self.assertEqual(next(u['name'] for u in presence['users'] if u['id']==alice_id),'OA6TEST')
+        self.assertNotIn(key,json.dumps(presence))
+        request={'type':'chat','request_id':uuid.uuid4().hex,'text':'<img src=x onerror=alert(1)> Señal recibida'}
+        await alice.send_json(request)
+        received=await self.event(bob,'event')
+        ack=await self.event(alice,'ack')
+        self.assertEqual(received['event'],ack['event'])
+        self.assertEqual(ack['event']['frequency'],7101000)
+        await alice.send_json(request)
+        repeated=await self.event(alice,'ack')
+        self.assertEqual(ack['event']['id'],repeated['event']['id'])
+        await alice.send_json({'type':'log','request_id':uuid.uuid4().hex,'text':'Prueba local','call':'OA6DXV'})
+        logged=await self.event(alice,'ack')
+        self.assertEqual(logged['event']['call'],'OA6DXV')
+        self.assertEqual(logged['event']['kind'],'log')
+        await alice.close()
+        gone=await self.event(bob,'presence',lambda x:all(u['id']!=alice_id for u in x['users']))
+        self.assertEqual(len(gone['users']),1)
+        # Restart only this isolated server and reopen the same on-disk DB.
+        await bob.close();await self.runner.cleanup();await self.start_server()
+        restored=await self.connect()
+        history=await self.event(restored,'history',lambda x:x['kind']=='chat')
+        self.assertEqual([e['id'] for e in history['events']],[ack['event']['id']])
+        log=await self.event(restored,'history',lambda x:x['kind']=='log')
+        self.assertEqual(log['events'][0]['id'],logged['event']['id'])
+        await self.identify(restored,'OA6TEST',key)
+        await restored.send_json(request)
+        repeated=await self.event(restored,'ack')
+        self.assertEqual(repeated['event']['id'],ack['event']['id'])
+        unicode_message='📻'*500
+        await restored.send_json({'type':'chat','request_id':uuid.uuid4().hex,'text':unicode_message})
+        unicode_ack=await self.event(restored,'ack')
+        self.assertEqual(unicode_ack['event']['text'],unicode_message)
+
+    async def test_community_validation_and_flood_limit(self):
+        ws=await self.connect()
+        await self.identify(ws,'Prueba')
+        for update in [
+            {'type':'identify','key':uuid.uuid4().hex,'name':'Cambio de clave'},
+            {'type':'chat','request_id':uuid.uuid4().hex,'text':'a'*501},
+            {'type':'chat','request_id':uuid.uuid4().hex,'text':'control\u202e'},
+            {'type':'history','kind':'private'},
+            {'type':'history','before':float('nan')},
+            {'type':'waterfall','preference':'broken','profile':'raw'},
+            {'type':'waterfall-speed','divisor':3},
+            {'type':'audio','enabled':'yes'},
+            {'type':'tune','nr':99}, {'type':'tune','notch':'yes'}]:
+            await ws.send_json(update);await self.event(ws,'error')
+        for i in range(4):
+            await ws.send_json({'type':'chat','request_id':uuid.uuid4().hex,'text':str(i)})
+            await self.event(ws,'ack')
+        await ws.send_json({'type':'chat','request_id':uuid.uuid4().hex,'text':'flood'})
+        error=await self.event(ws,'error')
+        self.assertIn('Espera',error['message'])
+        async with self.session.get(self.url+'/community.sqlite3') as response:self.assertEqual(response.status,404)
+
+    async def tune(self,ws,mode,frequency):
+        await ws.send_json({'type':'tune','mode':mode,'frequency':frequency})
+        async with asyncio.timeout(10):
+            while True:
+                msg=await ws.receive()
+                if msg.type==WSMsgType.TEXT and json.loads(msg.data).get('type')=='tuned':return
+
+    async def collect(self,ws,n=8000):
+        await ws.send_json({'type':'audio','enabled':True})
+        await self.event(ws,'audio-state')
+        audio=[]; rows=0
+        async with asyncio.timeout(12):
+            while len(audio)<n:
+                msg=await ws.receive()
+                if msg.type==WSMsgType.BINARY:
+                    if msg.data[0]==7:
+                        self.assertGreater(len(msg.data),17)
+                        rows+=1
+                    elif msg.data[0]==2:
+                        payload=msg.data[1:]
+                        audio.extend(struct.unpack('<'+'h'*(len(payload)//2),payload))
+        return audio,rows
+
+    async def test_audio_subscription_stops_network_pcm(self):
+        ws=await self.connect()
+        await ws.send_json({'type':'audio','enabled':True});await self.event(ws,'audio-state')
+        async with asyncio.timeout(3):
+            while True:
+                message=await ws.receive()
+                if message.type==WSMsgType.BINARY and message.data[0]==2:break
+        await ws.send_json({'type':'audio','enabled':False});await self.event(ws,'audio-state')
+        deadline=asyncio.get_running_loop().time()+1
+        while asyncio.get_running_loop().time()<deadline:
+            try:message=await asyncio.wait_for(ws.receive(),.2)
+            except asyncio.TimeoutError:continue
+            self.assertFalse(message.type==WSMsgType.BINARY and message.data[0]==2)
+
+    async def test_multiuser_audio_and_engine_restart(self):
+        modes=[('USB',7100000),('LSB',7090000),('AM',7108000),('USB',7100000),('LSB',7090000)]
+        for mode,freq in modes:
+            ws=await self.connect();await self.tune(ws,mode,freq)
+        collected=await asyncio.gather(*(self.collect(ws) for ws in self.sockets))
+        for audio,rows in collected:
+            values=audio[3000:8000]
+            rms=math.sqrt(sum(x*x for x in values)/len(values))/32768
+            # Independent spectral measurement on the network PCM, not engine internals.
+            def power(hz):
+                real=sum(x*math.cos(2*math.pi*hz*i/16000) for i,x in enumerate(values))
+                imag=sum(x*math.sin(2*math.pi*hz*i/16000) for i,x in enumerate(values))
+                return math.hypot(real,imag)
+            self.assertGreater(rms,.02)
+            self.assertGreater(power(1000),power(2100)*20)
+            self.assertGreater(rows,0)
+        gateway=self.app[GATEWAY]
+        old=gateway.process.pid
+        gateway.process.kill()  # Isolated demo subprocess only.
+        async with asyncio.timeout(10):
+            while not gateway.process or gateway.process.pid==old or gateway.source!='demo':await asyncio.sleep(.05)
+        audio,rows=await self.collect(self.sockets[0],16000)
+        self.assertGreater(sum(x*x for x in audio[-4000:]),0)
+        self.assertGreater(gateway.restarts,0)
+        with self.assertRaises(WSServerHandshakeError) as caught:
+            await self.session.ws_connect(self.url+'/ws',origin=self.url)
+        self.assertEqual(caught.exception.status,503)
+
+    async def test_three_waterfall_profiles_and_independent_rows(self):
+        sockets=[await self.connect() for _ in range(3)]
+        for ws,profile in zip(sockets,['mobile','balanced','raw']):
+            await ws.send_json({'type':'waterfall','preference':profile,'profile':profile})
+            reply=await self.event(ws,'waterfall-profile')
+            self.assertEqual(reply['profile'],profile)
+        counts=[0,0,0];sequences=[[],[],[]]
+        async def rows(index,ws):
+            async with asyncio.timeout(6):
+                while counts[index]<5:
+                    msg=await ws.receive()
+                    if msg.type!=WSMsgType.BINARY:continue
+                    if msg.data[0]==7:
+                        self.assertEqual(len(msg.data),(530,1554,4114)[index])
+                        code,sequence,lower,span,data=decode(msg.data[1:])
+                        self.assertEqual((code,lower,span,len(data)),(index+1,6588500,1024000,(1024,2048,4096)[index]))
+                        counts[index]+=1;sequences[index].append(sequence)
+        await asyncio.gather(*(rows(i,ws) for i,ws in enumerate(sockets)))
+        self.assertTrue(all(b>a for values in sequences for a,b in zip(values,values[1:])))
+        await sockets[0].send_json({'type':'waterfall-view','zoom':64,'center':7100000})
+        async with asyncio.timeout(3):
+            while True:
+                msg=await sockets[0].receive()
+                if msg.type==WSMsgType.BINARY and msg.data[0]==7:
+                    _,_,lower,span,data=decode(msg.data[1:]);break
+        self.assertEqual((lower,span,len(data)),(7092000,16000,1024))
+        await sockets[0].send_json({'type':'waterfall','preference':'raw','profile':'mobile'})
+        await self.event(sockets[0],'error')
+
+    async def test_server_side_waterfall_speeds(self):
+        sockets=[await self.connect() for _ in range(3)]
+        divisors=(1,2,6)
+        for ws,divisor in zip(sockets,divisors):
+            await ws.send_json({'type':'waterfall-speed','divisor':divisor})
+            reply=await self.event(ws,'waterfall-speed')
+            self.assertEqual(reply['divisor'],divisor)
+        async def sequences(ws):
+            found=[]
+            deadline=asyncio.get_running_loop().time()+4
+            while asyncio.get_running_loop().time()<deadline:
+                try:msg=await asyncio.wait_for(ws.receive(),min(.5,deadline-asyncio.get_running_loop().time()))
+                except asyncio.TimeoutError:continue
+                if msg.type==WSMsgType.BINARY and msg.data[0]==7:found.append(decode(msg.data[1:])[1])
+            return found
+        received=await asyncio.gather(*(sequences(ws) for ws in sockets))
+        for values,divisor,minimum in zip(received,divisors,(20,10,3)):
+            self.assertGreaterEqual(len(values),minimum)
+            self.assertTrue(all(sequence%divisor==0 for sequence in values[-3:]))
+        self.assertGreater(len(received[0]),len(received[1])*1.5)
+        self.assertGreater(len(received[1]),len(received[2])*2)
+
+    async def test_origins_controls_and_assets(self):
+        for origin in ['null','https://untrusted.example']:
+            with self.assertRaises(WSServerHandshakeError) as caught:
+                await self.session.ws_connect(self.url+'/ws',origin=origin)
+            self.assertEqual(caught.exception.status,403)
+        async with self.session.get(self.url+'/server.py') as response:self.assertEqual(response.status,404)
+        async with self.session.get(self.url+'/') as response:
+            self.assertEqual(response.status,200)
+            self.assertIn("script-src 'self'",response.headers['Content-Security-Policy'])
+        async with self.session.get(self.url+'/site-config.js') as response:
+            self.assertEqual(response.status,200)
+            self.assertIn('window.hamSdrSiteConfig=',await response.text())
+        async with self.session.get(self.url+'/site-logo') as response:
+            self.assertEqual(response.status,404)
+        ws=await self.connect()
+        for control in [{'type':'tune','frequency':float('nan')},{'type':'tune','frequency':1},
+                        {'type':'tune','mode':'bogus'},{'type':'tune','low':0,'high':1},[]]:
+            await ws.send_json(control)
+            async with asyncio.timeout(3):
+                while True:
+                    message=await ws.receive()
+                    if message.type==WSMsgType.TEXT and json.loads(message.data).get('type')=='error':break
+        await self.tune(ws,'USB',7100000)
+        audio,_=await self.collect(ws)
+        self.assertGreater(max(audio),1000)
+
+    async def test_cw_carrier_frequency_and_narrow_filter(self):
+        ws=await self.connect()
+        for lo,hi in [(450,950),(600,800)]:
+            await ws.send_json({'type':'tune','mode':'CW','frequency':7101000,'low':lo,'high':hi})
+            await self.event(ws,'tuned')
+            audio,_=await self.collect(ws)
+            values=audio[3000:]
+            def level(hz):
+                return abs(sum(x*complex(math.cos(2*math.pi*hz*i/16000),math.sin(2*math.pi*hz*i/16000)) for i,x in enumerate(values)))
+            self.assertGreater(level(700),level(1400)*30)
+            self.assertGreater(max(values),1000)
+
+if __name__=='__main__':unittest.main()

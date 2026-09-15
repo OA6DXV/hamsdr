@@ -1,0 +1,18 @@
+/* Keep two-finger gestures under the waterfall's own zoom handler. */
+#waterfall{touch-action:none}
+#waterfall-profile-status{display:block;color:#555;font-size:11px}
+main{width:100%}
+#panorama,#users-panel{width:100%}
+#panorama{overflow:hidden}
+#waterfall{will-change:transform}
+#spectrum-axis{position:absolute;z-index:2;left:0;top:0;width:100%;height:100px;pointer-events:none;color:#efb5ff;font:10px/1 monospace;text-shadow:0 1px #000}
+#spectrum-axis span{position:absolute;left:0;width:100%;height:0;border-top:1px solid rgba(225,128,255,.24)}
+#spectrum-axis span b{position:absolute;z-index:1;left:4px;top:0;transform:translateY(-50%);padding:0 2px;background:rgba(0,0,0,.72);font:inherit;font-weight:normal}
+#spectrum-axis span:last-child b{transform:translateY(0)}
+#panorama{position:relative}
+.controls{width:100%}
+.top-controls{align-items:center}
+.identity-control label{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.identity-control #username{flex:1;min-width:150px;max-width:360px}
+.audio-control{display:flex;align-items:center;gap:9px}#client-traffic{font-variant-numeric:tabular-nums;white-space:nowrap}
+#audio-status-top{font-size:12px;color:#555}
+@media(max-width:650px){.top-controls{display:grid;grid-template-columns:1fr auto}.audio-control{min-width:0}#audio-status-top{display:none}.identity-control label{font-size:13px}.identity-control #username{max-width:none}}

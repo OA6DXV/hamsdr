@@ -1,0 +1,15 @@
+'use strict';
+window.decodeWaterfallRow=bytes=>{
+  if(!(bytes instanceof Uint8Array)||bytes.length<17)return null;
+  const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
+  const version=bytes[0],profile=bytes[1],bins=view.getUint16(2,true),bits=bytes[4],sequence=view.getUint32(5,true),lower=view.getInt32(9,true),span=view.getUint32(13,true);
+  const limits={1:[1024,4,'mobile'],2:[2048,6,'balanced'],3:[4096,8,'raw']},spec=limits[profile];
+  const expected=17+Math.ceil(bins*bits/8);
+  if(version!==2||!spec||bins<1||bins>spec[0]||bits!==spec[1]||!span||bytes.length!==expected)return null;
+  const output=new Uint8Array(bins),mask=(1<<bits)-1;let accumulator=0,used=0,at=0;
+  for(let i=17;i<bytes.length;i++){
+    accumulator+=bytes[i]*2**used;used+=8;
+    while(used>=bits&&at<bins){const q=accumulator&mask;output[at++]=Math.round(q*255/mask);accumulator=Math.floor(accumulator/2**bits);used-=bits;}
+  }
+  return at===bins?{data:output,profile:spec[2],sequence,lower,span}:null;
+};
