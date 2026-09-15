@@ -2,9 +2,9 @@ name: C++ core
 
 on:
   push:
-    branches: [dev, main]
+    branches: [unstable, dev, main]
   pull_request:
-    branches: [dev, main]
+    branches: [unstable, dev, main]
 
 permissions:
   contents: read
@@ -34,6 +34,7 @@ jobs:
           .venv/bin/python tests/opus_codec_tests.py -v
           .venv/bin/python tests/history_tests.py -v
           .venv/bin/python tests/waterfall_codec_tests.py -v
+          .venv/bin/python tests/tls_tests.py -v
       - name: Desktop and mobile browser
         run: |
           .venv/bin/python server.py --demo --port 18094 &

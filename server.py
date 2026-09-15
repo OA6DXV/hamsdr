@@ -10,6 +10,7 @@ import math
 import re
 import resource
 import sqlite3
+import ssl
 from pathlib import Path
 import struct
 import time
@@ -23,7 +24,7 @@ from opus_codec import OPUS_AVAILABLE, OpusEncoder
 from waterfall_codec import encode as encode_waterfall
 
 ROOT = Path(__file__).resolve().parent
-VERSION = "0.3.0-preview"
+VERSION = "0.3.1-unstable"
 MODES = {"USB": (300, 2700), "LSB": (-2700, -300), "AM": (-4000, 4000),
          "CW": (450, 950), "NFM": (-5000, 5000)}
 
@@ -59,6 +60,7 @@ def load_runtime_config(requested=None):
     trusted_proxy = server.get("trusted_proxy", "")
     max_clients = server.get("max_clients", 10)
     max_clients_per_ip = server.get("max_clients_per_ip", 3)
+    tls = server.get("tls", {})
     if not isinstance(bind, str):
         raise ValueError("site config: invalid server bind")
     try:
@@ -85,6 +87,22 @@ def load_runtime_config(requested=None):
             isinstance(max_clients_per_ip, bool) or not isinstance(max_clients_per_ip, int) or
             not 1 <= max_clients <= 20 or not 1 <= max_clients_per_ip <= max_clients):
         raise ValueError("site config: clients must be 1..20 and per-IP must not exceed total")
+    if not isinstance(tls, dict):
+        raise ValueError("site config: invalid server.tls")
+    tls_enabled = tls.get("enabled", False)
+    tls_certificate = tls.get("certificate", "")
+    tls_private_key = tls.get("private_key", "")
+    if not isinstance(tls_enabled, bool):
+        raise ValueError("site config: server.tls enabled must be true or false")
+    if not isinstance(tls_certificate, str) or not isinstance(tls_private_key, str):
+        raise ValueError("site config: invalid TLS certificate path")
+    def tls_path(value):
+        if not value:
+            return None
+        result = Path(value).expanduser()
+        return result if result.is_absolute() else path.parent / result
+    tls_certificate = tls_path(tls_certificate)
+    tls_private_key = tls_path(tls_private_key)
 
     receiver = data.get("receiver", {})
     if not isinstance(receiver, dict):
@@ -119,6 +137,8 @@ def load_runtime_config(requested=None):
     return {
         "bind": bind, "port": port, "origin": origin, "trusted_proxy": trusted_proxy,
         "max_clients": max_clients, "max_clients_per_ip": max_clients_per_ip,
+        "tls_enabled": tls_enabled, "tls_certificate": tls_certificate,
+        "tls_private_key": tls_private_key,
         "receiver_type": receiver_type, "source_host": source_host, "source_port": source_port,
         "database": database, "retention_days": retention_days,
     }
@@ -127,6 +147,21 @@ def load_listen_config(requested=None):
     """Compatibility helper returning the configured HTTP listener."""
     config = load_runtime_config(requested)
     return config["bind"], config["port"]
+
+def create_tls_context(args):
+    """Build the optional HTTPS/WSS server context from validated settings."""
+    if not args.tls_enabled:
+        return None
+    if not args.tls_certificate or not args.tls_private_key:
+        raise ValueError("TLS requires both certificate and private_key")
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    context.options |= ssl.OP_NO_COMPRESSION
+    try:
+        context.load_cert_chain(args.tls_certificate, args.tls_private_key)
+    except (OSError, ssl.SSLError) as error:
+        raise ValueError(f"TLS certificate: {error}") from error
+    return context
 
 def load_site_config(requested=None):
     """Load operator branding separately from application code and assets."""
@@ -749,6 +784,10 @@ if __name__ == "__main__":
     parser.add_argument("--max-clients-per-ip", type=int, help="Per-IP limit (overrides site config)")
     parser.add_argument("--trusted-proxy", help="Proxy IP allowed to set X-HamSDR-Client-IP")
     parser.add_argument("--origin", help="Exact public origin, or * to disable origin protection")
+    parser.add_argument("--tls", dest="tls_enabled", action=argparse.BooleanOptionalAction,
+                        default=None, help="Enable or disable native HTTPS/WSS")
+    parser.add_argument("--tls-certificate", type=Path, help="PEM certificate chain (overrides site config)")
+    parser.add_argument("--tls-private-key", type=Path, help="PEM private key (overrides site config)")
     parser.add_argument("--demo", action="store_true")
     parser.add_argument("--database", type=Path, help="Community database path (overrides site config)")
     parser.add_argument("--retention-days", type=int, help="History retention (overrides site config)")
@@ -781,4 +820,8 @@ if __name__ == "__main__":
             not 1 <= args.max_clients <= 20 or not 1 <= args.max_clients_per_ip <= args.max_clients or
             not 1 <= args.retention_days <= 3650):
         parser.error("Ports: 1..65535; clients: 1..20; retention: 1..3650")
-    web.run_app(application(args), host=args.bind, port=args.port, access_log=None)
+    try:
+        ssl_context = create_tls_context(args)
+    except ValueError as error:
+        parser.error(str(error))
+    web.run_app(application(args), host=args.bind, port=args.port, ssl_context=ssl_context, access_log=None)

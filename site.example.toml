@@ -7,6 +7,12 @@ trusted_proxy = ""
 max_clients = 10
 max_clients_per_ip = 3
 
+# Optional native HTTPS/WSS. Certificate paths may be absolute or relative to this file.
+[server.tls]
+enabled = false
+certificate = "tls/fullchain.pem"
+private_key = "tls/privkey.pem"
+
 # Identity shown in the browser
 [html]
 receiver_name = "HamSDR"

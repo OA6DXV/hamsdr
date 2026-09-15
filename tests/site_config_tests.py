@@ -14,7 +14,7 @@ class SiteConfigTests(unittest.TestCase):
         self.assertEqual(generic["receiver_name"], "HamSDR")
         self.assertEqual(generic["callsign"], "N0CALL")
         self.assertTrue(generic["show_admin"])
-        self.assertEqual(generic["version"], "0.3.0-preview")
+        self.assertEqual(generic["version"], "0.3.1-unstable")
         self.assertNotIn("footer_text", generic)
         self.assertIsNone(logo)
         self.assertEqual(load_listen_config(ROOT / "site.example.toml"), ("127.0.0.1", 18093))
@@ -23,6 +23,9 @@ class SiteConfigTests(unittest.TestCase):
         self.assertEqual((runtime["source_host"], runtime["source_port"]), ("127.0.0.1", 1234))
         self.assertEqual(runtime["database"], ROOT / "var/community.sqlite3")
         self.assertEqual(runtime["retention_days"], 90)
+        self.assertFalse(runtime["tls_enabled"])
+        self.assertEqual(runtime["tls_certificate"], ROOT / "tls/fullchain.pem")
+        self.assertEqual(runtime["tls_private_key"], ROOT / "tls/privkey.pem")
 
     def test_listener_configuration_and_validation(self):
         with tempfile.TemporaryDirectory() as directory:
