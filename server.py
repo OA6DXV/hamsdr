@@ -15,11 +15,12 @@ import time
 from urllib.parse import urlsplit
 
 from aiohttp import web, WSMsgType
+from audio_codec import downsample_2, encode_ima_adpcm, pcm16le_samples
 from community import History, plain_text
 from waterfall_codec import encode as encode_waterfall
 
 ROOT = Path(__file__).resolve().parent
-VERSION = "0.2.6-unstable"
+VERSION = "0.2.7-unstable"
 MODES = {"USB": (300, 2700), "LSB": (-2700, -300), "AM": (-4000, 4000),
          "CW": (450, 950), "NFM": (-5000, 5000)}
 
@@ -112,6 +113,7 @@ class Gateway:
     def info(self):
         return {"type": "status", "version": VERSION, "source": self.source, "users": len(self.clients),
                 "center": 7100500, "sample_rate": 1024000, "audio_rate": 16000,
+                "audio_profiles": {"original": 16000, "balanced": 16000, "mobile": 8000},
                 "fft_size": 65536, "demo": self.args.demo, "restarts": self.restarts,
                 "dropped": self.dropped, **self.metrics}
 
@@ -160,9 +162,37 @@ class Gateway:
             retained = []
             while not client["queue"].empty():
                 packet = client["queue"].get_nowait()
-                if not isinstance(packet, bytes) or not packet or packet[0] != 2: retained.append(packet)
+                if not isinstance(packet, bytes) or not packet or packet[0] not in (2, 8, 9): retained.append(packet)
             for packet in retained: client["queue"].put_nowait(packet)
-        self.publish(json.dumps({"type":"audio-state", "enabled":enabled}), ident)
+        self.publish(json.dumps({"type":"audio-state", "enabled":enabled,
+            "profile":client["audio_profile"]}), ident)
+
+    def audio_profile(self, ident, profile):
+        client = self.clients.get(ident)
+        if not client: return
+        client["audio_profile"] = profile
+        client["adpcm_state"] = (0, 0)
+        retained = []
+        while not client["queue"].empty():
+            packet = client["queue"].get_nowait()
+            if not isinstance(packet, bytes) or not packet or packet[0] not in (2, 8, 9): retained.append(packet)
+        for packet in retained: client["queue"].put_nowait(packet)
+        self.publish(json.dumps({"type":"audio-profile", "profile":profile,
+            "rate":8000 if profile == "mobile" else 16000}), ident)
+
+    def publish_audio(self, ident, data):
+        client = self.clients.get(ident)
+        if not client or not client["audio_enabled"]:
+            return
+        profile = client["audio_profile"]
+        if profile == "original":
+            self.publish(bytes([2])+data, ident)
+            return
+        samples = pcm16le_samples(data)
+        if profile == "mobile":
+            samples = downsample_2(samples)
+        encoded, client["adpcm_state"] = encode_ima_adpcm(samples, client["adpcm_state"])
+        self.publish(bytes([9 if profile == "mobile" else 8])+encoded, ident)
 
     def publish_spectrum(self, data):
         sequence = self.waterfall_sequence
@@ -234,7 +264,8 @@ class Gateway:
                     else: client["stable_intervals"] = 0
                 client["congestion"] = 0
                 self.publish(json.dumps({"type":"stream-stats", "kbps":rate,
-                    "waterfall_profile":client["waterfall_profile"]}), ident)
+                    "waterfall_profile":client["waterfall_profile"],
+                    "audio_profile":client["audio_profile"]}), ident)
             self.status()
 
     async def community(self, ident, update):
@@ -318,8 +349,9 @@ class Gateway:
                     elif kind == 1:
                         self.last_data = time.monotonic()
                         self.publish_spectrum(data)
-                    elif kind == 2 and not self.clients.get(ident, {}).get("audio_enabled", False):
-                        continue
+                    elif kind == 2:
+                        self.last_data = time.monotonic()
+                        self.publish_audio(ident, data)
                     else:
                         self.last_data = time.monotonic()
                         self.publish(bytes([kind]) + data, ident)
@@ -388,7 +420,7 @@ class Gateway:
                   "waterfall_zoom": 1.0, "waterfall_center": 7100500,
                   "waterfall_speed": 1,
                   "congestion": 0, "stable_intervals": 0, "sent_bytes": 0, "last_sent": 0,
-                  "audio_enabled": False}
+                  "audio_enabled": False, "audio_profile": "original", "adpcm_state": (0, 0)}
         self.clients[ident] = client
         sender = None
         try:
@@ -463,6 +495,12 @@ class Gateway:
                         enabled = update.get("enabled")
                         if type(enabled) is not bool: raise ValueError("Estado de audio inválido")
                         self.audio_state(ident, enabled)
+                        continue
+                    if update.get("type") == "audio-profile":
+                        profile = update.get("profile")
+                        if profile not in ("original", "balanced", "mobile"):
+                            raise ValueError("Perfil de audio desconocido")
+                        self.audio_profile(ident, profile)
                         continue
                     if update.get("type") != "tune":
                         raise ValueError("Control desconocido")

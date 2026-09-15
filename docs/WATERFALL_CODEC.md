@@ -1,7 +1,7 @@
 # Experimental waterfall protocol v2
 
-The unstable branch keeps PCM audio unchanged and optimizes only the shared
-waterfall transport. Browser binary kind `7` contains one independently
+The waterfall codec remains independent from the separately selectable PCM/ADPCM
+audio profile. Browser binary kind `7` contains one independently
 decodable row:
 
 | Offset | Field | Encoding |

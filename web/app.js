@@ -7,7 +7,7 @@ let narrow=false, peakPower=-120, lastPeak=0, lastGraph=0, lastDraw=0, occupants
 let frequency=7100000, mode='LSB', low=-2700, high=-300, center=7100500, rate=1024000;
 let zoom=1, viewCenter=center, socket, retry=500, timer, tuneTimer, lastRow, view='waterfall', muted=false;
 let dynamicSpectrumBottom=null,dynamicSpectrumTop=null;
-let context, node, gain, audioStarting=false, audioEnabled=false, audioEverStarted=false, spectrumFrames=0, audioPackets=0;
+let context, node, gain, audioStarting=false, audioEnabled=false, audioEverStarted=false, audioProfile='original', spectrumFrames=0, audioPackets=0;
 let spectrumHistory=[];
 let waterfallPreference=innerWidth<=600?'mobile':'balanced',waterfallProfile='raw',waterfallSpeed=1,drawAverage=0,lastProfileRequest=0,profileTimer,pendingRow,waterfallFrame;
 let trafficBytes=0,trafficAt=performance.now();
@@ -19,6 +19,8 @@ try {
     Number.isFinite(m.low) && Number.isFinite(m.high) && m.low>=-6000 && m.high<=6000 && m.high-m.low>=100).slice(0,30);
   const preference=localStorage.getItem('hamsdr-waterfall');
   if(['auto','mobile','balanced','raw'].includes(preference))waterfallPreference=preference;
+  const savedAudio=localStorage.getItem('hamsdr-audio-profile');
+  if(['original','balanced','mobile'].includes(savedAudio))audioProfile=savedAudio;
 } catch {}
 const canvas=$('waterfall'), ctx=canvas.getContext('2d'), scale=$('scale'), dial=scale.getContext('2d');
 const lower=()=>viewCenter-rate/(2*zoom), width=()=>rate/zoom;
@@ -36,10 +38,16 @@ function sendWaterfallPreference(forced){
 }
 function sendWaterfallView(){if(socket?.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type:'waterfall-view',zoom,center:Math.round(viewCenter)}));}
 function sendWaterfallSpeed(){if(socket?.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type:'waterfall-speed',divisor:Number($('wfspeed').value)}));}
+function sendAudioProfile(){if(socket?.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type:'audio-profile',profile:audioProfile}));}
 function showWaterfallProfile(){
   const names={mobile:'bajo consumo · hasta 1024 bins/4 bits',balanced:'balanceado · hasta 2048 bins/6 bits',raw:'sin pérdida · hasta 4096 bins/8 bits'},fps={1:7.8,2:3.9,6:1.3};
   $('waterfall-profile-status').textContent=`Activo: ${names[waterfallProfile]} · ${fps[waterfallSpeed]} fps`;
   $('waterfall').dataset.profile=waterfallProfile;
+}
+function showAudioProfile(){
+  const names={original:'PCM16 · 16 kHz',balanced:'IMA ADPCM · 16 kHz',mobile:'IMA ADPCM · 8 kHz'};
+  $('audio-profile-status').textContent=names[audioProfile];
+  $('audio-quality').value=audioProfile;
 }
 const isSpectrum=()=>view==='spectrum-fixed'||view==='spectrum-dynamic';
 function spectrumRange(){
@@ -185,7 +193,7 @@ function connect(){
   const address=new URL('./ws',location.href);address.protocol=location.protocol==='https:'?'wss:':'ws:';
   socket=new WebSocket(address);
   socket.binaryType='arraybuffer';
-  socket.onopen=()=>{retry=500;tune();sendWaterfallPreference();sendWaterfallView();sendWaterfallSpeed();window.radioSend({type:'audio',enabled:audioEnabled});window.dispatchEvent(new Event('radio-open'));};
+  socket.onopen=()=>{retry=500;tune();sendWaterfallPreference();sendWaterfallView();sendWaterfallSpeed();sendAudioProfile();window.radioSend({type:'audio',enabled:audioEnabled});window.dispatchEvent(new Event('radio-open'));};
   socket.onmessage=({data})=>{
     trafficBytes+=typeof data==='string'?utf8Encoder.encode(data).byteLength:data.byteLength;
     if(typeof data==='string'){
@@ -205,7 +213,9 @@ function connect(){
       }else if(msg.type==='stream-stats'){
         $('client-traffic').dataset.serverKbps=String(msg.kbps);
       }else if(msg.type==='audio-state'){
-        audioEnabled=msg.enabled;showAudioState();
+        audioEnabled=msg.enabled;if(msg.profile)audioProfile=msg.profile;showAudioProfile();showAudioState();
+      }else if(msg.type==='audio-profile'){
+        audioProfile=msg.profile;resetAudio();showAudioProfile();
       }else if(msg.type==='error')message(msg.message);
       else if(msg.type==='tuned'){$('frequency').dataset.confirmed=String(msg.frequency);}
       return;
@@ -213,7 +223,12 @@ function connect(){
     const bytes=new Uint8Array(data),kind=bytes[0];
     if(kind===1)enqueueRow({data:bytes.subarray(1),lower:center-rate/2,span:rate});
     if(kind===7){const decoded=window.decodeWaterfallRow(bytes.subarray(1));if(!decoded){message('Fila de cascada inválida; reconectando…');socket.close(1002,'Invalid waterfall row');return;}canvas.dataset.sequence=String(decoded.sequence);canvas.dataset.lower=String(decoded.lower);canvas.dataset.span=String(decoded.span);enqueueRow(decoded);}
-    if(kind===2&&audioEnabled){audioPackets++;$('audio-status').dataset.packets=String(audioPackets);if(recording)recordPCM(data.slice(1));if(node&&context.state==='running'){const pcm=data.slice(1);node.port.postMessage(pcm,[pcm]);}}
+    if([2,8,9].includes(kind)&&audioEnabled){
+      audioPackets++;$('audio-status').dataset.packets=String(audioPackets);
+      const payload=data.slice(1),compressed=kind!==2,rate=kind===9?8000:16000;
+      if(kind===2&&recording)recordPCM(payload.slice(0));
+      if(node&&context.state==='running')node.port.postMessage({codec:compressed?'ima-adpcm':'pcm16',rate,payload,record:compressed&&recording},[payload]);
+    }
     if(kind===3)updateMeter(Number(new TextDecoder().decode(bytes.subarray(1))));
   };
   socket.onclose=()=>{resetAudio();occupants=[];drawUsers();window.dispatchEvent(new Event('radio-close'));$('connection').textContent='Conexión interrumpida · reintentando…';timer=setTimeout(connect,retry);retry=Math.min(retry*2,10000);};
@@ -243,7 +258,7 @@ async function listen(){
       await context.audioWorklet.addModule(new URL('./audio-worklet.js',location.href));
       node=new AudioWorkletNode(context,'radio-audio',{numberOfInputs:0,numberOfOutputs:1,outputChannelCount:[1]});
       gain=context.createGain();node.connect(gain).connect(context.destination);
-      node.port.onmessage=({data})=>{$('audio-status').dataset.rms=String(data.rms);};
+      node.port.onmessage=({data})=>{if(data.recording)recordPCM(data.recording);if(data.rms!==undefined)$('audio-status').dataset.rms=String(data.rms);};
       context.onstatechange=()=>{if(audioEnabled&&context.state!=='running')$('audio-status').textContent='Audio suspendido por el navegador. Pulsa Pausar y vuelve a iniciarlo.';};
     }
     await resumed;
@@ -282,6 +297,8 @@ $('brightness').addEventListener('input',()=>{if(isSpectrum()){renderSpectrumAxi
 $('labels').onchange=drawMarkers;
 $('waterfall-quality').value=waterfallPreference;
 $('waterfall-quality').addEventListener('change',()=>{waterfallPreference=$('waterfall-quality').value;try{localStorage.setItem('hamsdr-waterfall',waterfallPreference);}catch{}sendWaterfallPreference();});
+$('audio-quality').value=audioProfile;
+$('audio-quality').addEventListener('change',()=>{if(recording)stopRecording();audioProfile=$('audio-quality').value;try{localStorage.setItem('hamsdr-audio-profile',audioProfile);}catch{}resetAudio();showAudioProfile();sendAudioProfile();});
 let suppressWaterfallClick=false;
 canvas.addEventListener('click',e=>{if(suppressWaterfallClick){suppressWaterfallClick=false;return;}const rect=canvas.getBoundingClientRect();frequency=lower()+(e.clientX-rect.left)/rect.width*width();tune();});
 canvas.addEventListener('wheel',e=>{e.preventDefault();changeZoom(e.deltaY<0?zoom*2:zoom/2);},{passive:false});
@@ -321,11 +338,11 @@ new ResizeObserver(()=>{const available=Math.max(1,Math.round($('panorama').getB
 const networkConnection=navigator.connection||navigator.mozConnection||navigator.webkitConnection;
 if(networkConnection?.addEventListener)networkConnection.addEventListener('change',()=>{if(waterfallPreference==='auto')sendWaterfallPreference();});
 setInterval(()=>{const now=performance.now(),elapsed=(now-trafficAt)/1000;$('client-traffic').textContent=`${(trafficBytes*8/elapsed/1000).toFixed(1)} kb/s`;trafficBytes=0;trafficAt=now;},1000);
-clearWaterfall();controls();renderMemories();showAudioState();connect();
-let recording=false,recordChunks=[],recordBytes=0,recordTimer,downloadURL;
+clearWaterfall();controls();renderMemories();showAudioProfile();showAudioState();connect();
+let recording=false,recordChunks=[],recordBytes=0,recordingRate=16000,recordTimer,downloadURL;
 function recordPCM(pcm){
   recordChunks.push(pcm);recordBytes+=pcm.byteLength;
-  $('record-status').textContent=`Grabando · ${Math.floor(recordBytes/32000)} s`;
+  $('record-status').textContent=`Grabando · ${Math.floor(recordBytes/(recordingRate*2))} s`;
   if(recordBytes>=32*1024*1024)stopRecording();
 }
 function stopRecording(){
@@ -334,17 +351,17 @@ function stopRecording(){
   const header=new ArrayBuffer(44),v=new DataView(header);
   const text=(offset,s)=>{for(let i=0;i<s.length;i++)v.setUint8(offset+i,s.charCodeAt(i));};
   text(0,'RIFF');v.setUint32(4,36+recordBytes,true);text(8,'WAVE');text(12,'fmt ');
-  v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);v.setUint32(24,16000,true);
-  v.setUint32(28,32000,true);v.setUint16(32,2,true);v.setUint16(34,16,true);text(36,'data');v.setUint32(40,recordBytes,true);
+  v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);v.setUint32(24,recordingRate,true);
+  v.setUint32(28,recordingRate*2,true);v.setUint16(32,2,true);v.setUint16(34,16,true);text(36,'data');v.setUint32(40,recordBytes,true);
   const blob=new Blob([header,...recordChunks],{type:'audio/wav'});
   if(downloadURL)URL.revokeObjectURL(downloadURL);downloadURL=URL.createObjectURL(blob);
   $('download').href=downloadURL;$('download').download=`hamsdr-${new Date().toISOString().replaceAll(':','-')}.wav`;
-  $('download').hidden=false;$('record').textContent='iniciar';$('record-status').textContent=`${Math.round(recordBytes/32000)} s guardados`;
+  $('download').hidden=false;$('record').textContent='iniciar';$('record-status').textContent=`${Math.round(recordBytes/(recordingRate*2))} s guardados`;
   recordChunks=[];
 }
 $('record').onclick=async()=>{
   if(recording){stopRecording();return;}
   await listen();if(!node||context.state!=='running')return;
-  recordChunks=[];recordBytes=0;recording=true;$('record').textContent='detener';$('record-status').textContent='Grabando…';$('download').hidden=true;
+  recordChunks=[];recordBytes=0;recordingRate=audioProfile==='mobile'?8000:16000;recording=true;$('record').textContent='detener';$('record-status').textContent='Grabando…';$('download').hidden=true;
   recordTimer=setTimeout(stopRecording,30*60*1000);
 };

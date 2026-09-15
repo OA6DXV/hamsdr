@@ -18,7 +18,7 @@ reserved for stable releases.
 - Same-origin WebSockets, bounded queues and automatic DSP recovery.
 - Site identity and optional logo configured outside the frontend source.
 
-The initial preview accepts 1.024 Msps unsigned 8-bit IQ centered at
+The current preview accepts 1.024 Msps unsigned 8-bit IQ centered at
 7.1005 MHz and produces 16 kHz mono PCM internally. The source is expected on
 an `rtl_tcp`-compatible endpoint and must already be configured by its owning
 process. Each browser can tune and demodulate independently without changing
@@ -27,8 +27,16 @@ the shared hardware.
 The spectrum source contains 65,536 bins at approximately 7.8 rows per second.
 Waterfall profiles provide up to 1,024 bins/4 bits, 2,048 bins/6 bits or 4,096
 bins/8 bits. Slower waterfall settings reduce transmission at the server.
-Audio is opt-in: pausing audio stops its network frames instead of applying
-only a local mute.
+
+Audio and waterfall quality are selected independently. Audio offers:
+
+- Original: PCM16 mono at 16 kHz.
+- Balanced: IMA ADPCM mono at 16 kHz.
+- Low bandwidth: IMA ADPCM mono at 8 kHz.
+
+ADPCM is decoded inside the AudioWorklet. Audio is opt-in: pausing it stops its
+network frames instead of applying only a local mute. WAV recording follows
+the selected audio sample rate.
 
 ## Build
 
@@ -82,6 +90,7 @@ WebP up to 2 MB. An external configuration may be supplied with:
 
 ```sh
 .venv/bin/python tests/integration_test.py -v
+.venv/bin/python tests/audio_codec_tests.py -v
 .venv/bin/python tests/history_tests.py -v
 .venv/bin/python tests/waterfall_codec_tests.py -v
 .venv/bin/pip install playwright==1.62.0

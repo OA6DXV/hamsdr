@@ -14,6 +14,10 @@
 <p id="demo" hidden>Señales de prueba: USB 7100 kHz · LSB 7090 kHz · AM 7108 kHz (tono de 1 kHz).</p>
 <section class="receiver" aria-label="Receptor">
 <div class="ctl identity-control"><label><b>Nombre o indicativo / callsign:</b> <input id="username" maxlength="32" autocomplete="nickname" placeholder="Sin identificar"></label></div>
+<div class="ctl stream-profile-control" aria-label="Calidad de transmisión">
+<label><b>Audio:</b> <select id="audio-quality"><option value="original" selected>original</option><option value="balanced">balanceado</option><option value="mobile">bajo consumo</option></select></label>
+<label><b>Cascada:</b> <select id="waterfall-quality"><option value="auto">automático</option><option value="mobile">bajo consumo</option><option value="balanced" selected>balanceado</option><option value="raw">sin pérdida</option></select></label>
+<small id="audio-profile-status">PCM16 · 16 kHz</small><small id="waterfall-profile-status">Negociando cascada…</small></div>
 <div id="panorama"><canvas id="waterfall" width="1024" height="100" aria-label="Cascada de señales. Pulse para sintonizar."></canvas>
 <div id="spectrum-axis" hidden aria-label="Escala vertical del espectro en dBFS"></div>
 <canvas id="scale" width="1024" height="44" tabindex="0" role="slider" aria-label="Dial de sintonía" aria-valuemin="6600.5" aria-valuemax="7600.5" aria-valuenow="7100"></canvas><div id="markers" aria-label="Etiquetas de frecuencias"></div></div>
@@ -30,7 +34,6 @@
 <label>Velocidad: <select id="wfspeed"><option value="1" selected>normal</option><option value="2">lento</option><option value="6">muy lento</option></select></label>
 <label>Tamaño: <select id="wfsize"><option value="50">pequeño</option><option value="100" selected>medio</option><option value="200">grande</option><option value="400">muy grande</option><option value="600">máximo</option></select></label>
 <label>Gráfico: <select id="wfmode"><option value="spectrum-fixed">espectro fijo</option><option value="spectrum-dynamic">espectro dinámico</option><option value="waterfall" selected>cascada</option><option value="weak">señales débiles</option><option value="strong">señales fuertes</option></select></label>
-<label>Conexión: <select id="waterfall-quality"><option value="auto">automático</option><option value="mobile">bajo consumo</option><option value="balanced" selected>balanceado</option><option value="raw">sin pérdida</option></select></label><small id="waterfall-profile-status">Negociando perfil…</small>
 <details><summary>Ajuste de nivel</summary><label>Brillo <input type="range" id="brightness" min="-30" max="30" value="0"></label><label><input type="checkbox" id="pause"> detener cascada</label></details></section>
 <section class="ctl signal-panel" aria-label="Señal y volumen">
 <div class="smeter"><meter id="meter" min="-120" max="0" value="-120" aria-label="Nivel de señal"></meter><span id="peak-bar"></span><div class="meter-labels"><span>S1</span><span>S3</span><span>S5</span><span>S7</span><span>S9</span><span>+20</span><span>+40</span><span>+60</span></div></div>

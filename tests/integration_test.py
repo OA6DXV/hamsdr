@@ -13,6 +13,7 @@ import uuid
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from aiohttp import ClientSession, WSServerHandshakeError, WSMsgType, web
 from server import application, GATEWAY
+from audio_codec import decode_ima_adpcm
 from waterfall_codec import decode
 
 class RadioTests(unittest.IsolatedAsyncioTestCase):
@@ -111,6 +112,7 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
             {'type':'history','before':float('nan')},
             {'type':'waterfall','preference':'broken','profile':'raw'},
             {'type':'waterfall-speed','divisor':3},
+            {'type':'audio-profile','profile':'mp3'},
             {'type':'audio','enabled':'yes'},
             {'type':'tune','nr':99}, {'type':'tune','notch':'yes'}]:
             await ws.send_json(update);await self.event(ws,'error')
@@ -157,7 +159,29 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
         while asyncio.get_running_loop().time()<deadline:
             try:message=await asyncio.wait_for(ws.receive(),.2)
             except asyncio.TimeoutError:continue
-            self.assertFalse(message.type==WSMsgType.BINARY and message.data[0]==2)
+            self.assertFalse(message.type==WSMsgType.BINARY and message.data[0] in (2,8,9))
+
+    async def test_three_audio_profiles(self):
+        expected={"original":(2,513,256,16000),"balanced":(8,133,256,16000),"mobile":(9,69,128,8000)}
+        for profile,(kind,size,count,rate) in expected.items():
+            ws=await self.connect()
+            await self.tune(ws,'USB',7100000)
+            await ws.send_json({'type':'audio-profile','profile':profile})
+            reply=await self.event(ws,'audio-profile')
+            self.assertEqual((reply['profile'],reply['rate']),(profile,rate))
+            await ws.send_json({'type':'audio','enabled':True});await self.event(ws,'audio-state')
+            async with asyncio.timeout(3):
+                while True:
+                    message=await ws.receive()
+                    if message.type!=WSMsgType.BINARY or message.data[0] not in (2,8,9):continue
+                    self.assertEqual((message.data[0],len(message.data)),(kind,size))
+                    if kind==2:
+                        samples=struct.unpack('<'+'h'*count,message.data[1:])
+                    else:
+                        samples=decode_ima_adpcm(message.data[1:],count)
+                    if max(samples)-min(samples)>100:break
+            self.assertEqual(len(samples),count)
+            await ws.send_json({'type':'audio', 'enabled':False});await self.event(ws,'audio-state')
 
     async def test_multiuser_audio_and_engine_restart(self):
         modes=[('USB',7100000),('LSB',7090000),('AM',7108000),('USB',7100000),('LSB',7090000)]
