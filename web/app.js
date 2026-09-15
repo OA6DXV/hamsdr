@@ -11,7 +11,7 @@ let context, node, gain, audioStarting=false, audioEnabled=false, audioEverStart
 let spectrumHistory=[];
 let waterfallPreference=innerWidth<=600?'mobile':'balanced',waterfallProfile='raw',waterfallSpeed=1,drawAverage=0,lastProfileRequest=0,profileTimer,pendingRow,waterfallFrame;
 let trafficBytes=0,trafficAt=performance.now();
-let lastWaterfallSequence=null,lastWaterfallAt=0,streamWarningTimer,socketOpenedAt=0;
+let lastWaterfallSequence=null,lastWaterfallAt=0,streamWarningTimer,socketOpenedAt=0,interruptionSamples=[];
 let memories=[];
 try {
   const saved=JSON.parse(localStorage.getItem('hamsdr-memories')||'[]');
@@ -29,9 +29,15 @@ const beat=()=>mode==='CW'?700:0;
 function message(text=''){ $('message').textContent=text; }
 function reportStreamInterruption(reason){
   if(document.visibilityState==='hidden')return;
+  const now=performance.now();
+  interruptionSamples=interruptionSamples.filter(sample=>now-sample.time<=30000);
+  interruptionSamples.push({time:now,reason});
   const warning=$('stream-warning');
+  warning.dataset.samples=String(interruptionSamples.length);
+  if(interruptionSamples.length<3)return;
+  interruptionSamples=[];
   warning.hidden=false;warning.dataset.reason=reason;clearTimeout(streamWarningTimer);
-  streamWarningTimer=setTimeout(()=>{warning.hidden=true;delete warning.dataset.reason;},45000);
+  streamWarningTimer=setTimeout(()=>{warning.hidden=true;delete warning.dataset.reason;delete warning.dataset.samples;},45000);
 }
 window.reportStreamInterruption=reportStreamInterruption;
 function observeWaterfall(sequence){

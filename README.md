@@ -44,10 +44,11 @@ AudioWorklet. Unsupported clients fall back to ADPCM. Audio is opt-in: pausing
 it stops its network frames instead of applying only a local mute. WAV
 recording follows the decoded audio sample rate.
 
-The client observes actual AudioWorklet buffer underruns, missing or late
-waterfall sequence numbers and unexpected WebSocket reconnects. It displays a
-temporary red recommendation to use the low-bandwidth audio and waterfall
-profiles without changing either selection automatically.
+The client observes actual audio buffer underruns, missing or late waterfall
+sequence numbers and unexpected WebSocket reconnects. It displays a temporary
+red recommendation only after three interruption samples within 30 seconds,
+avoiding warnings for isolated jitter, and does not change either selection
+automatically.
 
 ## Build
 

@@ -43,6 +43,11 @@ async def main():
             assert await page.locator('.waterfall-panel #waterfall-quality').count()==0
             await expect(page.locator('#stream-warning')).to_be_hidden()
             await page.evaluate("window.reportStreamInterruption('test')")
+            await expect(page.locator('#stream-warning')).to_be_hidden()
+            await expect(page.locator('#stream-warning')).to_have_attribute('data-samples','1')
+            await page.evaluate("window.reportStreamInterruption('test')")
+            await expect(page.locator('#stream-warning')).to_be_hidden()
+            await page.evaluate("window.reportStreamInterruption('test')")
             await expect(page.locator('#stream-warning')).to_be_visible()
             await expect(page.locator('#stream-warning')).to_contain_text('Opus bajo consumo')
             assert await page.locator('#stream-warning').evaluate("e=>getComputedStyle(e).color==='rgb(196, 0, 0)'")
