@@ -34,13 +34,18 @@ async def main():
             assert await page.locator('[name="view"],#allowkeys,#audio-format').count()==0
             await expect(page.locator('#site-footer-text')).to_have_text(f"HamSDR v{site['version']}")
             await expect(page.locator('#site-footer-operator-label')).to_have_text('Administrador: ' if site['language']=='es' else 'Administrator: ')
-            assert 'República OA6' not in await page.locator('footer').inner_text()
             await expect(page.locator('label').filter(has=page.locator('#wfmode'))).to_contain_text('Gráfico:')
             await expect(page.locator('label').filter(has=page.locator('#waterfall-quality'))).to_contain_text('Cascada:')
             await expect(page.locator('label').filter(has=page.locator('#audio-quality'))).to_contain_text('Audio:')
             assert await page.locator('.stream-profile-control #audio-quality').count()==1
             assert await page.locator('.stream-profile-control #waterfall-quality').count()==1
             assert await page.locator('.waterfall-panel #waterfall-quality').count()==0
+            await expect(page.locator('#stream-warning')).to_be_hidden()
+            await page.evaluate("window.reportStreamInterruption('test')")
+            await expect(page.locator('#stream-warning')).to_be_visible()
+            await expect(page.locator('#stream-warning')).to_contain_text('Opus bajo consumo')
+            assert await page.locator('#stream-warning').evaluate("e=>getComputedStyle(e).color==='rgb(196, 0, 0)'")
+            await page.locator('#stream-warning').evaluate("e=>e.hidden=true")
             assert await page.locator('#wfspeed option').all_text_contents()==['normal','lento','muy lento']
             await expect(page.locator('#send-chat')).to_be_enabled()
             await expect(page.locator('#waterfall')).to_have_attribute('data-frames',re.compile(r'^[1-9][0-9]+$'))
@@ -56,6 +61,8 @@ async def main():
             await expect(page.locator('#client-traffic')).to_have_text(re.compile(r'^(?:—|[0-9]+(?:\.[0-9]+)?) kb/s$'))
             await expect(page.locator('#client-traffic')).not_to_have_text('— kb/s',timeout=2000)
             expected_profile='mobile' if viewport['width']<=600 else 'balanced'
+            if viewport['width']==1440:
+                await expect(page.locator('#audio-quality')).to_have_value('balanced')
             await expect(page.locator('#waterfall-quality')).to_have_value(expected_profile)
             await expect(page.locator('#waterfall')).to_have_attribute('data-profile',expected_profile)
             assert await page.locator('footer a',has_text='Estado del receptor').count()==0
@@ -80,6 +87,14 @@ async def main():
             await expect(page.locator('#audio-profile-status')).to_contain_text('IMA ADPCM · 16 kHz')
             await page.locator('#audio-quality').select_option('mobile')
             await expect(page.locator('#audio-profile-status')).to_contain_text('IMA ADPCM · 8 kHz')
+            await expect(page.locator('#audio-status')).to_have_attribute('data-rms',re.compile(r'^0\.(?:[1-9]|0[1-9]|00[1-9])'),timeout=15000)
+            await page.locator('#audio-status').evaluate("e=>e.removeAttribute('data-rms')")
+            await page.locator('#audio-quality').select_option('opus-high')
+            await expect(page.locator('#audio-profile-status')).to_contain_text('Opus · 32 kb/s')
+            await expect(page.locator('#audio-status')).to_have_attribute('data-rms',re.compile(r'^0\.(?:[1-9]|0[1-9]|00[1-9])'),timeout=15000)
+            await page.locator('#audio-status').evaluate("e=>e.removeAttribute('data-rms')")
+            await page.locator('#audio-quality').select_option('opus-low')
+            await expect(page.locator('#audio-profile-status')).to_contain_text('Opus · 12 kb/s')
             await expect(page.locator('#audio-status')).to_have_attribute('data-rms',re.compile(r'^0\.(?:[1-9]|0[1-9]|00[1-9])'),timeout=15000)
             await page.locator('#listen').click()
             await expect(page.locator('#listen')).to_have_text('Iniciar audio')
@@ -155,7 +170,8 @@ async def main():
             await page.locator('#notch').check()
             await page.locator('#notch').uncheck()
             await page.locator('#nr').select_option('0')
-            recording_rate=8000 if await page.locator('#audio-quality').input_value()=='mobile' else 16000
+            recording_profile=await page.locator('#audio-quality').input_value()
+            recording_rate=8000 if recording_profile=='mobile' else 48000 if recording_profile.startswith('opus-') else 16000
             await page.locator('#record').click()
             await page.wait_for_timeout(2000)
             await page.locator('#record').click()
@@ -176,10 +192,10 @@ async def main():
                 # Two independent browsers demonstrate live identity and safe chat text.
                 other=await browser.new_page()
                 await other.goto(url)
-                await page.locator('#username').fill('OA6TEST')
+                await page.locator('#username').fill('TESTER')
                 await page.locator('#username').press('Tab')
-                await expect(other.locator('#users')).to_contain_text('OA6TEST')
-                label=other.locator('#users .user').filter(has_text='OA6TEST')
+                await expect(other.locator('#users')).to_contain_text('TESTER')
+                label=other.locator('#users .user').filter(has_text='TESTER')
                 await page.locator('[data-step="1000"]').click()
                 await expect(label).to_have_attribute('data-frequency','7101000')
                 test_text='<img src=x onerror=alert(1)> '+uuid.uuid4().hex
@@ -191,7 +207,7 @@ async def main():
                 await expect(other.locator('#chatbox')).to_contain_text(test_text)
                 await expect(page.locator('#chat-text')).to_have_value('')
                 await page.reload()
-                await expect(page.locator('#username')).to_have_value('OA6TEST')
+                await expect(page.locator('#username')).to_have_value('TESTER')
                 await expect(page.locator('#chatbox')).to_contain_text(test_text)
                 await other.close()
             await page.wait_for_timeout(2000)

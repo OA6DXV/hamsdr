@@ -14,6 +14,8 @@ reserved for stable releases.
 - Responsive HTML, CSS and framework-free JavaScript.
 - Canvas spectrum and waterfall with independent quality and speed controls.
 - AudioWorklet playback with bounded buffering and clock correction.
+- Native Opus transport with browser capability fallback.
+- Client-side interruption detection with low-bandwidth recommendations.
 - Listener identification, live chat and persistent SQLite logbook.
 - Same-origin WebSockets, bounded queues and automatic DSP recovery.
 - Site identity and optional logo configured outside the frontend source.
@@ -33,18 +35,27 @@ Audio and waterfall quality are selected independently. Audio offers:
 - Original: PCM16 mono at 16 kHz.
 - Balanced: IMA ADPCM mono at 16 kHz.
 - Low bandwidth: IMA ADPCM mono at 8 kHz.
+- Opus high quality: 32 kbit/s, wideband mono input at 16 kHz.
+- Opus low bandwidth: 12 kbit/s, narrowband mono input at 16 kHz.
 
-ADPCM is decoded inside the AudioWorklet. Audio is opt-in: pausing it stops its
-network frames instead of applying only a local mute. WAV recording follows
-the selected audio sample rate.
+Balanced ADPCM is the default for a new browser. Opus is encoded by system
+`libopus`, decoded through browser WebCodecs and passed into the same
+AudioWorklet. Unsupported clients fall back to ADPCM. Audio is opt-in: pausing
+it stops its network frames instead of applying only a local mute. WAV
+recording follows the decoded audio sample rate.
+
+The client observes actual AudioWorklet buffer underruns, missing or late
+waterfall sequence numbers and unexpected WebSocket reconnects. It displays a
+temporary red recommendation to use the low-bandwidth audio and waterfall
+profiles without changing either selection automatically.
 
 ## Build
 
 Requirements are Linux, a C++20 compiler, CMake, pkg-config, FFTW3f, Python
-3.12 or newer and Python virtual-environment support. On Debian or Ubuntu:
+3.12 or newer, libopus and Python virtual-environment support. On Debian or Ubuntu:
 
 ```sh
-sudo apt install g++ cmake pkg-config libfftw3-dev python3-venv
+sudo apt install g++ cmake pkg-config libfftw3-dev libopus0 python3-venv
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 ctest --test-dir build --output-on-failure
@@ -91,6 +102,7 @@ WebP up to 2 MB. An external configuration may be supplied with:
 ```sh
 .venv/bin/python tests/integration_test.py -v
 .venv/bin/python tests/audio_codec_tests.py -v
+.venv/bin/python tests/opus_codec_tests.py -v
 .venv/bin/python tests/history_tests.py -v
 .venv/bin/python tests/waterfall_codec_tests.py -v
 .venv/bin/pip install playwright==1.62.0

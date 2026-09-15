@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from aiohttp import ClientSession, WSServerHandshakeError, WSMsgType, web
 from server import application, GATEWAY
 from audio_codec import decode_ima_adpcm
+from opus_codec import OPUS_AVAILABLE, OpusDecoder
 from waterfall_codec import decode
 
 class RadioTests(unittest.IsolatedAsyncioTestCase):
@@ -63,11 +64,11 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_presence_chat_log_restart_and_idempotence(self):
         alice,bob=await self.connect(),await self.connect()
-        key,alice_id=await self.identify(alice,'OA6TEST')
+        key,alice_id=await self.identify(alice,'TESTER')
         await self.identify(bob,'OYENTE')
         await self.tune(alice,'USB',7101000)
         presence=await self.event(bob,'presence',lambda x:any(u['id']==alice_id and u['frequency']==7101000 for u in x['users']))
-        self.assertEqual(next(u['name'] for u in presence['users'] if u['id']==alice_id),'OA6TEST')
+        self.assertEqual(next(u['name'] for u in presence['users'] if u['id']==alice_id),'TESTER')
         self.assertNotIn(key,json.dumps(presence))
         request={'type':'chat','request_id':uuid.uuid4().hex,'text':'<img src=x onerror=alert(1)> Señal recibida'}
         await alice.send_json(request)
@@ -78,9 +79,9 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
         await alice.send_json(request)
         repeated=await self.event(alice,'ack')
         self.assertEqual(ack['event']['id'],repeated['event']['id'])
-        await alice.send_json({'type':'log','request_id':uuid.uuid4().hex,'text':'Prueba local','call':'OA6DXV'})
+        await alice.send_json({'type':'log','request_id':uuid.uuid4().hex,'text':'Local test','call':'TEST-CALL'})
         logged=await self.event(alice,'ack')
-        self.assertEqual(logged['event']['call'],'OA6DXV')
+        self.assertEqual(logged['event']['call'],'TEST-CALL')
         self.assertEqual(logged['event']['kind'],'log')
         await alice.close()
         gone=await self.event(bob,'presence',lambda x:all(u['id']!=alice_id for u in x['users']))
@@ -92,7 +93,7 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([e['id'] for e in history['events']],[ack['event']['id']])
         log=await self.event(restored,'history',lambda x:x['kind']=='log')
         self.assertEqual(log['events'][0]['id'],logged['event']['id'])
-        await self.identify(restored,'OA6TEST',key)
+        await self.identify(restored,'TESTER',key)
         await restored.send_json(request)
         repeated=await self.event(restored,'ack')
         self.assertEqual(repeated['event']['id'],ack['event']['id'])
@@ -159,11 +160,14 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
         while asyncio.get_running_loop().time()<deadline:
             try:message=await asyncio.wait_for(ws.receive(),.2)
             except asyncio.TimeoutError:continue
-            self.assertFalse(message.type==WSMsgType.BINARY and message.data[0] in (2,8,9))
+            self.assertFalse(message.type==WSMsgType.BINARY and message.data[0] in (2,8,9,10,11))
 
-    async def test_three_audio_profiles(self):
-        expected={"original":(2,513,256,16000),"balanced":(8,133,256,16000),"mobile":(9,69,128,8000)}
-        for profile,(kind,size,count,rate) in expected.items():
+    @unittest.skipUnless(OPUS_AVAILABLE, "system libopus unavailable")
+    async def test_five_audio_profiles(self):
+        expected={"original":(2,513,513,256,16000),"balanced":(8,133,133,256,16000),
+                  "mobile":(9,69,69,128,8000),"opus-high":(10,6,205,320,16000),
+                  "opus-low":(11,6,105,320,16000)}
+        for profile,(kind,minimum,maximum,count,rate) in expected.items():
             ws=await self.connect()
             await self.tune(ws,'USB',7100000)
             await ws.send_json({'type':'audio-profile','profile':profile})
@@ -173,12 +177,17 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
             async with asyncio.timeout(3):
                 while True:
                     message=await ws.receive()
-                    if message.type!=WSMsgType.BINARY or message.data[0] not in (2,8,9):continue
-                    self.assertEqual((message.data[0],len(message.data)),(kind,size))
+                    if message.type!=WSMsgType.BINARY or message.data[0] not in (2,8,9,10,11):continue
+                    self.assertEqual(message.data[0],kind)
+                    self.assertTrue(minimum<=len(message.data)<=maximum,len(message.data))
                     if kind==2:
                         samples=struct.unpack('<'+'h'*count,message.data[1:])
-                    else:
+                    elif kind in (8,9):
                         samples=decode_ima_adpcm(message.data[1:],count)
+                    else:
+                        if 'decoder' not in locals() or decoder_profile!=profile:
+                            decoder,decoder_profile=OpusDecoder(),profile
+                        samples=decoder.decode(message.data[5:])
                     if max(samples)-min(samples)>100:break
             self.assertEqual(len(samples),count)
             await ws.send_json({'type':'audio', 'enabled':False});await self.event(ws,'audio-state')

@@ -33,7 +33,10 @@ is binary: one type byte, little-endian uint32 client ID, little-endian uint32
 payload length, then payload. ID zero broadcasts. Types: 1 spectrum uint8,
 2 mono signed PCM16LE at 16 kHz, 3 ASCII dBFS, 4 ASCII source state. The
 gateway can send audio to the browser as kind 2 PCM16/16 kHz, kind 8 packet-
-independent IMA ADPCM/16 kHz, or kind 9 IMA ADPCM/8 kHz.
+independent IMA ADPCM/16 kHz, kind 9 IMA ADPCM/8 kHz, kind 10 Opus wideband
+at 32 kbit/s, or kind 11 Opus narrowband at 12 kbit/s. Opus uses 20 ms mono
+input frames at 16 kHz and is decoded through WebCodecs before entering the
+same AudioWorklet output path.
 
 The browser uses a same-origin `/ws` connection. Text messages are JSON
 `tune`, `tuned`, `status`, `error`, `identify`, `identified`, `presence`,
@@ -43,12 +46,18 @@ versioned, independently decodable max-pooled and bit-packed spectrum row;
 protocol v2 carries every profile with its frequency window and sequence. A shared
 65536-bin FFT lets the gateway project a client's zoom to at most 1024, 2048 or
 4096 directly drawable bins without increasing packet size. Audio delivery is separately
-negotiated and defaults off; disabling it purges queued PCM or ADPCM before the server
+negotiated and defaults off; disabling it purges queued PCM, ADPCM or Opus before the server
 acknowledges the state. The private protocol is experimental;
 waterfall cadence is negotiated per client at 7.8, 3.9 or 1.3 rows/s, so a
 slower display setting reduces transport instead of discarding browser frames.
-version negotiation is required before any stable release. Opus is not yet
-implemented.
+version negotiation is required before any stable release. Browsers without a
+compatible WebCodecs Opus decoder fall back to ADPCM.
+
+Client-side diagnostics observe AudioWorklet underruns, gaps or large delays
+in waterfall sequence numbers, and unexpected WebSocket reconnects while the
+page is visible. They recommend lower-bandwidth profiles without overriding
+the listener's choices. This measures experienced interruption; it does not
+claim to identify a particular Wi-Fi or cellular cause.
 
 The engine translates each user's frequency with a complex oscillator. Two
 127-tap FIR stages decimate 8x each; a 257-tap complex bandpass selects the

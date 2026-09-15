@@ -12,7 +12,7 @@ class SiteConfigTests(unittest.TestCase):
     def test_generic_example(self):
         generic, logo = load_site_config(ROOT / "site.example.json")
         self.assertEqual(generic["receiver_name"], "HamSDR")
-        self.assertEqual(generic["version"], "0.2.7-unstable")
+        self.assertEqual(generic["version"], "0.2.9-unstable")
         self.assertNotIn("footer_text", generic)
         self.assertIsNone(logo)
 
