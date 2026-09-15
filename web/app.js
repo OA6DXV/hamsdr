@@ -7,7 +7,7 @@ let narrow=false, peakPower=-120, lastPeak=0, lastGraph=0, lastDraw=0, occupants
 let frequency=7100000, mode='LSB', low=-2700, high=-300, center=7100500, rate=1024000;
 let zoom=1, viewCenter=center, socket, retry=500, timer, tuneTimer, lastRow, view='waterfall', muted=false;
 let dynamicSpectrumBottom=null,dynamicSpectrumTop=null;
-let context, node, gain, audioStarting=false, audioEnabled=false, audioEverStarted=false, audioProfile='balanced', opusDecoder=null, opusSupportPromise=null, spectrumFrames=0, audioPackets=0;
+let context, node, gain, audioStarting=false, audioEnabled=false, audioEverStarted=false, audioProfile='balanced', opusDecoder=null, opusSupportPromise=null, lastOpusSequence=null, spectrumFrames=0, audioPackets=0;
 let spectrumHistory=[];
 let waterfallPreference=innerWidth<=600?'mobile':'balanced',waterfallProfile='raw',waterfallSpeed=1,drawAverage=0,lastProfileRequest=0,profileTimer,pendingRow,waterfallFrame;
 let trafficBytes=0,trafficAt=performance.now();
@@ -39,7 +39,7 @@ function observeWaterfall(sequence){
   if(lastWaterfallSequence!==null&&(delta>expected*2||(lastWaterfallAt&&now-lastWaterfallAt>Math.max(1500,expected/7.8*3500))))reportStreamInterruption('waterfall');
   lastWaterfallSequence=sequence;lastWaterfallAt=now;
 }
-function resetOpusDecoder(){if(opusDecoder){if(opusDecoder.state!=='closed')opusDecoder.close();opusDecoder=null;}}
+function resetOpusDecoder(){if(opusDecoder){if(opusDecoder.state!=='closed')opusDecoder.close();opusDecoder=null;}lastOpusSequence=null;}
 function resetAudio(){if(node)node.port.postMessage({reset:true});resetOpusDecoder();}
 const opusConfig={codec:'opus',sampleRate:48000,numberOfChannels:1};
 function browserSupportsOpus(){
@@ -71,8 +71,12 @@ function createOpusDecoder(){
 }
 function decodeOpusPacket(bytes){
   if(bytes.byteLength<5)return;
-  const sequence=new DataView(bytes.buffer,bytes.byteOffset,4).getUint32(0,true),decoder=createOpusDecoder();
+  const sequence=new DataView(bytes.buffer,bytes.byteOffset,4).getUint32(0,true);
+  let decoder=createOpusDecoder();
   if(!decoder)return;
+  if(decoder.decodeQueueSize>8){reportStreamInterruption('audio-decoder');resetOpusDecoder();decoder=createOpusDecoder();if(!decoder)return;}
+  if(lastOpusSequence!==null&&((sequence-lastOpusSequence)>>>0)!==1)reportStreamInterruption('audio-sequence');
+  lastOpusSequence=sequence;
   try{decoder.decode(new EncodedAudioChunk({type:'key',timestamp:sequence*20000,duration:20000,data:bytes.subarray(4)}));}
   catch(error){fallbackFromOpus(`No se pudo decodificar Opus: ${error.message}.`);}
 }

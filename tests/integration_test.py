@@ -280,6 +280,9 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
         async with self.session.get(self.url+'/') as response:
             self.assertEqual(response.status,200)
             self.assertIn("script-src 'self'",response.headers['Content-Security-Policy'])
+            self.assertIn("base-uri 'none'",response.headers['Content-Security-Policy'])
+            self.assertEqual(response.headers['Cross-Origin-Opener-Policy'],'same-origin')
+            self.assertIn('microphone=()',response.headers['Permissions-Policy'])
         async with self.session.get(self.url+'/site-config.js') as response:
             self.assertEqual(response.status,200)
             self.assertIn('window.hamSdrSiteConfig=',await response.text())
@@ -296,6 +299,21 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
         await self.tune(ws,'USB',7100000)
         audio,_=await self.collect(ws)
         self.assertGreater(max(audio),1000)
+
+    async def test_per_ip_connection_limit_and_trusted_proxy(self):
+        gateway=self.app[GATEWAY]
+        gateway.args.max_clients_per_ip=2
+        first,second=await self.connect(),await self.connect()
+        with self.assertRaises(WSServerHandshakeError) as caught:
+            await self.session.ws_connect(self.url+'/ws',origin=self.url)
+        self.assertEqual(caught.exception.status,429)
+        await first.close();await second.close()
+
+        gateway.args.max_clients_per_ip=1
+        gateway.args.trusted_proxy='127.0.0.1'
+        one=await self.session.ws_connect(self.url+'/ws',origin=self.url,headers={'X-HamSDR-Client-IP':'192.0.2.1'})
+        two=await self.session.ws_connect(self.url+'/ws',origin=self.url,headers={'X-HamSDR-Client-IP':'192.0.2.2'})
+        self.sockets.extend((one,two))
 
     async def test_cw_carrier_frequency_and_narrow_filter(self):
         ws=await self.connect()

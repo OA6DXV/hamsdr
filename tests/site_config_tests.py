@@ -12,7 +12,7 @@ class SiteConfigTests(unittest.TestCase):
     def test_generic_example(self):
         generic, logo = load_site_config(ROOT / "site.example.json")
         self.assertEqual(generic["receiver_name"], "HamSDR")
-        self.assertEqual(generic["version"], "0.2.9-unstable")
+        self.assertEqual(generic["version"], "0.2.10-unstable")
         self.assertNotIn("footer_text", generic)
         self.assertIsNone(logo)
 
@@ -29,6 +29,15 @@ class SiteConfigTests(unittest.TestCase):
             path.write_text(json.dumps(data))
             with self.assertRaisesRegex(ValueError, "logo must"):
                 load_site_config(path)
+            outside = Path(directory).parent / f"{Path(directory).name}-outside-logo.svg"
+            outside.write_text("<svg xmlns='http://www.w3.org/2000/svg'/>")
+            data["logo"]["file"] = f"../{outside.name}"
+            path.write_text(json.dumps(data))
+            try:
+                with self.assertRaisesRegex(ValueError, "logo must"):
+                    load_site_config(path)
+            finally:
+                outside.unlink()
 
 
 if __name__ == "__main__":

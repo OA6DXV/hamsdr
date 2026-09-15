@@ -6,7 +6,10 @@
     SSLCertificateKeyFile /etc/ssl/private/radio.example.com.key
 
     ProxyPreserveHost On
-    RequestHeader set Origin "https://radio.example.com"
+    # Never replace Origin: HamSDR uses the browser value to reject cross-site
+    # WebSockets. Pass the address Apache considers to be the real client.
+    RequestHeader set X-HamSDR-Client-IP "expr=%{REMOTE_ADDR}"
+    Header always set Strict-Transport-Security "max-age=31536000"
 
     RewriteEngine On
     RewriteCond %{HTTP:Upgrade} =websocket [NC]
@@ -18,5 +21,7 @@
 </VirtualHost>
 
 # Enable proxy, proxy_http, proxy_wstunnel, rewrite, headers and ssl. Launch
-# server.py with --origin https://radio.example.com and replace certificate
-# paths with those managed by your TLS provider.
+# server.py with --origin https://radio.example.com --trusted-proxy 127.0.0.1
+# and replace certificate paths with those managed by your TLS provider. When
+# a CDN is in front, configure mod_remoteip with only that CDN's published IP
+# ranges before trusting REMOTE_ADDR here.

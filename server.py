@@ -1,6 +1,7 @@
 """Small HTTP/WebSocket gateway. DSP stays in one shared C++ subprocess."""
 import argparse
 import asyncio
+from collections import OrderedDict
 import contextlib
 import ipaddress
 import json
@@ -21,7 +22,7 @@ from opus_codec import OPUS_AVAILABLE, OpusEncoder
 from waterfall_codec import encode as encode_waterfall
 
 ROOT = Path(__file__).resolve().parent
-VERSION = "0.2.9-unstable"
+VERSION = "0.2.10-unstable"
 MODES = {"USB": (300, 2700), "LSB": (-2700, -300), "AM": (-4000, 4000),
          "CW": (450, 950), "NFM": (-5000, 5000)}
 
@@ -70,8 +71,11 @@ def load_site_config(requested=None):
     if logo_file:
         if not isinstance(logo_file, str) or len(logo_file) > 300:
             raise ValueError("site config: invalid logo file")
-        logo_path = (path.parent / logo_file).resolve()
-        if logo_path.suffix.lower() not in (".svg", ".png", ".jpg", ".jpeg", ".webp") or not logo_path.is_file() or logo_path.stat().st_size > 2_000_000:
+        config_root = path.parent.resolve()
+        logo_path = (config_root / logo_file).resolve()
+        if (not logo_path.is_relative_to(config_root) or
+                logo_path.suffix.lower() not in (".svg", ".png", ".jpg", ".jpeg", ".webp") or
+                not logo_path.is_file() or logo_path.stat().st_size > 2_000_000):
             raise ValueError("site config: logo must be an SVG, PNG, JPEG or WebP file up to 2 MB")
     logo_alt = logo.get("alt", "Receiver logo")
     if not isinstance(logo_alt, str) or len(logo_alt) > 120:
@@ -109,7 +113,29 @@ class Gateway:
         self.metrics = {"cpu_percent": 0, "kbps": 0}
         self.stats_task = None
         self.waterfall_sequence = 0
+        self.connection_attempts = OrderedDict()
         self.site_config, self.site_logo = load_site_config(getattr(args, "site_config", None))
+
+    def client_address(self, request):
+        """Use a proxy-supplied address only when the TCP peer is explicitly trusted."""
+        peer = request.remote or "unknown"
+        trusted = getattr(self.args, "trusted_proxy", "")
+        candidate = request.headers.get("X-HamSDR-Client-IP", "") if trusted and peer == trusted else peer
+        try:
+            return ipaddress.ip_address(candidate).compressed
+        except ValueError:
+            return "unknown"
+
+    def allow_connection_attempt(self, address):
+        """Bound reconnect/open floods without retaining an unbounded IP table."""
+        now = time.monotonic()
+        tokens, previous = self.connection_attempts.pop(address, (6.0, now))
+        tokens = min(6.0, tokens + (now-previous)/5.0)
+        allowed = tokens >= 1.0
+        self.connection_attempts[address] = (tokens-1.0 if allowed else tokens, now)
+        while len(self.connection_attempts) > 4096:
+            self.connection_attempts.popitem(last=False)
+        return allowed
 
     def info(self):
         return {"type": "status", "version": VERSION, "source": self.source, "users": len(self.clients),
@@ -367,7 +393,12 @@ class Gateway:
                     await self.command(self.settings_command(ident, client["settings"]))
                 started = time.monotonic()
                 while True:
-                    header = await process.stdout.readexactly(9)
+                    try:
+                        header = await asyncio.wait_for(process.stdout.readexactly(9), 20)
+                    except asyncio.TimeoutError:
+                        if self.clients:
+                            raise RuntimeError("DSP output stalled")
+                        continue
                     kind, ident, size = struct.unpack("<BII", header)
                     if size > 262144 or kind not in (1, 2, 3, 4):
                         raise ValueError("invalid engine frame")
@@ -391,7 +422,7 @@ class Gateway:
                         delay = 0.25
             except asyncio.CancelledError:
                 raise
-            except (OSError, ValueError, asyncio.IncompleteReadError) as error:
+            except Exception as error:
                 logging.warning("DSP restart: %s", error)
                 self.restarts += 1
                 self.source = "reconnecting"
@@ -424,7 +455,8 @@ class Gateway:
         await self.history.close()
 
     async def health(self, request):
-        healthy = self.source in ("streaming", "demo")
+        recent = not self.clients or time.monotonic()-self.last_data < 10
+        healthy = self.source in ("streaming", "demo") and recent and self.task and not self.task.done()
         return web.json_response(self.info(), status=200 if healthy else 503)
 
     async def websocket(self, request):
@@ -435,8 +467,14 @@ class Gateway:
             parsed.scheme in ("http", "https") and parsed.netloc == request.host)
         if not allowed:
             raise web.HTTPForbidden(text="Origin not allowed")
+        address = self.client_address(request)
+        if not self.allow_connection_attempt(address):
+            raise web.HTTPTooManyRequests(text="Demasiados intentos de conexión. Espera unos segundos.")
         if len(self.clients) >= self.args.max_clients:
             raise web.HTTPServiceUnavailable(text="Receptor completo. Intenta más tarde.")
+        per_ip = getattr(self.args, "max_clients_per_ip", self.args.max_clients)
+        if sum(client["address"] == address for client in self.clients.values()) >= per_ip:
+            raise web.HTTPTooManyRequests(text="Demasiadas conexiones desde esta dirección.")
         # 500 Unicode characters can occupy 6000 bytes when JSON uses escaped
         # surrogate pairs. Text limits remain enforced after JSON decoding.
         ws = web.WebSocketResponse(heartbeat=20, max_msg_size=8192, compress=False)
@@ -446,7 +484,7 @@ class Gateway:
         settings = {"frequency": 7100000, "mode": "LSB", "low": -2700, "high": -300, "squelch": -150, "notch": False, "nr": 0}
         queue = asyncio.Queue(maxsize=32)
         client = {"queue": queue, "reliable": asyncio.Queue(maxsize=64), "wake": asyncio.Event(),
-                  "closing": False, "settings": settings, "ws": ws, "name": "", "key": "",
+                  "closing": False, "settings": settings, "ws": ws, "name": "", "key": "", "address": address,
                   "chat_tokens": 4.0, "chat_last": time.monotonic(), "history_last": 0,
                   "waterfall_profile": "raw", "waterfall_preference": "raw", "waterfall_ceiling": "raw",
                   "waterfall_zoom": 1.0, "waterfall_center": 7100500,
@@ -578,7 +616,9 @@ async def security(request, handler):
     response = await handler(request)
     if not response.prepared:
         response.headers.update({"X-Content-Type-Options": "nosniff", "Referrer-Policy": "same-origin",
-            "Cache-Control": "no-store", "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; media-src 'self' blob:; object-src 'none'; frame-ancestors 'none'"})
+            "Cache-Control": "no-store", "Permissions-Policy": "camera=(), geolocation=(), microphone=(), payment=(), usb=()",
+            "Cross-Origin-Opener-Policy": "same-origin",
+            "Content-Security-Policy": "default-src 'self'; base-uri 'none'; form-action 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; media-src 'self' blob:; object-src 'none'; frame-ancestors 'none'"})
     return response
 
 GATEWAY = web.AppKey("gateway", Gateway)
@@ -615,6 +655,8 @@ if __name__ == "__main__":
     parser.add_argument("--source-host", default="127.0.0.1")
     parser.add_argument("--source-port", type=int, default=1231)
     parser.add_argument("--max-clients", type=int, default=10)
+    parser.add_argument("--max-clients-per-ip", type=int, default=3)
+    parser.add_argument("--trusted-proxy", default="", help="Proxy IP allowed to set X-HamSDR-Client-IP")
     parser.add_argument("--origin", default="", help="Exact public HTTPS origin when behind a proxy")
     parser.add_argument("--demo", action="store_true")
     parser.add_argument("--database", type=Path, default=ROOT / "var/community.sqlite3")
@@ -624,6 +666,9 @@ if __name__ == "__main__":
     if not 1 <= args.retention_days <= 3650:
         parser.error("retention-days: 1..3650")
     ipaddress.ip_address(args.source_host)
-    if not 1 <= args.source_port <= 65535 or not 1 <= args.port <= 65535 or not 1 <= args.max_clients <= 20:
-        parser.error("Ports: 1..65535; max clients: 1..20")
+    if args.trusted_proxy:
+        args.trusted_proxy = ipaddress.ip_address(args.trusted_proxy).compressed
+    if (not 1 <= args.source_port <= 65535 or not 1 <= args.port <= 65535 or
+            not 1 <= args.max_clients <= 20 or not 1 <= args.max_clients_per_ip <= args.max_clients):
+        parser.error("Ports: 1..65535; max clients: 1..20; per-IP: 1..max clients")
     web.run_app(application(args), host=args.bind, port=args.port, access_log=None)

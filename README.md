@@ -81,6 +81,12 @@ Use HTTPS for remote access because AudioWorklet requires a secure context
 outside localhost. Set `--origin` to the public HTTPS origin when deploying
 behind a reverse proxy.
 
+Public deployments should set `--trusted-proxy` to the proxy's literal IP and
+leave the browser's `Origin` header unchanged. `--max-clients-per-ip` defaults
+to three. If a CDN is present, normalize its authenticated client address in
+the reverse proxy before setting `X-HamSDR-Client-IP`; never trust that header
+from arbitrary peers.
+
 ## Site customization
 
 Copy the generic configuration and edit the copy:
