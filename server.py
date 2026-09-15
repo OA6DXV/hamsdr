@@ -24,7 +24,7 @@ from opus_codec import OPUS_AVAILABLE, OpusEncoder
 from waterfall_codec import encode as encode_waterfall
 
 ROOT = Path(__file__).resolve().parent
-VERSION = "0.3.1-unstable"
+VERSION = "0.3.2-dev"
 MODES = {"USB": (300, 2700), "LSB": (-2700, -300), "AM": (-4000, 4000),
          "CW": (450, 950), "NFM": (-5000, 5000)}
 
@@ -56,11 +56,10 @@ def load_runtime_config(requested=None):
         raise ValueError("site config: invalid server")
     bind = server.get("bind", "127.0.0.1")
     port = server.get("port", 18093)
-    origin = server.get("origin", "")
     trusted_proxy = server.get("trusted_proxy", "")
     max_clients = server.get("max_clients", 10)
     max_clients_per_ip = server.get("max_clients_per_ip", 3)
-    tls = server.get("tls", {})
+    secure = data.get("secure", server.get("tls", {}))
     if not isinstance(bind, str):
         raise ValueError("site config: invalid server bind")
     try:
@@ -69,13 +68,6 @@ def load_runtime_config(requested=None):
         raise ValueError("site config: server bind must be an IP address") from error
     if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
         raise ValueError("site config: server port must be 1..65535")
-    if not isinstance(origin, str):
-        raise ValueError("site config: invalid server origin")
-    if origin and origin != "*":
-        parsed = urlsplit(origin)
-        if (parsed.scheme not in ("http", "https") or not parsed.netloc or parsed.path or
-                parsed.query or parsed.fragment or parsed.username or parsed.password):
-            raise ValueError("site config: server origin must be an exact http(s) origin")
     if not isinstance(trusted_proxy, str):
         raise ValueError("site config: invalid trusted proxy")
     if trusted_proxy:
@@ -87,15 +79,23 @@ def load_runtime_config(requested=None):
             isinstance(max_clients_per_ip, bool) or not isinstance(max_clients_per_ip, int) or
             not 1 <= max_clients <= 20 or not 1 <= max_clients_per_ip <= max_clients):
         raise ValueError("site config: clients must be 1..20 and per-IP must not exceed total")
-    if not isinstance(tls, dict):
-        raise ValueError("site config: invalid server.tls")
-    tls_enabled = tls.get("enabled", False)
-    tls_certificate = tls.get("certificate", "")
-    tls_private_key = tls.get("private_key", "")
+    if not isinstance(secure, dict):
+        raise ValueError("site config: invalid secure")
+    tls_enabled = secure.get("enable", secure.get("enabled", False))
+    tls_certificate = secure.get("certificate", "")
+    tls_private_key = secure.get("private_key", "")
+    secure_origin = secure.get("origin", server.get("origin", ""))
     if not isinstance(tls_enabled, bool):
-        raise ValueError("site config: server.tls enabled must be true or false")
+        raise ValueError("site config: secure enable must be true or false")
     if not isinstance(tls_certificate, str) or not isinstance(tls_private_key, str):
         raise ValueError("site config: invalid TLS certificate path")
+    if not isinstance(secure_origin, str):
+        raise ValueError("site config: invalid secure origin")
+    if secure_origin and secure_origin != "*":
+        parsed = urlsplit(secure_origin)
+        if (parsed.scheme not in ("http", "https") or not parsed.netloc or parsed.path or
+                parsed.query or parsed.fragment or parsed.username or parsed.password):
+            raise ValueError("site config: secure origin must be an exact http(s) origin")
     def tls_path(value):
         if not value:
             return None
@@ -135,7 +135,7 @@ def load_runtime_config(requested=None):
             not 1 <= retention_days <= 3650):
         raise ValueError("site config: retention days must be 1..3650")
     return {
-        "bind": bind, "port": port, "origin": origin, "trusted_proxy": trusted_proxy,
+        "bind": bind, "port": port, "origin": secure_origin if tls_enabled else "",
         "max_clients": max_clients, "max_clients_per_ip": max_clients_per_ip,
         "tls_enabled": tls_enabled, "tls_certificate": tls_certificate,
         "tls_private_key": tls_private_key,
@@ -766,7 +766,7 @@ def application(args):
     app.router.add_get("/site-logo", site_logo)
     async def asset(request):
         name = request.match_info.get("name", "index.html")
-        if name not in {"index.html", "style.css", "zoom.css", "site.js", "app.js", "audio-worklet.js", "waterfall-codec.js", "community.js", "palette.js"}:
+        if name not in {"index.html", "style.css", "zoom.css", "site.js", "app.js", "audio-worklet.js", "classic-audio.js", "waterfall-codec.js", "community.js", "palette.js"}:
             raise web.HTTPNotFound()
         return web.FileResponse(ROOT / "web" / name)
     app.router.add_get("/", asset)

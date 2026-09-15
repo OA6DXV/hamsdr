@@ -14,7 +14,7 @@ class SiteConfigTests(unittest.TestCase):
         self.assertEqual(generic["receiver_name"], "HamSDR")
         self.assertEqual(generic["callsign"], "N0CALL")
         self.assertTrue(generic["show_admin"])
-        self.assertEqual(generic["version"], "0.3.1-unstable")
+        self.assertEqual(generic["version"], "0.3.2-dev")
         self.assertNotIn("footer_text", generic)
         self.assertIsNone(logo)
         self.assertEqual(load_listen_config(ROOT / "site.example.toml"), ("127.0.0.1", 18093))
@@ -38,6 +38,17 @@ class SiteConfigTests(unittest.TestCase):
             path.write_text('[server]\nbind="not-an-address"\nport=18099\n')
             with self.assertRaisesRegex(ValueError, "server bind"):
                 load_listen_config(path)
+
+    def test_secure_section_controls_tls_and_origin(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "site.toml"
+            path.write_text('[server]\nbind="127.0.0.1"\nport=8443\n[secure]\nenable=true\ncertificate="cert.pem"\nprivate_key="key.pem"\norigin="https://radio.example.test:8443"\n')
+            runtime = load_runtime_config(path)
+            self.assertTrue(runtime["tls_enabled"])
+            self.assertEqual(runtime["origin"], "https://radio.example.test:8443")
+            self.assertEqual(runtime["tls_certificate"], Path(directory) / "cert.pem")
+            path.write_text('[server]\nbind="127.0.0.1"\nport=8080\n[secure]\nenable=false\ncertificate=""\nprivate_key=""\norigin="https://ignored.example"\n')
+            self.assertEqual(load_runtime_config(path)["origin"], "")
 
     def test_rejects_unsafe_or_missing_branding(self):
         with tempfile.TemporaryDirectory() as directory:

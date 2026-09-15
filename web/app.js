@@ -305,14 +305,19 @@ async function listen(){
   if(audioStarting||audioEnabled)return;
   audioStarting=true;
   try{
-    if(!window.isSecureContext)throw new Error('Para escuchar, abre el receptor con HTTPS.');
     if('audioSession'in navigator){try{navigator.audioSession.type='playback';}catch{}}
     if(!context){context=new AudioContext({latencyHint:'interactive'});}
     // resume is invoked during the click gesture, before awaiting module loading.
     const resumed=context.resume();
     if(!node){
-      await context.audioWorklet.addModule(new URL('./audio-worklet.js',location.href));
-      node=new AudioWorkletNode(context,'radio-audio',{numberOfInputs:0,numberOfOutputs:1,outputChannelCount:[1]});
+      if(window.isSecureContext&&context.audioWorklet){
+        await context.audioWorklet.addModule(new URL('./audio-worklet.js',location.href));
+        node=new AudioWorkletNode(context,'radio-audio',{numberOfInputs:0,numberOfOutputs:1,outputChannelCount:[1]});
+        document.documentElement.dataset.audioEngine='worklet';
+      }else{
+        if(!window.ClassicRadioAudio||!context.createScriptProcessor)throw new Error('Este navegador no ofrece un reproductor de audio compatible.');
+        node=new window.ClassicRadioAudio(context);document.documentElement.dataset.audioEngine='classic';
+      }
       gain=context.createGain();node.connect(gain).connect(context.destination);
       node.port.onmessage=({data})=>{if(data.recording){if(recordBytes===0&&data.rate)recordingRate=data.rate;recordPCM(data.recording);}if(data.rms!==undefined)$('audio-status').dataset.rms=String(data.rms);if(data.underrun!==undefined&&audioEnabled)reportStreamInterruption('audio');};
       context.onstatechange=()=>{if(audioEnabled&&context.state!=='running')$('audio-status').textContent='Audio suspendido por el navegador. Pulsa Pausar y vuelve a iniciarlo.';};

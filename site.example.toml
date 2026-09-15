@@ -2,16 +2,17 @@
 [server]
 bind = "127.0.0.1"
 port = 18093
-origin = ""
 trusted_proxy = ""
 max_clients = 10
 max_clients_per_ip = 3
 
-# Optional native HTTPS/WSS. Certificate paths may be absolute or relative to this file.
-[server.tls]
-enabled = false
+# Secure mode enables native HTTPS/WSS. In insecure mode, same-origin WebSockets
+# and the classic low-latency audio fallback are used for direct HTTP access.
+[secure]
+enable = false
 certificate = "tls/fullchain.pem"
 private_key = "tls/privkey.pem"
+origin = "https://radio.example.com:18093"
 
 # Identity shown in the browser
 [html]

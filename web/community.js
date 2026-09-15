@@ -1,6 +1,10 @@
 'use strict';
 (()=>{
-  const el=id=>document.getElementById(id), random=()=>crypto.randomUUID().replaceAll('-','');
+  const el=id=>document.getElementById(id), random=()=>{
+    if(crypto.randomUUID)return crypto.randomUUID().replaceAll('-','');
+    const bytes=new Uint8Array(16);crypto.getRandomValues(bytes);
+    return Array.from(bytes,byte=>byte.toString(16).padStart(2,'0')).join('');
+  };
   const events={chat:new Map(),log:new Map()}, pending={};
   let key=random(),ready=false;
   try{
