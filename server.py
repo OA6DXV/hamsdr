@@ -26,8 +26,8 @@ VERSION = "0.2.10-unstable"
 MODES = {"USB": (300, 2700), "LSB": (-2700, -300), "AM": (-4000, 4000),
          "CW": (450, 950), "NFM": (-5000, 5000)}
 
-def load_site_config(requested=None):
-    """Load operator branding separately from application code and assets."""
+def read_site_config(requested=None):
+    """Read the installation-specific configuration outside application code."""
     path = Path(requested).expanduser() if requested else ROOT / "site.json"
     if not path.exists() and not requested:
         path = ROOT / "site.example.json"
@@ -37,6 +37,29 @@ def load_site_config(requested=None):
         raise ValueError(f"site config: {error}") from error
     if not isinstance(data, dict):
         raise ValueError("site config: root must be an object")
+    return data, path
+
+def load_listen_config(requested=None):
+    """Return the configured HTTP listener without exposing it to browsers."""
+    data, _ = read_site_config(requested)
+    server = data.get("server", {})
+    if not isinstance(server, dict):
+        raise ValueError("site config: invalid server")
+    bind = server.get("bind", "127.0.0.1")
+    port = server.get("port", 18093)
+    if not isinstance(bind, str):
+        raise ValueError("site config: invalid server bind")
+    try:
+        bind = ipaddress.ip_address(bind.strip()).compressed
+    except ValueError as error:
+        raise ValueError("site config: server bind must be an IP address") from error
+    if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
+        raise ValueError("site config: server port must be 1..65535")
+    return bind, port
+
+def load_site_config(requested=None):
+    """Load operator branding separately from application code and assets."""
+    data, path = read_site_config(requested)
 
     def text(name, limit, default=""):
         value = data.get(name, default)
@@ -651,8 +674,8 @@ def application(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--bind", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=18093)
+    parser.add_argument("--bind", help="Listener IP (overrides site config)")
+    parser.add_argument("--port", type=int, help="Listener port (overrides site config)")
     parser.add_argument("--source-host", default="127.0.0.1")
     parser.add_argument("--source-port", type=int, default=1231)
     parser.add_argument("--max-clients", type=int, default=10)
@@ -664,9 +687,19 @@ if __name__ == "__main__":
     parser.add_argument("--retention-days", type=int, default=90)
     parser.add_argument("--site-config", type=Path, help="Site identity JSON (defaults to ./site.json, then generic example)")
     args = parser.parse_args()
+    try:
+        configured_bind, configured_port = load_listen_config(args.site_config)
+    except ValueError as error:
+        parser.error(str(error))
+    args.bind = args.bind if args.bind is not None else configured_bind
+    args.port = args.port if args.port is not None else configured_port
     if not 1 <= args.retention_days <= 3650:
         parser.error("retention-days: 1..3650")
-    ipaddress.ip_address(args.source_host)
+    try:
+        args.bind = ipaddress.ip_address(args.bind).compressed
+        ipaddress.ip_address(args.source_host)
+    except ValueError as error:
+        parser.error(f"invalid IP address: {error}")
     if args.trusted_proxy:
         args.trusted_proxy = ipaddress.ip_address(args.trusted_proxy).compressed
     if (not 1 <= args.source_port <= 65535 or not 1 <= args.port <= 65535 or

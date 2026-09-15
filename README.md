@@ -95,9 +95,11 @@ Copy the generic configuration and edit the copy:
 cp site.example.json site.json
 ```
 
-`site.json` is ignored by Git. It defines the receiver name, descriptive text,
-language, administrator and optional logo. Logo files may be SVG, PNG, JPEG or
-WebP up to 2 MB. An external configuration may be supplied with:
+`site.json` is ignored by Git. It defines the HTTP listener (`server.bind` and
+`server.port`), receiver name, descriptive text, language, administrator and
+optional logo. Logo files may be SVG, PNG, JPEG or WebP up to 2 MB. Command-line
+`--bind` and `--port` values override the file when supplied. An external
+configuration may be supplied with:
 
 ```sh
 .venv/bin/python server.py --site-config /etc/hamsdr/site.json

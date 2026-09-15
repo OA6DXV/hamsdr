@@ -1,4 +1,8 @@
 {
+  "server": {
+    "bind": "127.0.0.1",
+    "port": 18093
+  },
   "language": "en",
   "receiver_name": "HamSDR",
   "description": [

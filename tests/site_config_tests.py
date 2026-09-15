@@ -5,7 +5,7 @@ import tempfile
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from server import ROOT, load_site_config
+from server import ROOT, load_listen_config, load_site_config
 
 
 class SiteConfigTests(unittest.TestCase):
@@ -15,6 +15,23 @@ class SiteConfigTests(unittest.TestCase):
         self.assertEqual(generic["version"], "0.2.10-unstable")
         self.assertNotIn("footer_text", generic)
         self.assertIsNone(logo)
+        self.assertEqual(load_listen_config(ROOT / "site.example.json"), ("127.0.0.1", 18093))
+
+    def test_listener_configuration_and_validation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "site.json"
+            data = json.loads((ROOT / "site.example.json").read_text())
+            data["server"] = {"bind": "0.0.0.0", "port": 18099}
+            path.write_text(json.dumps(data))
+            self.assertEqual(load_listen_config(path), ("0.0.0.0", 18099))
+            data["server"]["port"] = 70000
+            path.write_text(json.dumps(data))
+            with self.assertRaisesRegex(ValueError, "server port"):
+                load_listen_config(path)
+            data["server"] = {"bind": "not-an-address", "port": 18099}
+            path.write_text(json.dumps(data))
+            with self.assertRaisesRegex(ValueError, "server bind"):
+                load_listen_config(path)
 
     def test_rejects_unsafe_or_missing_branding(self):
         with tempfile.TemporaryDirectory() as directory:
