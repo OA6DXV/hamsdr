@@ -27,7 +27,7 @@ async def main():
             await page.goto(url)
             site=await page.evaluate("window.hamSdrSiteConfig")
             assert site and await page.locator('#site-name').text_content()==site['receiver_name']
-            assert await page.title()==f"{site['receiver_name']} · Unstable"
+            assert await page.title()==f"{site['receiver_name']} · Preview"
             assert await page.locator('html').get_attribute('lang')=='es'
             assert await page.locator('#site-footer-operator').text_content()==site['callsign']
             assert await page.locator('#site-footer-operator-row').is_visible()==site['show_admin']

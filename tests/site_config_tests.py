@@ -14,7 +14,7 @@ class SiteConfigTests(unittest.TestCase):
         self.assertEqual(generic["receiver_name"], "HamSDR")
         self.assertEqual(generic["callsign"], "N0CALL")
         self.assertTrue(generic["show_admin"])
-        self.assertEqual(generic["version"], "0.2.10-unstable")
+        self.assertEqual(generic["version"], "0.3.0-preview")
         self.assertNotIn("footer_text", generic)
         self.assertIsNone(logo)
         self.assertEqual(load_listen_config(ROOT / "site.example.toml"), ("127.0.0.1", 18093))

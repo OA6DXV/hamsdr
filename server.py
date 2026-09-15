@@ -23,7 +23,7 @@ from opus_codec import OPUS_AVAILABLE, OpusEncoder
 from waterfall_codec import encode as encode_waterfall
 
 ROOT = Path(__file__).resolve().parent
-VERSION = "0.2.10-unstable"
+VERSION = "0.3.0-preview"
 MODES = {"USB": (300, 2700), "LSB": (-2700, -300), "AM": (-4000, 4000),
          "CW": (450, 950), "NFM": (-5000, 5000)}
 
