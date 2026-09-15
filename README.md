@@ -27,9 +27,9 @@ process. Each browser can tune and demodulate independently without changing
 the shared hardware.
 
 The spectrum source contains 65,536 bins at approximately 7.8 rows per second.
-Waterfall profiles provide up to 1,024 bins/4 bits, lossless variable-length
-1,024-bin classic mode, 2,048 bins/6 bits or 4,096
-bins/8 bits. Slower waterfall settings reduce transmission at the server.
+Waterfall profiles provide up to 1,024 bins/4 bits, 2,048 bins/6 bits or 4,096
+bins/8 bits. Experimental lossless variable-length modes provide 1,024, 2,048
+or 4,096 bins at 8 bits. Slower waterfall settings reduce transmission at the server.
 
 Audio and waterfall quality are selected independently. Audio offers:
 

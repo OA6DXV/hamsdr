@@ -10,7 +10,9 @@ PROFILES = {
     "mobile": {"code": 1, "bins": 1024, "bits": 4},
     "balanced": {"code": 2, "bins": 2048, "bits": 6},
     "raw": {"code": 3, "bins": 4096, "bits": 8},
-    "classic": {"code": 4, "bins": 1024, "bits": 8},
+    "exp1024": {"code": 4, "bins": 1024, "bits": 8, "differential": True},
+    "exp2048": {"code": 5, "bins": 2048, "bits": 8, "differential": True},
+    "exp4096": {"code": 6, "bins": 4096, "bits": 8, "differential": True},
 }
 HEADER = struct.Struct("<BBHBIiI")  # version, profile, bins, bits, sequence, lower Hz, span Hz
 
@@ -61,7 +63,7 @@ def encode(row: bytes, profile: str, sequence: int, start: int = 0, end: int | N
         first = start + output*source_bins//bins
         last = start + (output+1)*source_bins//bins
         values.append(max(row[first:max(first+1,last)]) >> shift)
-    payload = _pack_classic(values) if profile == "classic" else _pack(values, spec["bits"])
+    payload = _pack_classic(values) if spec.get("differential") else _pack(values, spec["bits"])
     return HEADER.pack(VERSION, spec["code"], bins, spec["bits"], sequence, lower_hz, span_hz) + payload
 
 def decode(packet: bytes):
@@ -70,11 +72,11 @@ def decode(packet: bytes):
         raise ValueError("truncated waterfall row")
     version, code, bins, bits, sequence, lower_hz, span_hz = HEADER.unpack_from(packet)
     expected = HEADER.size + (bins*bits+7)//8
-    valid = {1:(1024,4), 2:(2048,6), 3:(4096,8), 4:(1024,8)}
+    valid = {1:(1024,4), 2:(2048,6), 3:(4096,8), 4:(1024,8), 5:(2048,8), 6:(4096,8)}
     maximum, expected_bits = valid.get(code, (0,0))
-    if version != VERSION or not 0 < bins <= maximum or bits != expected_bits or span_hz == 0 or (code != 4 and len(packet) != expected):
+    if version != VERSION or not 0 < bins <= maximum or bits != expected_bits or span_hz == 0 or (code < 4 and len(packet) != expected):
         raise ValueError("invalid waterfall packet")
-    if code == 4:
+    if code >= 4:
         payload = packet[HEADER.size:]
         if not payload: raise ValueError("truncated classic waterfall row")
         values, previous, nibbles = [payload[0]], payload[0], []

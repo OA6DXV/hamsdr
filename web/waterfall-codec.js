@@ -3,8 +3,8 @@ window.decodeWaterfallRow=bytes=>{
   if(!(bytes instanceof Uint8Array)||bytes.length<17)return null;
   const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
   const version=bytes[0],profile=bytes[1],bins=view.getUint16(2,true),bits=bytes[4],sequence=view.getUint32(5,true),lower=view.getInt32(9,true),span=view.getUint32(13,true);
-  const limits={1:[1024,4,'mobile'],2:[2048,6,'balanced'],3:[4096,8,'raw'],4:[1024,8,'classic']},spec=limits[profile];
-  if(version===2&&profile===4&&bins>0&&bins<=spec[0]&&bits===8&&span&&bytes.length>=18){
+  const limits={1:[1024,4,'mobile'],2:[2048,6,'balanced'],3:[4096,8,'raw'],4:[1024,8,'exp1024'],5:[2048,8,'exp2048'],6:[4096,8,'exp4096']},spec=limits[profile];
+  if(version===2&&profile>=4&&profile<=6&&bins>0&&bins<=spec[0]&&bits===8&&span&&bytes.length>=18){
     const output=new Uint8Array(bins);output[0]=bytes[17];let at=1,nibble=0;
     const next=()=>{const value=(bytes[18+(nibble>>1)]>>(nibble%2?4:0))&15;nibble++;return value;};
     while(at<bins){if(18+(nibble>>1)>=bytes.length)return null;const code=next();let value;

@@ -7,7 +7,7 @@ decodable row:
 | Offset | Field | Encoding |
 |---:|---|---|
 | 0 | version | uint8, currently 2 |
-| 1 | profile | 1 mobile, 2 balanced, 3 raw, 4 classic |
+| 1 | profile | 1 mobile, 2 balanced, 3 raw, 4/5/6 experimental 1024/2048/4096@8 |
 | 2 | bins | uint16 little-endian |
 | 4 | bits per bin | uint8 |
 | 5 | sequence | uint32 little-endian |
@@ -17,7 +17,7 @@ decodable row:
 
 Input is one 65536-bin uint8 FFT row. The gateway first selects the requested
 frequency window. Reduced profiles max-pool adjacent bins, then quantize and
-pack fixed-width integers. Classic mode keeps 8-bit intensity and encodes small
+pack fixed-width integers. Experimental modes keep 8-bit intensity and encode small
 spatial deltas as nibbles, with an absolute 8-bit escape for larger changes;
 every row remains independently decodable. Max-pooling was selected to keep
 narrow carriers visible; averaging could erase a carrier between bins. There

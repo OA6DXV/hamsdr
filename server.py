@@ -430,7 +430,7 @@ class Gateway:
             self.metrics = {"cpu_percent": round(max(0, current-previous)/elapsed*100, 1),
                             "kbps": round((self.sent_bytes-sent)*8/elapsed/1000, 1)}
             previous, last, sent = current, now, self.sent_bytes
-            levels = ["mobile", "classic", "balanced", "raw"]
+            levels = ["mobile", "exp1024", "exp2048", "balanced", "exp4096", "raw"]
             for ident, client in tuple(self.clients.items()):
                 rate = round((client["sent_bytes"]-client["last_sent"])*8/elapsed/1000, 1)
                 client["last_sent"] = client["sent_bytes"]
@@ -665,7 +665,8 @@ class Gateway:
                         continue
                     if update.get("type") == "waterfall":
                         preference, profile = update.get("preference"), update.get("profile")
-                        if preference not in ("auto", "mobile", "classic", "balanced", "raw") or profile not in ("mobile", "classic", "balanced", "raw"):
+                        profiles = ("auto", "mobile", "exp1024", "exp2048", "exp4096", "balanced", "raw")
+                        if preference not in profiles or profile not in profiles[1:]:
                             raise ValueError("Perfil de cascada desconocido")
                         if preference != "auto" and preference != profile:
                             raise ValueError("Perfil de cascada inconsistente")

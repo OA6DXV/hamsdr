@@ -19,7 +19,7 @@ try {
     Number.isFinite(m.frequency) && m.frequency>=6600500 && m.frequency<=7600500 &&
     Number.isFinite(m.low) && Number.isFinite(m.high) && m.low>=-6000 && m.high<=6000 && m.high-m.low>=100).slice(0,30);
   const preference=localStorage.getItem('hamsdr-waterfall');
-  if(['auto','mobile','classic','balanced','raw'].includes(preference))waterfallPreference=preference;
+  if(['auto','mobile','balanced','raw','exp1024','exp2048','exp4096'].includes(preference))waterfallPreference=preference;
   const savedAudio=localStorage.getItem('hamsdr-audio-profile');
   if(['original','balanced','mobile','opus-high','opus-low'].includes(savedAudio))audioProfile=savedAudio;
 } catch {}
@@ -99,7 +99,7 @@ function sendWaterfallView(){if(socket?.readyState===WebSocket.OPEN)socket.send(
 function sendWaterfallSpeed(){if(socket?.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type:'waterfall-speed',divisor:Number($('wfspeed').value)}));}
 function sendAudioProfile(){if(socket?.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type:'audio-profile',profile:audioProfile}));}
 function showWaterfallProfile(){
-  const names={mobile:'bajo consumo · hasta 1024 bins/4 bits',classic:'clásico experimental · 1024 bins/8 bits variable',balanced:'balanceado · hasta 2048 bins/6 bits',raw:'sin pérdida · hasta 4096 bins/8 bits'},fps={1:7.8,2:3.9,6:1.3};
+  const names={mobile:'bajo consumo · hasta 1024 bins/4 bits',balanced:'balanceado · hasta 2048 bins/6 bits',raw:'sin pérdida · hasta 4096 bins/8 bits',exp1024:'1024@8 experimental · diferencial variable',exp2048:'2048@8 experimental · diferencial variable',exp4096:'4096@8 experimental · diferencial variable'},fps={1:7.8,2:3.9,6:1.3};
   $('waterfall-profile-status').textContent=`Activo: ${names[waterfallProfile]} · ${fps[waterfallSpeed]} fps`;
   $('waterfall').dataset.profile=waterfallProfile;
 }
