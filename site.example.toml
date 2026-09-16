@@ -23,6 +23,21 @@ description = [
 callsign = "N0CALL"
 show_admin = true
 
+# Station metadata compatible with the legacy WebSDR directory format.
+[station]
+qth = "AA00aa"
+description = "N0CALL | HamSDR | Example"
+email = "radio@example.com"
+logo = ""
+mobile_page = "m.html"
+bands = 1
+
+[station.band.0]
+name = "40m"
+center_frequency_khz = 7100.500
+sample_rate_khz = 1024.000
+antenna = "Example antenna"
+
 # Receiver connector. Only rtltcp is implemented currently.
 [receiver]
 type = "rtltcp"
