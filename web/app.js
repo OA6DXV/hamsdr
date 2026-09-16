@@ -5,6 +5,7 @@ const defaults = {LSB:[-2700,-300],USB:[300,2700],AM:[-4000,4000],CW:[450,950],N
 const narrowDefaults={LSB:[-2200,-500],USB:[500,2200],AM:[-2500,2500],CW:[600,800],NFM:[-3000,3000]};
 let narrow=false, peakPower=-120, lastPeak=0, lastGraph=0, lastDraw=0, occupants=[];
 let frequency=7100000, mode='LSB', low=-2700, high=-300, center=7100500, rate=1024000;
+let bandConfigured=false;
 let zoom=1, viewCenter=center, socket, retry=500, timer, tuneTimer, lastRow, view='waterfall', muted=false;
 let dynamicSpectrumBottom=null,dynamicSpectrumTop=null;
 let context, node, gain, audioStarting=false, audioEnabled=false, audioEverStarted=false, audioProfile='balanced', opusDecoder=null, opusSupportPromise=null, lastOpusSequence=null, spectrumFrames=0, audioPackets=0;
@@ -16,7 +17,7 @@ let memories=[];
 try {
   const saved=JSON.parse(localStorage.getItem('hamsdr-memories')||'[]');
   if(Array.isArray(saved)) memories=saved.filter(m=>m && typeof m.name==='string' && defaults[m.mode] &&
-    Number.isFinite(m.frequency) && m.frequency>=6600500 && m.frequency<=7600500 &&
+    Number.isFinite(m.frequency) && m.frequency>0 &&
     Number.isFinite(m.low) && Number.isFinite(m.high) && m.low>=-6000 && m.high<=6000 && m.high-m.low>=100).slice(0,30);
   const savedWaterfall=localStorage.getItem('hamsdr-waterfall');
   const preference={mobile:'low',raw:'high',exp1024:'low',exp2048:'balanced',exp4096:'high'}[savedWaterfall]||savedWaterfall;
@@ -168,7 +169,7 @@ function controls(){
 }
 function tune(){
   if(!Number.isFinite(frequency)||!Number.isFinite(low)||!Number.isFinite(high)||low < -6000||high > 6000||high-low<100){message('Revisa los límites del filtro (−6000 a 6000 Hz).');return;}
-  frequency=Math.round(Math.max(center-500000,Math.min(center+500000,frequency)));
+  frequency=Math.round(Math.max(center-rate/2,Math.min(center+rate/2,frequency)));
   if(frequency<lower()||frequency>lower()+width()){const oldLower=lower(),oldWidth=width();viewCenter=frequency;clampView();reprojectWaterfall(oldLower,oldWidth);sendWaterfallView();}
   controls(); message();
   clearTimeout(tuneTimer);
@@ -268,7 +269,7 @@ function connect(){
   const address=new URL('./ws',location.href);address.protocol=location.protocol==='https:'?'wss:':'ws:';
   socket=new WebSocket(address);
   socket.binaryType='arraybuffer';
-  socket.onopen=()=>{retry=500;socketOpenedAt=performance.now();lastWaterfallSequence=null;lastWaterfallAt=0;tune();sendWaterfallPreference();sendWaterfallView();sendWaterfallSpeed();sendAudioProfile();window.radioSend({type:'audio',enabled:audioEnabled});window.dispatchEvent(new Event('radio-open'));};
+  socket.onopen=()=>{retry=500;socketOpenedAt=performance.now();lastWaterfallSequence=null;lastWaterfallAt=0;if(bandConfigured){tune();sendWaterfallView();}sendWaterfallPreference();sendWaterfallSpeed();sendAudioProfile();window.radioSend({type:'audio',enabled:audioEnabled});window.dispatchEvent(new Event('radio-open'));};
   socket.onmessage=({data})=>{
     trafficBytes+=typeof data==='string'?utf8Encoder.encode(data).byteLength:data.byteLength;
     if(typeof data==='string'){
@@ -276,6 +277,15 @@ function connect(){
       window.dispatchEvent(new CustomEvent('radio-event',{detail:msg}));
       if(msg.type==='status'){
         center=msg.center;rate=msg.sample_rate;$('listeners').textContent=msg.users;
+        if(!bandConfigured){
+          frequency=Number.isFinite(msg.initial_frequency)?msg.initial_frequency:Math.round(center/1000)*1000;
+          viewCenter=center;bandConfigured=true;
+          const minimum=(center-rate/2)/1000,maximum=(center+rate/2)/1000;
+          $('frequency').min=String(minimum);$('frequency').max=String(maximum);
+          scale.setAttribute('aria-valuemin',String(minimum));scale.setAttribute('aria-valuemax',String(maximum));
+          memories=memories.filter(memory=>memory.frequency>=center-rate/2&&memory.frequency<=center+rate/2);
+          controls();renderMemories();sendWaterfallView();tune();
+        }
         $('demo').hidden=!msg.demo;
         const labels={streaming:'● Receptor conectado',demo:'● Receptor de prueba',connecting:'Conectando al SDR…',disconnected:'SDR desconectado · reconectando…',reconnecting:'Recuperando receptor…','connect-failed':'SDR no disponible · reintentando…','invalid-header':'Entrada IQ incompatible','stopped':'SDR detenido'};
         $('connection').textContent=labels[msg.source]||msg.source;

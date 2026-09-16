@@ -31,8 +31,15 @@ void state(std::string_view text) {
 }
 int main(int argc,char** argv) {
     std::signal(SIGPIPE,SIG_IGN);
-    if (argc!=3) { std::cerr<<"Usage: engine HOST PORT (or --demo 0)\n"; return 2; }
+    if (argc!=5) { std::cerr<<"Usage: engine HOST PORT CENTER_HZ SAMPLE_RATE_HZ (or --demo 0 CENTER_HZ SAMPLE_RATE_HZ)\n"; return 2; }
     const bool demo=std::string(argv[1])=="--demo";
+    std::uint32_t center_frequency=0,sample_rate=0;
+    try {
+        const auto center=std::stoull(argv[3]),rate=std::stoull(argv[4]);
+        if (!center || center>UINT32_MAX || rate!=1'024'000) return 2;
+        center_frequency=static_cast<std::uint32_t>(center);
+        sample_rate=static_cast<std::uint32_t>(rate);
+    } catch (...) { return 2; }
     std::mutex mutex;
     std::map<unsigned,std::unique_ptr<hamsdr::Receiver>> receivers;
     // Each 65536-point FFT yields 15.625 shared rows/second. The gateway
@@ -62,7 +69,7 @@ int main(int argc,char** argv) {
             while (!stop.stop_requested()) {
                 std::vector<std::complex<float>> iq(16384);
                 for (auto& x:iq) {
-                    const double t=static_cast<double>(n++)/1024000;
+                    const double t=static_cast<double>(n++)/sample_rate;
                     auto tone=[&](double f){const double p=2*std::numbers::pi*f*t;return std::complex<float>(std::cos(p),std::sin(p));};
                     // Carrier reference is 7.1005 MHz. USB at 7100 kHz, LSB at
                     // 7090 kHz, AM at 7108 kHz. All carry a 1 kHz test tone.
@@ -78,6 +85,8 @@ int main(int argc,char** argv) {
         hamsdr::RtlTcpConfig config; config.host=argv[1];
         const auto port=std::stoul(argv[2]); if (!port || port>65535) return 2;
         config.port=static_cast<std::uint16_t>(port);
+        config.center_frequency=center_frequency;
+        config.sample_rate=sample_rate;
         source=std::make_unique<hamsdr::RtlTcpClient>(config,
             [&](auto bytes){consume(hamsdr::convert_u8_iq(bytes));},
             [&](auto event){

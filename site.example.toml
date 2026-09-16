@@ -1,3 +1,6 @@
+# Every installation-specific file must be placed directly in this directory.
+working_directory = "/etc/hamsdr"
+
 # HTTP listener
 [server]
 bind = "127.0.0.1"
@@ -6,13 +9,13 @@ trusted_proxy = ""
 max_clients = 10
 max_clients_per_ip = 3
 
-# Modes: false = direct HTTP with classic audio; true = native HTTPS/WSS using
-# the certificate below; "proxy" = HTTP behind an HTTPS reverse proxy.
+# Modes: "insecure" = direct HTTP with classic audio; "native" = HTTPS/WSS
+# using the certificate below; "proxy" = HTTP behind an HTTPS reverse proxy.
 [secure]
-enable = false
-certificate = "tls/fullchain.pem"
-private_key = "tls/privkey.pem"
-origin = "https://radio.example.com:18093"
+mode = "insecure"
+certificate = ""
+private_key = ""
+origin = ""
 
 # Identity shown in the browser
 [html]
@@ -23,16 +26,32 @@ description = [
 callsign = "N0CALL"
 show_admin = true
 
-# Receiver connector. Only rtltcp is implemented currently.
-[receiver]
-type = "rtltcp"
-host = "127.0.0.1"
-port = 1234
+# Station metadata used by ReceiverBook and the browser identity.
+[station]
+qth = ""
+description = ""
+email = ""
+mobile_page = "/"
+flag = ""
+flag_description = "Station flag"
+
+# Bands must use contiguous indexes beginning at zero. The current receiver
+# engine supports one enabled rtl_tcp band at 1024 kHz sample rate.
+[band.0]
+enable = false
+name = ""
+center_frequency_khz = 0.0
+sample_rate_khz = 0.0
+antenna = ""
+receiver_type = "rtltcp"
+receiver_host = "127.0.0.1"
+receiver_port = 1234
+
+# Paste the complete confirmation meta tag into tag before enabling discovery.
+[receiverbook]
+enable = false
+tag = ""
 
 [storage]
-database = "var/community.sqlite3"
+database = "community.sqlite3"
 retention_days = 90
-
-[logo]
-file = ""
-alt = "Receiver logo"

@@ -20,11 +20,10 @@ reserved for stable releases.
 - Same-origin WebSockets, bounded queues and automatic DSP recovery.
 - Site identity and optional logo configured outside the frontend source.
 
-The current preview accepts 1.024 Msps unsigned 8-bit IQ centered at
-7.1005 MHz and produces 16 kHz mono PCM internally. The source is expected on
-an `rtl_tcp`-compatible endpoint and must already be configured by its owning
-process. Each browser can tune and demodulate independently without changing
-the shared hardware.
+The current preview accepts 1.024 Msps unsigned 8-bit IQ and produces 16 kHz
+mono PCM internally. The center frequency and source endpoint are selected by
+the enabled `[band.N]` section. Each browser can tune and demodulate
+independently without changing the shared hardware.
 
 The spectrum source contains 65,536 bins at 15.625 rows per second. Connection
 slow uses 1,024 bins at 6 bits and 5 fps. The remaining profiles preserve 8-bit
@@ -63,33 +62,29 @@ cmake --build build -j
 ctest --test-dir build --output-on-failure
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-.venv/bin/python server.py --demo
+.venv/bin/python server.py --demo --database /tmp/hamsdr-demo.sqlite3
 ```
 
 Open <http://127.0.0.1:18093/>. The demo source provides a 1 kHz tone on USB
 7100, LSB 7090 and AM 7108 kHz.
 
-For a real source:
+For a real source, configure and enable one `[band.N]` entry as described below,
+then start HamSDR with that installation file:
 
 ```sh
-.venv/bin/python server.py \
-  --source-host 127.0.0.1 \
-  --source-port 1231 \
-  --bind 127.0.0.1 \
-  --port 8080
+.venv/bin/python server.py --site-config /etc/hamsdr/site.toml
 ```
 
 Use HTTPS for remote access because AudioWorklet requires a secure context
 outside localhost. Set `--origin` to the public HTTPS origin when deploying
 behind a reverse proxy.
 
-`[secure].enable` accepts three states: `false` for direct HTTP and classic
-audio, `true` for native HTTPS/WSS with the configured PEM certificate and
-private key, or `"proxy"` when an HTTPS reverse proxy terminates TLS. Relative
-certificate paths are resolved from the directory containing `site.toml`.
-Native TLS and a reverse proxy should not be enabled on the same listener.
+`[secure].mode` accepts three values: `"insecure"` for direct HTTP and classic
+audio, `"native"` for native HTTPS/WSS with the configured PEM certificate and
+private key, or `"proxy"` when an HTTPS reverse proxy terminates TLS. Native TLS
+and a reverse proxy should not be enabled on the same listener.
 
-When `[secure].enable` is false and the page is opened directly over HTTP,
+When `[secure].mode` is `"insecure"` and the page is opened directly over HTTP,
 HamSDR falls back to the deprecated but widely compatible ScriptProcessor Web
 Audio path. It keeps the PCM/Opus stream interactive with a short buffer, but
 is not expected to survive iOS background suspension. Secure pages continue to
@@ -103,24 +98,40 @@ from arbitrary peers.
 
 ## Site customization
 
-Copy the generic configuration and edit the copy:
+Create one installation directory, copy the generic configuration into it and
+edit the copy:
 
 ```sh
-cp site.example.toml site.toml
+sudo install -d -m 0755 /etc/hamsdr
+sudo install -m 0644 site.example.toml /etc/hamsdr/site.toml
+sudo editor /etc/hamsdr/site.toml
 ```
 
 `site.toml` is ignored by Git. It defines the HTTP listener and connection
-limits under `[server]`, browser identity under `[html]`, the SDR connector under
-`[receiver]`, and persistence under `[storage]`. Only `receiver.type = "rtltcp"`
-is implemented currently. Logo files may be SVG, PNG, JPEG or WebP up to 2 MB.
-Equivalent command-line options override the file when supplied. An external
-configuration may be supplied with:
+limits under `[server]`, browser identity under `[html]`, public station metadata
+under `[station]`, numbered receiver sources under `[band.N]`, ReceiverBook
+discovery under `[receiverbook]`, and persistence under `[storage]`. Band indexes
+must be contiguous from zero. The current engine accepts exactly one enabled
+band, `receiver_type = "rtltcp"`, and `sample_rate_khz = 1024.0`.
+
+`working_directory` must be absolute. Certificates, the station flag and the
+SQLite database are filename-only references and must live directly inside
+that directory; subdirectories, absolute per-file paths and traversal are
+rejected. Flags may be SVG, PNG, JPEG or WebP up to 2 MB. Equivalent
+command-line options override the file when supplied. An external configuration
+may be supplied with:
 
 ```sh
 .venv/bin/python server.py --site-config /etc/hamsdr/site.toml
 ```
 
-Legacy `.json` configuration files remain readable for compatibility.
+When ReceiverBook is enabled, `tag` must contain the complete 64-hex-character
+confirmation `<meta>` tag. HamSDR injects it into the document head and exposes
+the legacy-compatible `/~~orgstatus` endpoint using `[station]` plus all enabled
+bands. `mobile_page = "/"` identifies the responsive root page.
+
+Legacy `.json` configuration files and the former single `[receiver]` section
+remain readable for migration compatibility.
 Using `server.origin = "*"` disables browser Origin protection and is intended
 only for controlled diagnostics.
 
@@ -128,6 +139,7 @@ only for controlled diagnostics.
 
 ```sh
 .venv/bin/python tests/integration_test.py -v
+.venv/bin/python tests/site_config_tests.py -v
 .venv/bin/python tests/opus_codec_tests.py -v
 .venv/bin/python tests/history_tests.py -v
 .venv/bin/python tests/waterfall_codec_tests.py -v

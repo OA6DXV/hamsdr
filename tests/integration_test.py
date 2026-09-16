@@ -316,6 +316,27 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
         audio,_=await self.collect(ws)
         self.assertGreater(max(audio),1000)
 
+    async def test_receiverbook_status_and_confirmation_tag(self):
+        gateway = self.app[GATEWAY]
+        token = "a" * 64
+        gateway.receiverbook = {"enable": True, "confirmation": token,
+            "tag": f'<meta name="receiverbook-confirmation" content="{token}">' }
+        gateway.station = {"description": "Test HamSDR", "email": "operator@example.test",
+                           "qth": "AA00aa", "mobile_page": "/", "flag": "",
+                           "flag_description": "Station flag"}
+        gateway.bands = [{"enable": True, "center_frequency_khz": 7100.5,
+                          "sample_rate_khz": 1024.0, "antenna": "Test antenna"}]
+        async with self.session.get(self.url+'/~~orgstatus') as response:
+            self.assertEqual(response.status,200)
+            status = await response.text()
+            self.assertIn("Description: Test HamSDR\n", status)
+            self.assertIn("Bands: 1\n", status)
+            self.assertIn("Band: 0 7100.500 1024.000 Test antenna\n", status)
+        async with self.session.get(self.url+'/') as response:
+            document = await response.text()
+            self.assertEqual(document.count('name="receiverbook-confirmation"'), 1)
+            self.assertIn(f'content="{token}"', document)
+
     async def test_per_ip_connection_limit_and_trusted_proxy(self):
         gateway=self.app[GATEWAY]
         gateway.args.max_clients_per_ip=2

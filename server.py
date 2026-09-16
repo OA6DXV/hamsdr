@@ -23,7 +23,7 @@ from opus_codec import OPUS_AVAILABLE, OpusEncoder
 from waterfall_codec import encode as encode_waterfall
 
 ROOT = Path(__file__).resolve().parent
-VERSION = "0.3.6-dev"
+VERSION = "0.3.7-dev"
 MODES = {"USB": (300, 2700), "LSB": (-2700, -300), "AM": (-4000, 4000),
          "CW": (450, 950), "NFM": (-5000, 5000)}
 
@@ -47,9 +47,146 @@ def read_site_config(requested=None):
         raise ValueError("site config: root must be an object")
     return data, path
 
-def load_runtime_config(requested=None):
+def working_directory(data, config_path):
+    """Return the one absolute directory allowed to hold installation files."""
+    value = data.get("working_directory", str(config_path.parent))
+    if not isinstance(value, str) or not value.strip() or "\0" in value:
+        raise ValueError("site config: invalid working_directory")
+    root = Path(value).expanduser()
+    if not root.is_absolute():
+        raise ValueError("site config: working_directory must be absolute")
+    return root.resolve()
+
+def working_file(root, value, label, extensions=None):
+    """Resolve one direct child of the working directory without path traversal."""
+    if value in (None, ""):
+        return None
+    if not isinstance(value, str) or "\0" in value:
+        raise ValueError(f"site config: invalid {label}")
+    name = Path(value)
+    if name.is_absolute() or len(name.parts) != 1 or name.name in ("", ".", ".."):
+        raise ValueError(f"site config: {label} must be a filename in working_directory")
+    if extensions and name.suffix.lower() not in extensions:
+        raise ValueError(f"site config: invalid {label} file type")
+    candidate = root / name.name
+    if candidate.is_symlink():
+        raise ValueError(f"site config: {label} must not be a symbolic link")
+    return candidate
+
+def load_station_config(data):
+    """Validate station metadata, indexed bands and ReceiverBook settings."""
+    station = data.get("station", {})
+    if not isinstance(station, dict):
+        raise ValueError("site config: invalid station")
+
+    def optional_text(source, name, limit):
+        value = source.get(name, "")
+        if (not isinstance(value, str) or len(value) > limit or
+                any(ord(character) < 32 for character in value)):
+            raise ValueError(f"site config: invalid {name}")
+        return value.strip()
+
+    qth = optional_text(station, "qth", 8)
+    if qth and not re.fullmatch(r"[A-Ra-r]{2}[0-9]{2}(?:[A-Xa-x]{2})?", qth):
+        raise ValueError("site config: invalid station qth")
+    station_data = {
+        "qth": qth,
+        "description": optional_text(station, "description", 240),
+        "email": optional_text(station, "email", 254),
+        "mobile_page": optional_text(station, "mobile_page", 120) or "/",
+        "flag": optional_text(station, "flag", 255),
+        "flag_description": optional_text(station, "flag_description", 120) or "Station flag",
+    }
+
+    raw_bands = data.get("band", {})
+    if not isinstance(raw_bands, dict):
+        raise ValueError("site config: invalid band sections")
+    indexes = []
+    for key in raw_bands:
+        if not isinstance(key, str) or not key.isdecimal():
+            raise ValueError("site config: band indexes must be non-negative integers")
+        indexes.append(int(key))
+    indexes.sort()
+    if indexes and indexes != list(range(indexes[-1] + 1)):
+        raise ValueError("site config: band indexes must be contiguous from 0")
+    bands = []
+    for index in indexes:
+        source = raw_bands[str(index)]
+        if not isinstance(source, dict):
+            raise ValueError(f"site config: invalid band.{index}")
+        enabled = source.get("enable", False)
+        if not isinstance(enabled, bool):
+            raise ValueError(f"site config: band.{index}.enable must be true or false")
+        name = optional_text(source, "name", 80)
+        antenna = optional_text(source, "antenna", 160)
+        center = source.get("center_frequency_khz", 0.0)
+        sample_rate = source.get("sample_rate_khz", 0.0)
+        receiver_type = source.get("receiver_type", "rtltcp")
+        host = source.get("receiver_host", "127.0.0.1")
+        port = source.get("receiver_port", 1231)
+        if enabled:
+            if not name or not antenna:
+                raise ValueError(f"site config: enabled band.{index} requires name and antenna")
+            if (isinstance(center, bool) or not isinstance(center, (int, float)) or
+                    not math.isfinite(center) or center <= 0):
+                raise ValueError(f"site config: invalid band.{index} center frequency")
+            if (isinstance(sample_rate, bool) or not isinstance(sample_rate, (int, float)) or
+                    not math.isfinite(sample_rate) or sample_rate != 1024.0):
+                raise ValueError(f"site config: band.{index} sample rate must currently be 1024.0 kHz")
+            if receiver_type != "rtltcp":
+                raise ValueError(f"site config: band.{index} receiver type must currently be rtltcp")
+            if not isinstance(host, str):
+                raise ValueError(f"site config: invalid band.{index} receiver host")
+            try:
+                host = ipaddress.ip_address(host.strip()).compressed
+            except ValueError as error:
+                raise ValueError(f"site config: invalid band.{index} receiver host") from error
+            if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
+                raise ValueError(f"site config: invalid band.{index} receiver port")
+        bands.append({
+            "index": index, "enable": enabled, "name": name,
+            "center_frequency_khz": float(center), "sample_rate_khz": float(sample_rate),
+            "antenna": antenna, "receiver_type": receiver_type,
+            "receiver_host": host, "receiver_port": port,
+        })
+
+    # Keep installations using the previous single [receiver] section readable
+    # until their external configuration is migrated.
+    if not bands and isinstance(data.get("receiver"), dict):
+        receiver = data["receiver"]
+        bands = [{
+            "index": 0, "enable": True, "name": "40m",
+            "center_frequency_khz": 7100.5, "sample_rate_khz": 1024.0,
+            "antenna": "Receiver antenna", "receiver_type": receiver.get("type", "rtltcp"),
+            "receiver_host": receiver.get("host", "127.0.0.1"),
+            "receiver_port": receiver.get("port", 1231),
+        }]
+
+    receiverbook = data.get("receiverbook", {})
+    if not isinstance(receiverbook, dict):
+        raise ValueError("site config: invalid receiverbook")
+    receiverbook_enabled = receiverbook.get("enable", False)
+    receiverbook_tag = receiverbook.get("tag", "")
+    if not isinstance(receiverbook_enabled, bool) or not isinstance(receiverbook_tag, str):
+        raise ValueError("site config: invalid receiverbook settings")
+    confirmation = ""
+    if receiverbook_enabled:
+        match = re.fullmatch(
+            r'\s*<meta\s+name=["\']receiverbook-confirmation["\']\s+'
+            r'content=["\']([0-9a-f]{64})["\']\s*/?>\s*', receiverbook_tag)
+        if not match:
+            raise ValueError("site config: receiverbook tag must contain one valid confirmation meta tag")
+        confirmation = match.group(1)
+        if not station_data["description"] or not station_data["email"]:
+            raise ValueError("site config: ReceiverBook requires station description and email")
+    return station_data, bands, {
+        "enable": receiverbook_enabled, "tag": receiverbook_tag.strip(), "confirmation": confirmation,
+    }
+
+def load_runtime_config(requested=None, allow_unconfigured=False):
     """Return validated private server, receiver and storage settings."""
     data, path = read_site_config(requested)
+    root = working_directory(data, path)
     server = data.get("server", {})
     if not isinstance(server, dict):
         raise ValueError("site config: invalid server")
@@ -80,13 +217,16 @@ def load_runtime_config(requested=None):
         raise ValueError("site config: clients must be 1..20 and per-IP must not exceed total")
     if not isinstance(secure, dict):
         raise ValueError("site config: invalid secure")
-    secure_enable = secure.get("enable", secure.get("enabled", False))
+    security_mode = secure.get("mode")
+    if security_mode is None:
+        legacy_mode = secure.get("enable", secure.get("enabled", False))
+        security_mode = "proxy" if legacy_mode == "proxy" else "native" if legacy_mode is True else "insecure"
     tls_certificate = secure.get("certificate", "")
     tls_private_key = secure.get("private_key", "")
     secure_origin = secure.get("origin", server.get("origin", ""))
-    if type(secure_enable) is not bool and secure_enable != "proxy":
-        raise ValueError('site config: secure enable must be false, true or "proxy"')
-    tls_enabled = secure_enable is True
+    if security_mode not in ("insecure", "native", "proxy"):
+        raise ValueError('site config: secure mode must be "insecure", "native" or "proxy"')
+    tls_enabled = security_mode == "native"
     if not isinstance(tls_certificate, str) or not isinstance(tls_private_key, str):
         raise ValueError("site config: invalid TLS certificate path")
     if not isinstance(secure_origin, str):
@@ -96,51 +236,51 @@ def load_runtime_config(requested=None):
         if (parsed.scheme not in ("http", "https") or not parsed.netloc or parsed.path or
                 parsed.query or parsed.fragment or parsed.username or parsed.password):
             raise ValueError("site config: secure origin must be an exact http(s) origin")
-    def tls_path(value):
-        if not value:
-            return None
-        result = Path(value).expanduser()
-        return result if result.is_absolute() else path.parent / result
-    tls_certificate = tls_path(tls_certificate)
-    tls_private_key = tls_path(tls_private_key)
+    tls_certificate = working_file(root, tls_certificate, "TLS certificate")
+    tls_private_key = working_file(root, tls_private_key, "TLS private key")
+    if tls_enabled and (not tls_certificate or not tls_private_key):
+        raise ValueError("site config: native secure mode requires certificate and private_key")
 
-    receiver = data.get("receiver", {})
-    if not isinstance(receiver, dict):
-        raise ValueError("site config: invalid receiver")
-    receiver_type = receiver.get("type", "rtltcp")
-    source_host = receiver.get("host", "127.0.0.1")
-    source_port = receiver.get("port", 1231)
-    if receiver_type != "rtltcp":
-        raise ValueError("site config: receiver type must currently be rtltcp")
-    if not isinstance(source_host, str):
-        raise ValueError("site config: invalid receiver host")
-    try:
-        source_host = ipaddress.ip_address(source_host.strip()).compressed
-    except ValueError as error:
-        raise ValueError("site config: receiver host must be an IP address") from error
-    if isinstance(source_port, bool) or not isinstance(source_port, int) or not 1 <= source_port <= 65535:
-        raise ValueError("site config: receiver port must be 1..65535")
+    station, bands, receiverbook = load_station_config(data)
+    enabled_bands = [band for band in bands if band["enable"]]
+    if not enabled_bands and allow_unconfigured:
+        enabled_bands = [{
+            "index": 0, "enable": True, "name": "demo",
+            "center_frequency_khz": 7100.5, "sample_rate_khz": 1024.0,
+            "antenna": "Demo source", "receiver_type": "rtltcp",
+            "receiver_host": "127.0.0.1", "receiver_port": 1234,
+        }]
+    if len(enabled_bands) != 1:
+        raise ValueError("site config: exactly one band must be enabled by the current receiver engine")
+    band = enabled_bands[0]
+    receiver_type = band["receiver_type"]
+    source_host = band["receiver_host"]
+    source_port = band["receiver_port"]
+    center_frequency = round(band["center_frequency_khz"] * 1000)
+    sample_rate = round(band["sample_rate_khz"] * 1000)
 
     storage = data.get("storage", {})
     if not isinstance(storage, dict):
         raise ValueError("site config: invalid storage")
-    database = storage.get("database", str(ROOT / "var/community.sqlite3"))
+    database = storage.get("database", "community.sqlite3")
     retention_days = storage.get("retention_days", 90)
     if not isinstance(database, str) or not database.strip() or "\0" in database:
         raise ValueError("site config: invalid database path")
-    database = Path(database).expanduser()
-    if not database.is_absolute():
-        database = path.parent / database
+    database = working_file(root, database, "database", {".sqlite", ".sqlite3", ".db"})
     if (isinstance(retention_days, bool) or not isinstance(retention_days, int) or
             not 1 <= retention_days <= 3650):
         raise ValueError("site config: retention days must be 1..3650")
     return {
-        "bind": bind, "port": port, "origin": secure_origin if secure_enable is not False else "",
+        "working_directory": root,
+        "bind": bind, "port": port, "origin": secure_origin if security_mode != "insecure" else "",
         "trusted_proxy": trusted_proxy,
         "max_clients": max_clients, "max_clients_per_ip": max_clients_per_ip,
-        "tls_enabled": tls_enabled, "tls_certificate": tls_certificate,
+        "security_mode": security_mode, "tls_enabled": tls_enabled, "tls_certificate": tls_certificate,
         "tls_private_key": tls_private_key,
         "receiver_type": receiver_type, "source_host": source_host, "source_port": source_port,
+        "center_frequency": center_frequency, "sample_rate": sample_rate,
+        "initial_frequency": round(center_frequency / 1000) * 1000,
+        "station": station, "bands": bands, "receiverbook": receiverbook,
         "database": database, "retention_days": retention_days,
     }
 
@@ -167,6 +307,7 @@ def create_tls_context(args):
 def load_site_config(requested=None):
     """Load operator branding separately from application code and assets."""
     data, path = read_site_config(requested)
+    root = working_directory(data, path)
     html = data.get("html", data)
     if not isinstance(html, dict):
         raise ValueError("site config: invalid html")
@@ -189,23 +330,15 @@ def load_site_config(requested=None):
     if not isinstance(show_admin, bool):
         raise ValueError("site config: show_admin must be true or false")
 
-    logo = data.get("logo", {})
-    if not isinstance(logo, dict):
+    station, bands, receiverbook = load_station_config(data)
+    legacy_logo = data.get("logo", {})
+    if not isinstance(legacy_logo, dict):
         raise ValueError("site config: invalid logo")
-    logo_file = logo.get("file", "")
-    logo_path = None
-    if logo_file:
-        if not isinstance(logo_file, str) or len(logo_file) > 300:
-            raise ValueError("site config: invalid logo file")
-        config_root = path.parent.resolve()
-        logo_path = (config_root / logo_file).resolve()
-        if (not logo_path.is_relative_to(config_root) or
-                logo_path.suffix.lower() not in (".svg", ".png", ".jpg", ".jpeg", ".webp") or
-                not logo_path.is_file() or logo_path.stat().st_size > 2_000_000):
-            raise ValueError("site config: logo must be an SVG, PNG, JPEG or WebP file up to 2 MB")
-    logo_alt = logo.get("alt", "Receiver logo")
-    if not isinstance(logo_alt, str) or len(logo_alt) > 120:
-        raise ValueError("site config: invalid logo alt text")
+    logo_file = station["flag"] or legacy_logo.get("file", "")
+    logo_alt = station["flag_description"] or legacy_logo.get("alt", "Station flag")
+    logo_path = working_file(root, logo_file, "station flag", {".svg", ".png", ".jpg", ".jpeg", ".webp"})
+    if logo_path and (not logo_path.is_file() or logo_path.stat().st_size > 2_000_000):
+        raise ValueError("site config: station flag must be an SVG, PNG, JPEG or WebP file up to 2 MB")
 
     public = {
         "receiver_name": text("receiver_name", 120, "HamSDR"),
@@ -215,11 +348,17 @@ def load_site_config(requested=None):
         "version": VERSION,
         "logo": {"enabled": logo_path is not None, "url": "./site-logo" if logo_path else "", "alt": logo_alt},
     }
-    return public, logo_path
+    return public, logo_path, station, bands, receiverbook
 
 class Gateway:
     def __init__(self, args):
         self.args = args
+        self.center_frequency = int(getattr(args, "center_frequency", 7100500))
+        self.sample_rate = int(getattr(args, "sample_rate", 1024000))
+        self.band_lower = self.center_frequency - self.sample_rate // 2
+        self.band_upper = self.center_frequency + self.sample_rate // 2
+        self.initial_frequency = int(getattr(args, "initial_frequency",
+                                             round(self.center_frequency / 1000) * 1000))
         self.clients = {}
         self.next_id = 1
         self.process = None
@@ -239,7 +378,8 @@ class Gateway:
         self.stopping = False
         self.waterfall_sequence = 0
         self.connection_attempts = OrderedDict()
-        self.site_config, self.site_logo = load_site_config(getattr(args, "site_config", None))
+        (self.site_config, self.site_logo, self.station,
+         self.bands, self.receiverbook) = load_site_config(getattr(args, "site_config", None))
 
     def client_address(self, request):
         """Use a proxy-supplied address only when the TCP peer is explicitly trusted."""
@@ -264,11 +404,28 @@ class Gateway:
 
     def info(self):
         return {"type": "status", "version": VERSION, "source": self.source, "users": len(self.clients),
-                "center": 7100500, "sample_rate": 1024000, "audio_rate": 16000,
+                "center": self.center_frequency, "sample_rate": self.sample_rate,
+                "initial_frequency": self.initial_frequency, "audio_rate": 16000,
                 "audio_profiles": {"raw": 16000, "balanced": 16000, "mobile": 16000},
                 "opus_available": OPUS_AVAILABLE,
-                "fft_size": 65536, "demo": self.args.demo, "restarts": self.restarts,
+                "fft_size": 65536, "demo": getattr(self.args, "demo", False), "restarts": self.restarts,
                 "dropped": self.dropped, **self.metrics}
+
+    def receiverbook_status(self):
+        """Return the legacy receiver-directory station discovery document."""
+        bands = [band for band in self.bands if band["enable"]]
+        lines = [
+            f"Description: {self.station['description']}",
+            f"Email: {self.station['email']}",
+            f"Qth: {self.station['qth']}",
+            f"Users: {len(self.clients)}",
+            f"Bands: {len(bands)}",
+        ]
+        for position, band in enumerate(bands):
+            lines.append(
+                f"Band: {position} {band['center_frequency_khz']:.3f} "
+                f"{band['sample_rate_khz']:.3f} {band['antenna']}")
+        return "\n".join(lines) + "\n"
 
     async def command(self, text):
         async with self.lock:
@@ -393,10 +550,10 @@ class Gateway:
             divisor = speed if isinstance(speed,int) else 1
             if emitted % divisor: continue
             zoom, view_center = client["waterfall_zoom"], client["waterfall_center"]
-            span = round(1024000/zoom)
+            span = round(self.sample_rate/zoom)
             lower = round(view_center-span/2)
-            start = max(0, min(len(data)-1, round((lower-6588500)/1024000*len(data))))
-            end = max(start+1, min(len(data), round((lower+span-6588500)/1024000*len(data))))
+            start = max(0, min(len(data)-1, round((lower-self.band_lower)/self.sample_rate*len(data))))
+            end = max(start+1, min(len(data), round((lower+span-self.band_lower)/self.sample_rate*len(data))))
             key = profile, start, end, lower, span
             if key not in compressed:
                 compressed[key] = bytes([7])+encode_waterfall(data, profile, sequence, start, end, lower, span)
@@ -407,7 +564,7 @@ class Gateway:
 
     def settings_command(self, ident, settings):
         # CW's displayed frequency is the RF carrier, with a 700 Hz beat note.
-        offset = settings['frequency']-7100500-(700 if settings['mode']=='CW' else 0)
+        offset = settings['frequency']-self.center_frequency-(700 if settings['mode']=='CW' else 0)
         return f"set {ident} {offset} {settings['mode']} {settings['low']} {settings['high']} {settings['squelch']} {int(settings.get('notch', False))} {settings.get('nr', 0)}"
 
     def presence(self):
@@ -519,6 +676,7 @@ class Gateway:
                     str(ROOT / "build/hamsdr-next-engine"),
                     "--demo" if self.args.demo else self.args.source_host,
                     "0" if self.args.demo else str(self.args.source_port),
+                    str(self.center_frequency), str(self.sample_rate),
                     stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
                     limit=262144)
                 self.process = process
@@ -622,13 +780,13 @@ class Gateway:
         # Reserve the slot before the first await, including handshake processing.
         ident = self.next_id
         self.next_id += 1
-        settings = {"frequency": 7100000, "mode": "LSB", "low": -2700, "high": -300, "squelch": -150, "notch": False, "nr": 0}
+        settings = {"frequency": self.initial_frequency, "mode": "LSB", "low": -2700, "high": -300, "squelch": -150, "notch": False, "nr": 0}
         queue = asyncio.Queue(maxsize=32)
         client = {"queue": queue, "reliable": asyncio.Queue(maxsize=64), "wake": asyncio.Event(),
                   "closing": False, "settings": settings, "ws": ws, "name": "", "key": "", "address": address,
                   "chat_tokens": 4.0, "chat_last": time.monotonic(), "history_last": 0,
                   "waterfall_profile": "balanced", "waterfall_preference": "balanced", "waterfall_ceiling": "balanced",
-                  "waterfall_zoom": 1.0, "waterfall_center": 7100500,
+                  "waterfall_zoom": 1.0, "waterfall_center": self.center_frequency,
                   "waterfall_speed": 1, "waterfall_phase": 0, "waterfall_emitted": 0,
                   "congestion": 0, "stable_intervals": 0, "sent_bytes": 0, "last_sent": 0,
                   "audio_enabled": False, "audio_profile": "balanced",
@@ -691,8 +849,8 @@ class Gateway:
                         zoom, view_center = update.get("zoom"), update.get("center")
                         if type(zoom) not in (int,float) or type(view_center) not in (int,float) or not math.isfinite(zoom) or not math.isfinite(view_center) or not 1 <= zoom <= 64:
                             raise ValueError("Ventana de cascada inválida")
-                        span = 1024000/zoom
-                        if not 6588500+span/2 <= view_center <= 7612500-span/2:
+                        span = self.sample_rate/zoom
+                        if not self.band_lower+span/2 <= view_center <= self.band_upper-span/2:
                             raise ValueError("Ventana de cascada fuera de banda")
                         client["waterfall_zoom"], client["waterfall_center"] = float(zoom), round(view_center)
                         continue
@@ -735,7 +893,7 @@ class Gateway:
                     numbers = [new[k] for k in ("frequency", "low", "high", "squelch")]
                     if not all(math.isfinite(x) for x in numbers):
                         raise ValueError("Número inválido")
-                    if not (6600500 <= new["frequency"] <= 7600500 and -6000 <= new["low"] < new["high"] <= 6000
+                    if not (self.band_lower <= new["frequency"] <= self.band_upper and -6000 <= new["low"] < new["high"] <= 6000
                             and new["high"]-new["low"] >= 100 and -150 <= new["squelch"] <= 0):
                         raise ValueError("Control fuera de rango")
                     client["settings"] = settings = new
@@ -785,12 +943,21 @@ def application(args):
         if not gateway.site_logo:
             raise web.HTTPNotFound()
         return web.FileResponse(gateway.site_logo)
+    async def receiverbook_status(request):
+        if not gateway.receiverbook["enable"]:
+            raise web.HTTPNotFound()
+        return web.Response(text=gateway.receiverbook_status(), content_type="text/plain")
     app.router.add_get("/site-config.js", site_config)
     app.router.add_get("/site-logo", site_logo)
+    app.router.add_get("/~~orgstatus", receiverbook_status)
     async def asset(request):
         name = request.match_info.get("name", "index.html")
         if name not in {"index.html", "style.css", "zoom.css", "site.js", "app.js", "audio-worklet.js", "classic-audio.js", "waterfall-codec.js", "community.js", "palette.js"}:
             raise web.HTTPNotFound()
+        if name == "index.html" and gateway.receiverbook["enable"]:
+            document = (ROOT / "web/index.html").read_text(encoding="utf-8")
+            document = document.replace("<head>", f"<head>\n  {gateway.receiverbook['tag']}", 1)
+            return web.Response(text=document, content_type="text/html")
         return web.FileResponse(ROOT / "web" / name)
     app.router.add_get("/", asset)
     app.router.add_get("/{name}", asset)
@@ -817,11 +984,11 @@ if __name__ == "__main__":
     parser.add_argument("--site-config", type=Path, help="Site configuration TOML (defaults to ./site.toml, then generic example)")
     args = parser.parse_args()
     try:
-        configured = load_runtime_config(args.site_config)
+        configured = load_runtime_config(args.site_config, allow_unconfigured=args.demo)
     except ValueError as error:
         parser.error(str(error))
     for name, value in configured.items():
-        if getattr(args, name) is None:
+        if getattr(args, name, None) is None:
             setattr(args, name, value)
     try:
         args.bind = ipaddress.ip_address(args.bind).compressed

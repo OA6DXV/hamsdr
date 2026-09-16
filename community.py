@@ -32,7 +32,10 @@ class History:
         self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.db = sqlite3.connect(self.path, timeout=3)
         self.db.row_factory = sqlite3.Row
-        self.db.execute("PRAGMA journal_mode=WAL")
+        # PERSIST keeps the journal file allocated, so a hardened service can
+        # grant write access to only the database and journal, not its entire
+        # configuration directory.
+        self.db.execute("PRAGMA journal_mode=PERSIST")
         self.db.execute("PRAGMA synchronous=FULL")
         version = self.db.execute("PRAGMA user_version").fetchone()[0]
         if version > 1:
