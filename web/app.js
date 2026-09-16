@@ -9,7 +9,7 @@ let zoom=1, viewCenter=center, socket, retry=500, timer, tuneTimer, lastRow, vie
 let dynamicSpectrumBottom=null,dynamicSpectrumTop=null;
 let context, node, gain, audioStarting=false, audioEnabled=false, audioEverStarted=false, audioProfile='balanced', opusDecoder=null, opusSupportPromise=null, lastOpusSequence=null, spectrumFrames=0, audioPackets=0;
 let spectrumHistory=[];
-let waterfallPreference=innerWidth<=600?'mobile':'balanced',waterfallProfile='raw',waterfallSpeed=1,drawAverage=0,lastProfileRequest=0,profileTimer,pendingRow,waterfallFrame;
+let waterfallPreference='balanced',waterfallProfile='balanced',waterfallSpeed=1,drawAverage=0,lastProfileRequest=0,profileTimer,pendingRow,waterfallFrame;
 let trafficBytes=0,trafficAt=performance.now();
 let lastWaterfallSequence=null,lastWaterfallAt=0,streamWarningTimer,socketOpenedAt=0,interruptionSamples=[];
 let memories=[];
@@ -18,8 +18,9 @@ try {
   if(Array.isArray(saved)) memories=saved.filter(m=>m && typeof m.name==='string' && defaults[m.mode] &&
     Number.isFinite(m.frequency) && m.frequency>=6600500 && m.frequency<=7600500 &&
     Number.isFinite(m.low) && Number.isFinite(m.high) && m.low>=-6000 && m.high<=6000 && m.high-m.low>=100).slice(0,30);
-  const preference=localStorage.getItem('hamsdr-waterfall');
-  if(['auto','mobile','balanced','raw','exp1024','exp2048','exp4096'].includes(preference))waterfallPreference=preference;
+  const savedWaterfall=localStorage.getItem('hamsdr-waterfall');
+  const preference={mobile:'low',raw:'high',exp1024:'low',exp2048:'balanced',exp4096:'high'}[savedWaterfall]||savedWaterfall;
+  if(['auto','slow','low','balanced','high'].includes(preference))waterfallPreference=preference;
   const savedAudio=localStorage.getItem('hamsdr-audio-profile');
   const migratedAudio={original:'raw','opus-high':'balanced','opus-low':'mobile'}[savedAudio]||savedAudio;
   if(['raw','balanced','mobile'].includes(migratedAudio))audioProfile=migratedAudio;
@@ -88,8 +89,6 @@ function decodeOpusPacket(bytes){
   catch(error){fallbackFromOpus(`No se pudo decodificar Opus: ${error.message}.`);}
 }
 function recommendedWaterfallProfile(){
-  const connection=navigator.connection||navigator.mozConnection||navigator.webkitConnection;
-  if(connection?.saveData||['slow-2g','2g'].includes(connection?.effectiveType)||innerWidth<=600||(navigator.deviceMemory&&navigator.deviceMemory<=2))return'mobile';
   return'balanced';
 }
 function sendWaterfallPreference(forced){
@@ -100,8 +99,9 @@ function sendWaterfallView(){if(socket?.readyState===WebSocket.OPEN)socket.send(
 function sendWaterfallSpeed(){if(socket?.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type:'waterfall-speed',divisor:Number($('wfspeed').value)}));}
 function sendAudioProfile(){if(socket?.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type:'audio-profile',profile:audioProfile}));}
 function showWaterfallProfile(){
-  const names={mobile:'bajo consumo · hasta 1024 bins/4 bits',balanced:'balanceado · hasta 2048 bins/6 bits',raw:'sin pérdida · hasta 4096 bins/8 bits',exp1024:'1024@8 experimental · diferencial variable',exp2048:'2048@8 experimental · diferencial variable',exp4096:'4096@8 experimental · diferencial variable'},fps={1:7.8,2:3.9,6:1.3};
-  $('waterfall-profile-status').textContent=`Activo: ${names[waterfallProfile]} · ${fps[waterfallSpeed]} fps`;
+  const names={slow:'conexión lenta · 1024 bins/8 bits',low:'baja definición · 1024 bins/8 bits',balanced:'balanceado · 2048 bins/8 bits',high:'alta definición · 4096 bins/8 bits'};
+  const fps=(waterfallProfile==='slow'?6:7.8)/waterfallSpeed;
+  $('waterfall-profile-status').textContent=`Activo: ${names[waterfallProfile]} · ${fps.toFixed(1).replace('.0','')} fps`;
   $('waterfall').dataset.profile=waterfallProfile;
 }
 function showAudioProfile(){
@@ -254,7 +254,7 @@ function drawRow(frame,replay=false){
   else{ctx.lineTo(w,h);ctx.lineTo(0,h);ctx.closePath();const gradient=ctx.createLinearGradient(0,h,0,0);gradient.addColorStop(0,'#210038');gradient.addColorStop(.55,'#7900a8');gradient.addColorStop(1,'#e180ff');ctx.fillStyle=gradient;ctx.fill();renderSpectrumAxis();}
   if(!replay){
     const elapsed=performance.now()-drawStarted;drawAverage=drawAverage?drawAverage*.9+elapsed*.1:elapsed;
-    if(waterfallPreference==='auto'&&drawAverage>14&&waterfallProfile!=='mobile'&&performance.now()-lastProfileRequest>15000)sendWaterfallPreference('mobile');
+    if(waterfallPreference==='auto'&&drawAverage>14&&waterfallProfile!=='slow'&&performance.now()-lastProfileRequest>15000)sendWaterfallPreference('slow');
   }
 }
 function enqueueRow(frame){

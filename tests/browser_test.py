@@ -43,6 +43,8 @@ async def main():
             assert await page.locator('.stream-profile-control #audio-quality').count()==1
             assert await page.locator('.stream-profile-control #waterfall-quality').count()==1
             assert await page.locator('.waterfall-panel #waterfall-quality').count()==0
+            waterfall_options=await page.locator('#waterfall-quality option').evaluate_all('(options)=>options.map(option=>[option.value,option.textContent])')
+            assert waterfall_options==[['auto','automático'],['slow','conexión lenta'],['low','baja definición'],['balanced','balanceado'],['high','alta definición']]
             await expect(page.locator('#stream-warning')).to_be_hidden()
             await page.evaluate("window.reportStreamInterruption('test')")
             await expect(page.locator('#stream-warning')).to_be_hidden()
@@ -51,7 +53,7 @@ async def main():
             await expect(page.locator('#stream-warning')).to_be_hidden()
             await page.evaluate("window.reportStreamInterruption('test')")
             await expect(page.locator('#stream-warning')).to_be_visible()
-            await expect(page.locator('#stream-warning')).to_contain_text('Opus bajo consumo')
+            await expect(page.locator('#stream-warning')).to_contain_text('Cascada: conexión lenta')
             assert await page.locator('#stream-warning').evaluate("e=>getComputedStyle(e).color==='rgb(196, 0, 0)'")
             await page.locator('#stream-warning').evaluate("e=>e.hidden=true")
             assert await page.locator('#wfspeed option').all_text_contents()==['normal','lento','muy lento']
@@ -68,7 +70,7 @@ async def main():
             assert await page.locator('#username').evaluate("e=>{const profiles=e.closest('.identity-control').nextElementSibling;return profiles.classList.contains('stream-profile-control')&&profiles.nextElementSibling.id==='panorama'}")
             await expect(page.locator('#client-traffic')).to_have_text(re.compile(r'^(?:—|[0-9]+(?:\.[0-9]+)?) kb/s$'))
             await expect(page.locator('#client-traffic')).not_to_have_text('— kb/s',timeout=2000)
-            expected_profile='mobile' if viewport['width']<=600 else 'balanced'
+            expected_profile='balanced'
             if viewport['width']>=1440:
                 await expect(page.locator('#audio-quality')).to_have_value('balanced')
             await expect(page.locator('#waterfall-quality')).to_have_value(expected_profile)
@@ -81,11 +83,9 @@ async def main():
                 assert max(layout[name]['y'] for name in ('frequency','waterfall','signal','filter'))-min(layout[name]['y'] for name in ('frequency','waterfall','signal','filter'))<=1,'desktop control panels are not in one row'
                 assert abs(layout['chat']['y']-layout['log']['y'])<=1 and 2.8<=layout['chat']['w']/layout['log']['w']<=3.2,'community columns are not 3:1'
                 assert abs(layout['main']['x']-(viewport['width']-layout['main']['w'])/2)<=1,'page is not centered'
-            await page.locator('#waterfall-quality').select_option('balanced')
-            await expect(page.locator('#waterfall')).to_have_attribute('data-profile','balanced')
-            for experimental in ('exp1024','exp2048','exp4096'):
-                await page.locator('#waterfall-quality').select_option(experimental)
-                await expect(page.locator('#waterfall')).to_have_attribute('data-profile',experimental)
+            for profile in ('slow','low','balanced','high'):
+                await page.locator('#waterfall-quality').select_option(profile)
+                await expect(page.locator('#waterfall')).to_have_attribute('data-profile',profile)
             await page.locator('#waterfall-quality').select_option('auto')
             await expect(page.locator('#waterfall')).to_have_attribute('data-profile',expected_profile)
             await page.locator('[data-mode="USB"]:not([data-narrow])').click()

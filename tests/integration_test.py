@@ -222,37 +222,41 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
             await self.session.ws_connect(self.url+'/ws',origin=self.url)
         self.assertEqual(caught.exception.status,503)
 
-    async def test_three_waterfall_profiles_and_independent_rows(self):
-        sockets=[await self.connect() for _ in range(3)]
-        for ws,profile in zip(sockets,['mobile','balanced','raw']):
+    async def test_four_waterfall_profiles_and_independent_rows(self):
+        sockets=[await self.connect() for _ in range(4)]
+        profiles=['slow','low','balanced','high']
+        for ws,profile in zip(sockets,profiles):
             await ws.send_json({'type':'waterfall','preference':profile,'profile':profile})
             reply=await self.event(ws,'waterfall-profile')
             self.assertEqual(reply['profile'],profile)
-        counts=[0,0,0];sequences=[[],[],[]]
+        counts=[0,0,0,0];sequences=[[],[],[],[]]
         async def rows(index,ws):
             async with asyncio.timeout(6):
                 while counts[index]<5:
                     msg=await ws.receive()
                     if msg.type!=WSMsgType.BINARY:continue
                     if msg.data[0]==7:
-                        self.assertEqual(len(msg.data),(530,1554,4114)[index])
                         code,sequence,lower,span,data=decode(msg.data[1:])
-                        self.assertEqual((code,lower,span,len(data)),(index+1,6588500,1024000,(1024,2048,4096)[index]))
+                        self.assertEqual((code,lower,span,len(data)),((4,4,5,6)[index],6588500,1024000,(1024,1024,2048,4096)[index]))
                         counts[index]+=1;sequences[index].append(sequence)
         await asyncio.gather(*(rows(i,ws) for i,ws in enumerate(sockets)))
         self.assertTrue(all(b>a for values in sequences for a,b in zip(values,values[1:])))
-        await sockets[0].send_json({'type':'waterfall-view','zoom':64,'center':7100000})
+        await sockets[1].send_json({'type':'waterfall-view','zoom':64,'center':7100000})
         async with asyncio.timeout(3):
             while True:
-                msg=await sockets[0].receive()
+                msg=await sockets[1].receive()
                 if msg.type==WSMsgType.BINARY and msg.data[0]==7:
-                    _,_,lower,span,data=decode(msg.data[1:]);break
+                    _,_,lower,span,data=decode(msg.data[1:])
+                    if lower==7092000 and span==16000:break
         self.assertEqual((lower,span,len(data)),(7092000,16000,1024))
-        await sockets[0].send_json({'type':'waterfall','preference':'raw','profile':'mobile'})
+        await sockets[0].send_json({'type':'waterfall','preference':'high','profile':'low'})
         await self.event(sockets[0],'error')
 
     async def test_server_side_waterfall_speeds(self):
         sockets=[await self.connect() for _ in range(3)]
+        slow=await self.connect()
+        await slow.send_json({'type':'waterfall','preference':'slow','profile':'slow'})
+        await self.event(slow,'waterfall-profile')
         divisors=(1,2,6)
         for ws,divisor in zip(sockets,divisors):
             await ws.send_json({'type':'waterfall-speed','divisor':divisor})
@@ -266,12 +270,14 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
                 except asyncio.TimeoutError:continue
                 if msg.type==WSMsgType.BINARY and msg.data[0]==7:found.append(decode(msg.data[1:])[1])
             return found
-        received=await asyncio.gather(*(sequences(ws) for ws in sockets))
+        received=await asyncio.gather(*(sequences(ws) for ws in sockets),sequences(slow))
         for values,divisor,minimum in zip(received,divisors,(20,10,3)):
             self.assertGreaterEqual(len(values),minimum)
             self.assertTrue(all(sequence%divisor==0 for sequence in values[-3:]))
         self.assertGreater(len(received[0]),len(received[1])*1.5)
         self.assertGreater(len(received[1]),len(received[2])*2)
+        self.assertGreaterEqual(len(received[3]),18)
+        self.assertLess(len(received[3]),len(received[0]))
 
     async def test_origins_controls_and_assets(self):
         for origin in ['null','https://untrusted.example']:

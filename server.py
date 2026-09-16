@@ -23,7 +23,7 @@ from opus_codec import OPUS_AVAILABLE, OpusEncoder
 from waterfall_codec import encode as encode_waterfall
 
 ROOT = Path(__file__).resolve().parent
-VERSION = "0.3.4-dev"
+VERSION = "0.3.5-dev"
 MODES = {"USB": (300, 2700), "LSB": (-2700, -300), "AM": (-4000, 4000),
          "CW": (450, 950), "NFM": (-5000, 5000)}
 
@@ -300,6 +300,8 @@ class Gateway:
         if not client:
             return
         client["waterfall_profile"] = profile
+        client["waterfall_phase"] = 0
+        client["waterfall_emitted"] = 0
         if preference is not None: client["waterfall_preference"] = preference
         if ceiling is not None: client["waterfall_ceiling"] = ceiling
         self.publish(json.dumps({"type":"waterfall-profile", "preference":client["waterfall_preference"],
@@ -372,7 +374,16 @@ class Gateway:
         compressed = {}
         for ident, client in tuple(self.clients.items()):
             profile = client["waterfall_profile"]
-            if sequence % client["waterfall_speed"]: continue
+            if profile == "slow":
+                # The FFT produces 125 rows every 16 seconds. Emit 96 of
+                # those rows for an exact long-term cadence of 6 fps.
+                client["waterfall_phase"] += 96
+                if client["waterfall_phase"] < 125: continue
+                client["waterfall_phase"] -= 125
+                emitted = client["waterfall_emitted"]
+                client["waterfall_emitted"] += 1
+                if emitted % client["waterfall_speed"]: continue
+            elif sequence % client["waterfall_speed"]: continue
             zoom, view_center = client["waterfall_zoom"], client["waterfall_center"]
             span = round(1024000/zoom)
             lower = round(view_center-span/2)
@@ -419,7 +430,7 @@ class Gateway:
             self.metrics = {"cpu_percent": round(max(0, current-previous)/elapsed*100, 1),
                             "kbps": round((self.sent_bytes-sent)*8/elapsed/1000, 1)}
             previous, last, sent = current, now, self.sent_bytes
-            levels = ["mobile", "exp1024", "exp2048", "balanced", "exp4096", "raw"]
+            levels = ["slow", "low", "balanced", "high"]
             for ident, client in tuple(self.clients.items()):
                 rate = round((client["sent_bytes"]-client["last_sent"])*8/elapsed/1000, 1)
                 client["last_sent"] = client["sent_bytes"]
@@ -601,9 +612,9 @@ class Gateway:
         client = {"queue": queue, "reliable": asyncio.Queue(maxsize=64), "wake": asyncio.Event(),
                   "closing": False, "settings": settings, "ws": ws, "name": "", "key": "", "address": address,
                   "chat_tokens": 4.0, "chat_last": time.monotonic(), "history_last": 0,
-                  "waterfall_profile": "raw", "waterfall_preference": "raw", "waterfall_ceiling": "raw",
+                  "waterfall_profile": "balanced", "waterfall_preference": "balanced", "waterfall_ceiling": "balanced",
                   "waterfall_zoom": 1.0, "waterfall_center": 7100500,
-                  "waterfall_speed": 1,
+                  "waterfall_speed": 1, "waterfall_phase": 0, "waterfall_emitted": 0,
                   "congestion": 0, "stable_intervals": 0, "sent_bytes": 0, "last_sent": 0,
                   "audio_enabled": False, "audio_profile": "balanced",
                   "opus_encoder": None, "opus_pending": bytearray(), "opus_sequence": 0}
@@ -654,7 +665,7 @@ class Gateway:
                         continue
                     if update.get("type") == "waterfall":
                         preference, profile = update.get("preference"), update.get("profile")
-                        profiles = ("auto", "mobile", "exp1024", "exp2048", "exp4096", "balanced", "raw")
+                        profiles = ("auto", "slow", "low", "balanced", "high")
                         if preference not in profiles or profile not in profiles[1:]:
                             raise ValueError("Perfil de cascada desconocido")
                         if preference != "auto" and preference != profile:
@@ -675,8 +686,9 @@ class Gateway:
                         if type(speed) is not int or speed not in (1,2,6):
                             raise ValueError("Velocidad de cascada inválida")
                         client["waterfall_speed"] = speed
+                        client["waterfall_emitted"] = 0
                         self.publish(json.dumps({"type":"waterfall-speed", "divisor":speed,
-                            "fps":{1:7.8,2:3.9,6:1.3}[speed]}), ident)
+                            "fps":round((6 if client["waterfall_profile"] == "slow" else 7.8)/speed, 1)}), ident)
                         continue
                     if update.get("type") == "audio":
                         enabled = update.get("enabled")

@@ -16,9 +16,9 @@
 <div class="ctl identity-control"><label><b>Nombre o indicativo / callsign:</b> <input id="username" maxlength="32" autocomplete="nickname" placeholder="Sin identificar"></label></div>
 <div class="ctl stream-profile-control" aria-label="Calidad de transmisión">
 <label><b>Audio:</b> <select id="audio-quality"><option value="raw">raw</option><option value="balanced" selected>balanceado</option><option value="mobile">bajo consumo</option></select></label>
-<label><b>Cascada:</b> <select id="waterfall-quality"><option value="auto">automático</option><option value="mobile">bajo consumo</option><option value="balanced" selected>balanceado</option><option value="raw">sin pérdida</option><option value="exp1024">1024@8</option><option value="exp2048">2048@8</option><option value="exp4096">4096@8</option></select></label>
+<label><b>Cascada:</b> <select id="waterfall-quality"><option value="auto">automático</option><option value="slow">conexión lenta</option><option value="low">baja definición</option><option value="balanced" selected>balanceado</option><option value="high">alta definición</option></select></label>
 <small id="audio-profile-status">Opus · 32 kb/s · 16 kHz</small><small id="waterfall-profile-status">Negociando cascada…</small>
-<p id="stream-warning" role="status" aria-live="polite" hidden>Se detectaron cortes en la transmisión. Prueba Audio: Opus bajo consumo y Cascada: bajo consumo.</p></div>
+<p id="stream-warning" role="status" aria-live="polite" hidden>Se detectaron cortes en la transmisión. Prueba Audio: Opus bajo consumo y Cascada: conexión lenta.</p></div>
 <div id="panorama"><canvas id="waterfall" width="1024" height="100" aria-label="Cascada de señales. Pulse para sintonizar."></canvas>
 <div id="spectrum-axis" hidden aria-label="Escala vertical del espectro en dBFS"></div>
 <canvas id="scale" width="1024" height="44" tabindex="0" role="slider" aria-label="Dial de sintonía" aria-valuemin="6600.5" aria-valuemax="7600.5" aria-valuenow="7100"></canvas><div id="markers" aria-label="Etiquetas de frecuencias"></div></div>

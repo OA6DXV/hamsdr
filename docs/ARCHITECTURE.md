@@ -46,7 +46,7 @@ protocol v2 carries every profile with its frequency window and sequence. A shar
 65536-bin FFT lets the gateway project a client's zoom to at most 1024, 2048 or
 4096 directly drawable bins without increasing packet size. Audio delivery is separately
 negotiated and defaults off; disabling it purges queued PCM or Opus before the server
-acknowledges the state. The private protocol is experimental;
+acknowledges the state. The private protocol is versioned;
 waterfall cadence is negotiated per client at 7.8, 3.9 or 1.3 rows/s, so a
 slower display setting reduces transport instead of discarding browser frames.
 version negotiation is required before any stable release. Browsers without a
