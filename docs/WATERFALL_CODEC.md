@@ -1,6 +1,6 @@
 # Experimental waterfall protocol v2
 
-The waterfall codec remains independent from the separately selectable PCM/ADPCM
+The waterfall codec remains independent from the separately selectable PCM/Opus
 audio profile. Browser binary kind `7` contains one independently
 decodable row:
 

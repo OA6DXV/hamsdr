@@ -33,15 +33,13 @@ or 4,096 bins at 8 bits. Slower waterfall settings reduce transmission at the se
 
 Audio and waterfall quality are selected independently. Audio offers:
 
-- Original: PCM16 mono at 16 kHz.
-- Balanced: IMA ADPCM mono at 16 kHz.
-- Low bandwidth: IMA ADPCM mono at 8 kHz.
-- Opus high quality: 32 kbit/s, wideband mono input at 16 kHz.
-- Opus low bandwidth: 12 kbit/s, narrowband mono input at 16 kHz.
+- Raw: PCM16 mono at 16 kHz.
+- Balanced: Opus at 32 kbit/s, wideband mono input at 16 kHz.
+- Low bandwidth: Opus at 12 kbit/s, narrowband mono input at 16 kHz.
 
-Balanced ADPCM is the default for a new browser. Opus is encoded by system
+Balanced Opus is the default for a new browser. Opus is encoded by system
 `libopus`, decoded through browser WebCodecs and passed into the same
-AudioWorklet. Unsupported clients fall back to ADPCM. Audio is opt-in: pausing
+AudioWorklet. Unsupported clients fall back to raw PCM16. Audio is opt-in: pausing
 it stops its network frames instead of applying only a local mute. WAV
 recording follows the decoded audio sample rate.
 
@@ -91,7 +89,7 @@ Native TLS and a reverse proxy should not be enabled on the same listener.
 
 When `[secure].enable` is false and the page is opened directly over HTTP,
 HamSDR falls back to the deprecated but widely compatible ScriptProcessor Web
-Audio path. It keeps the PCM/ADPCM stream interactive with a short buffer, but
+Audio path. It keeps the PCM/Opus stream interactive with a short buffer, but
 is not expected to survive iOS background suspension. Secure pages continue to
 use AudioWorklet, including the existing background behavior.
 
@@ -128,7 +126,6 @@ only for controlled diagnostics.
 
 ```sh
 .venv/bin/python tests/integration_test.py -v
-.venv/bin/python tests/audio_codec_tests.py -v
 .venv/bin/python tests/opus_codec_tests.py -v
 .venv/bin/python tests/history_tests.py -v
 .venv/bin/python tests/waterfall_codec_tests.py -v

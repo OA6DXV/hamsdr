@@ -38,6 +38,8 @@ async def main():
             await expect(page.locator('label').filter(has=page.locator('#wfmode'))).to_contain_text('Gráfico:')
             await expect(page.locator('label').filter(has=page.locator('#waterfall-quality'))).to_contain_text('Cascada:')
             await expect(page.locator('label').filter(has=page.locator('#audio-quality'))).to_contain_text('Audio:')
+            self_audio_options=await page.locator('#audio-quality option').evaluate_all('(options)=>options.map(option=>[option.value,option.textContent])')
+            assert self_audio_options==[['raw','raw'],['balanced','balanceado'],['mobile','bajo consumo']]
             assert await page.locator('.stream-profile-control #audio-quality').count()==1
             assert await page.locator('.stream-profile-control #waterfall-quality').count()==1
             assert await page.locator('.waterfall-panel #waterfall-quality').count()==0
@@ -95,18 +97,15 @@ async def main():
             assert await page.locator('html').get_attribute('data-audio-engine')==('worklet' if secure_context else 'classic')
             await expect(page.locator('#audio-status')).to_have_attribute('data-rms',re.compile(r'^0\.(?:[1-9]|0[1-9]|00[1-9])'),timeout=15000)
             await page.locator('#audio-quality').select_option('balanced')
-            await expect(page.locator('#audio-profile-status')).to_contain_text('IMA ADPCM · 16 kHz')
+            await expect(page.locator('#audio-profile-status')).to_contain_text('Opus · 32 kb/s')
             await page.locator('#audio-quality').select_option('mobile')
-            await expect(page.locator('#audio-profile-status')).to_contain_text('IMA ADPCM · 8 kHz')
+            await expect(page.locator('#audio-profile-status')).to_contain_text('Opus · 12 kb/s')
             await expect(page.locator('#audio-status')).to_have_attribute('data-rms',re.compile(r'^0\.(?:[1-9]|0[1-9]|00[1-9])'),timeout=15000)
             await page.locator('#audio-status').evaluate("e=>e.removeAttribute('data-rms')")
-            await page.locator('#audio-quality').select_option('opus-high')
-            await expect(page.locator('#audio-profile-status')).to_contain_text('Opus · 32 kb/s' if secure_context else 'IMA ADPCM · 16 kHz')
+            await page.locator('#audio-quality').select_option('raw')
+            await expect(page.locator('#audio-profile-status')).to_contain_text('PCM16 · 16 kHz')
             await expect(page.locator('#audio-status')).to_have_attribute('data-rms',re.compile(r'^0\.(?:[1-9]|0[1-9]|00[1-9])'),timeout=15000)
             await page.locator('#audio-status').evaluate("e=>e.removeAttribute('data-rms')")
-            await page.locator('#audio-quality').select_option('opus-low')
-            await expect(page.locator('#audio-profile-status')).to_contain_text('Opus · 12 kb/s' if secure_context else 'IMA ADPCM · 8 kHz')
-            await expect(page.locator('#audio-status')).to_have_attribute('data-rms',re.compile(r'^0\.(?:[1-9]|0[1-9]|00[1-9])'),timeout=15000)
             await page.locator('#listen').click()
             await expect(page.locator('#listen')).to_have_text('Iniciar audio')
             await expect(page.locator('#listen')).to_have_attribute('aria-pressed','false')
@@ -182,7 +181,7 @@ async def main():
             await page.locator('#notch').uncheck()
             await page.locator('#nr').select_option('0')
             recording_profile=await page.locator('#audio-quality').input_value()
-            recording_rate=8000 if recording_profile=='mobile' else 48000 if recording_profile.startswith('opus-') else 16000
+            recording_rate=16000 if recording_profile=='raw' else 48000
             await page.locator('#record').click()
             await page.wait_for_timeout(2000)
             await page.locator('#record').click()

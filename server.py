@@ -18,13 +18,12 @@ import tomllib
 from urllib.parse import urlsplit
 
 from aiohttp import web, WSMsgType
-from audio_codec import downsample_2, encode_ima_adpcm, pcm16le_samples
 from community import History, plain_text
 from opus_codec import OPUS_AVAILABLE, OpusEncoder
 from waterfall_codec import encode as encode_waterfall
 
 ROOT = Path(__file__).resolve().parent
-VERSION = "0.3.3-dev"
+VERSION = "0.3.4-dev"
 MODES = {"USB": (300, 2700), "LSB": (-2700, -300), "AM": (-4000, 4000),
          "CW": (450, 950), "NFM": (-5000, 5000)}
 
@@ -264,8 +263,7 @@ class Gateway:
     def info(self):
         return {"type": "status", "version": VERSION, "source": self.source, "users": len(self.clients),
                 "center": 7100500, "sample_rate": 1024000, "audio_rate": 16000,
-                "audio_profiles": {"original": 16000, "balanced": 16000, "mobile": 8000,
-                                   "opus-high": 16000, "opus-low": 16000},
+                "audio_profiles": {"raw": 16000, "balanced": 16000, "mobile": 16000},
                 "opus_available": OPUS_AVAILABLE,
                 "fft_size": 65536, "demo": self.args.demo, "restarts": self.restarts,
                 "dropped": self.dropped, **self.metrics}
@@ -316,7 +314,7 @@ class Gateway:
             retained = []
             while not client["queue"].empty():
                 packet = client["queue"].get_nowait()
-                if not isinstance(packet, bytes) or not packet or packet[0] not in (2, 8, 9, 10, 11): retained.append(packet)
+                if not isinstance(packet, bytes) or not packet or packet[0] not in (2, 10, 11): retained.append(packet)
             for packet in retained: client["queue"].put_nowait(packet)
         self.publish(json.dumps({"type":"audio-state", "enabled":enabled,
             "profile":client["audio_profile"]}), ident)
@@ -324,18 +322,17 @@ class Gateway:
     def audio_profile(self, ident, profile):
         client = self.clients.get(ident)
         if not client: return
-        if profile.startswith("opus-") and not OPUS_AVAILABLE:
+        if profile in ("balanced", "mobile") and not OPUS_AVAILABLE:
             raise ValueError("Opus no está disponible en el servidor")
         client["audio_profile"] = profile
         self.reset_audio_codec(client)
         retained = []
         while not client["queue"].empty():
             packet = client["queue"].get_nowait()
-            if not isinstance(packet, bytes) or not packet or packet[0] not in (2, 8, 9, 10, 11): retained.append(packet)
+            if not isinstance(packet, bytes) or not packet or packet[0] not in (2, 10, 11): retained.append(packet)
         for packet in retained: client["queue"].put_nowait(packet)
-        details = {"original":("pcm16",16000,256000), "balanced":("ima-adpcm",16000,64000),
-                   "mobile":("ima-adpcm",8000,32000), "opus-high":("opus",16000,32000),
-                   "opus-low":("opus",16000,12000)}[profile]
+        details = {"raw":("pcm16",16000,256000), "balanced":("opus",16000,32000),
+                   "mobile":("opus",16000,12000)}[profile]
         self.publish(json.dumps({"type":"audio-profile", "profile":profile,
             "codec":details[0], "rate":details[1], "bitrate":details[2]}), ident)
 
@@ -347,35 +344,27 @@ class Gateway:
         client["opus_encoder"] = None
         client["opus_pending"] = bytearray()
         client["opus_sequence"] = 0
-        client["adpcm_state"] = (0, 0)
 
     def publish_audio(self, ident, data):
         client = self.clients.get(ident)
         if not client or not client["audio_enabled"]:
             return
         profile = client["audio_profile"]
-        if profile == "original":
+        if profile == "raw":
             self.publish(bytes([2])+data, ident)
             return
-        if profile.startswith("opus-"):
-            if client["opus_encoder"] is None:
-                client["opus_encoder"] = OpusEncoder(32000 if profile == "opus-high" else 12000,
-                                                       profile == "opus-low")
-            pending = client["opus_pending"]
-            pending.extend(data)
-            frame_bytes = OpusEncoder.FRAME_SAMPLES * 2
-            while len(pending) >= frame_bytes:
-                packet = client["opus_encoder"].encode_pcm16le(pending[:frame_bytes])
-                del pending[:frame_bytes]
-                sequence = client["opus_sequence"]
-                client["opus_sequence"] = (sequence+1) & 0xffffffff
-                self.publish(bytes([10 if profile == "opus-high" else 11])+struct.pack("<I",sequence)+packet, ident)
-            return
-        samples = pcm16le_samples(data)
-        if profile == "mobile":
-            samples = downsample_2(samples)
-        encoded, client["adpcm_state"] = encode_ima_adpcm(samples, client["adpcm_state"])
-        self.publish(bytes([9 if profile == "mobile" else 8])+encoded, ident)
+        if client["opus_encoder"] is None:
+            client["opus_encoder"] = OpusEncoder(32000 if profile == "balanced" else 12000,
+                                                   profile == "mobile")
+        pending = client["opus_pending"]
+        pending.extend(data)
+        frame_bytes = OpusEncoder.FRAME_SAMPLES * 2
+        while len(pending) >= frame_bytes:
+            packet = client["opus_encoder"].encode_pcm16le(pending[:frame_bytes])
+            del pending[:frame_bytes]
+            sequence = client["opus_sequence"]
+            client["opus_sequence"] = (sequence+1) & 0xffffffff
+            self.publish(bytes([10 if profile == "balanced" else 11])+struct.pack("<I",sequence)+packet, ident)
 
     def publish_spectrum(self, data):
         sequence = self.waterfall_sequence
@@ -616,7 +605,7 @@ class Gateway:
                   "waterfall_zoom": 1.0, "waterfall_center": 7100500,
                   "waterfall_speed": 1,
                   "congestion": 0, "stable_intervals": 0, "sent_bytes": 0, "last_sent": 0,
-                  "audio_enabled": False, "audio_profile": "original", "adpcm_state": (0, 0),
+                  "audio_enabled": False, "audio_profile": "balanced",
                   "opus_encoder": None, "opus_pending": bytearray(), "opus_sequence": 0}
         self.clients[ident] = client
         sender = None
@@ -696,7 +685,7 @@ class Gateway:
                         continue
                     if update.get("type") == "audio-profile":
                         profile = update.get("profile")
-                        if profile not in ("original", "balanced", "mobile", "opus-high", "opus-low"):
+                        if profile not in ("raw", "balanced", "mobile"):
                             raise ValueError("Perfil de audio desconocido")
                         self.audio_profile(ident, profile)
                         continue

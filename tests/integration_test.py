@@ -13,7 +13,6 @@ import uuid
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from aiohttp import ClientSession, WSServerHandshakeError, WSMsgType, web
 from server import application, GATEWAY
-from audio_codec import decode_ima_adpcm
 from opus_codec import OPUS_AVAILABLE, OpusDecoder
 from waterfall_codec import decode
 
@@ -114,6 +113,9 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
             {'type':'waterfall','preference':'broken','profile':'raw'},
             {'type':'waterfall-speed','divisor':3},
             {'type':'audio-profile','profile':'mp3'},
+            {'type':'audio-profile','profile':'original'},
+            {'type':'audio-profile','profile':'opus-high'},
+            {'type':'audio-profile','profile':'opus-low'},
             {'type':'audio','enabled':'yes'},
             {'type':'tune','nr':99}, {'type':'tune','notch':'yes'}]:
             await ws.send_json(update);await self.event(ws,'error')
@@ -133,6 +135,8 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
                 if msg.type==WSMsgType.TEXT and json.loads(msg.data).get('type')=='tuned':return
 
     async def collect(self,ws,n=8000):
+        await ws.send_json({'type':'audio-profile','profile':'raw'})
+        await self.event(ws,'audio-profile')
         await ws.send_json({'type':'audio','enabled':True})
         await self.event(ws,'audio-state')
         audio=[]; rows=0
@@ -150,6 +154,7 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_audio_subscription_stops_network_pcm(self):
         ws=await self.connect()
+        await ws.send_json({'type':'audio-profile','profile':'raw'});await self.event(ws,'audio-profile')
         await ws.send_json({'type':'audio','enabled':True});await self.event(ws,'audio-state')
         async with asyncio.timeout(3):
             while True:
@@ -160,13 +165,12 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
         while asyncio.get_running_loop().time()<deadline:
             try:message=await asyncio.wait_for(ws.receive(),.2)
             except asyncio.TimeoutError:continue
-            self.assertFalse(message.type==WSMsgType.BINARY and message.data[0] in (2,8,9,10,11))
+            self.assertFalse(message.type==WSMsgType.BINARY and message.data[0] in (2,10,11))
 
     @unittest.skipUnless(OPUS_AVAILABLE, "system libopus unavailable")
-    async def test_five_audio_profiles(self):
-        expected={"original":(2,513,513,256,16000),"balanced":(8,133,133,256,16000),
-                  "mobile":(9,69,69,128,8000),"opus-high":(10,6,205,320,16000),
-                  "opus-low":(11,6,105,320,16000)}
+    async def test_three_audio_profiles(self):
+        expected={"raw":(2,513,513,256,16000),"balanced":(10,6,205,320,16000),
+                  "mobile":(11,6,105,320,16000)}
         for profile,(kind,minimum,maximum,count,rate) in expected.items():
             ws=await self.connect()
             await self.tune(ws,'USB',7100000)
@@ -177,13 +181,11 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
             async with asyncio.timeout(3):
                 while True:
                     message=await ws.receive()
-                    if message.type!=WSMsgType.BINARY or message.data[0] not in (2,8,9,10,11):continue
+                    if message.type!=WSMsgType.BINARY or message.data[0] not in (2,10,11):continue
                     self.assertEqual(message.data[0],kind)
                     self.assertTrue(minimum<=len(message.data)<=maximum,len(message.data))
                     if kind==2:
                         samples=struct.unpack('<'+'h'*count,message.data[1:])
-                    elif kind in (8,9):
-                        samples=decode_ima_adpcm(message.data[1:],count)
                     else:
                         if 'decoder' not in locals() or decoder_profile!=profile:
                             decoder,decoder_profile=OpusDecoder(),profile
