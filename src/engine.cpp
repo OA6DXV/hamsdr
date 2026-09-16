@@ -35,9 +35,10 @@ int main(int argc,char** argv) {
     const bool demo=std::string(argv[1])=="--demo";
     std::mutex mutex;
     std::map<unsigned,std::unique_ptr<hamsdr::Receiver>> receivers;
-    // Two 65536-point FFTs yield 7.8 shared multiresolution rows/second.
+    // Each 65536-point FFT yields 15.625 shared rows/second. The gateway
+    // selects per-client cadences from this stream without repeating rows.
     // At maximum 64x zoom the 16 kHz viewport still contains 1024 real bins.
-    auto spectrum=std::make_unique<hamsdr::SpectrumEngine>(hamsdr::SpectrumConfig{65536,2,-120,0});
+    auto spectrum=std::make_unique<hamsdr::SpectrumEngine>(hamsdr::SpectrumConfig{65536,1,-120,0});
     auto consume=[&](std::span<const std::complex<float>> iq) {
         std::scoped_lock lock(mutex);
         if (receivers.empty()) return;
@@ -82,7 +83,7 @@ int main(int argc,char** argv) {
             [&](auto event){
                 if (event=="streaming") {
                     std::scoped_lock lock(mutex);
-                    spectrum=std::make_unique<hamsdr::SpectrumEngine>(hamsdr::SpectrumConfig{65536,2,-120,0});
+                    spectrum=std::make_unique<hamsdr::SpectrumEngine>(hamsdr::SpectrumConfig{65536,1,-120,0});
                 }
                 state(event);
             });

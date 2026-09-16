@@ -26,11 +26,12 @@ an `rtl_tcp`-compatible endpoint and must already be configured by its owning
 process. Each browser can tune and demodulate independently without changing
 the shared hardware.
 
-The spectrum source contains 65,536 bins at approximately 7.8 rows per second.
-All waterfall profiles preserve 8-bit levels with lossless differential encoding:
-connection slow uses 1,024 bins at 6 fps, low definition uses 1,024 bins,
+The spectrum source contains 65,536 bins at 15.625 rows per second. Connection
+slow uses 1,024 bins at 6 bits and 5 fps. The remaining profiles preserve 8-bit
+levels with lossless differential encoding: low definition uses 1,024 bins,
 balanced uses 2,048 bins and high definition uses 4,096 bins. Balanced is the
-default on every device. Slower waterfall settings reduce transmission at the server.
+default on every device. High definition unlocks an 11.7 fps high-speed mode.
+Slower waterfall settings reduce transmission at the server.
 
 Audio and waterfall quality are selected independently. Audio offers:
 

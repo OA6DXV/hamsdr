@@ -112,6 +112,7 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
             {'type':'history','before':float('nan')},
             {'type':'waterfall','preference':'broken','profile':'raw'},
             {'type':'waterfall-speed','divisor':3},
+            {'type':'waterfall-speed','divisor':'high'},
             {'type':'audio-profile','profile':'mp3'},
             {'type':'audio-profile','profile':'original'},
             {'type':'audio-profile','profile':'opus-high'},
@@ -237,7 +238,7 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
                     if msg.type!=WSMsgType.BINARY:continue
                     if msg.data[0]==7:
                         code,sequence,lower,span,data=decode(msg.data[1:])
-                        self.assertEqual((code,lower,span,len(data)),((4,4,5,6)[index],6588500,1024000,(1024,1024,2048,4096)[index]))
+                        self.assertEqual((code,lower,span,len(data)),((7,4,5,6)[index],6588500,1024000,(1024,1024,2048,4096)[index]))
                         counts[index]+=1;sequences[index].append(sequence)
         await asyncio.gather(*(rows(i,ws) for i,ws in enumerate(sockets)))
         self.assertTrue(all(b>a for values in sequences for a,b in zip(values,values[1:])))
@@ -257,6 +258,12 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
         slow=await self.connect()
         await slow.send_json({'type':'waterfall','preference':'slow','profile':'slow'})
         await self.event(slow,'waterfall-profile')
+        fast=await self.connect()
+        await fast.send_json({'type':'waterfall','preference':'high','profile':'high'})
+        await self.event(fast,'waterfall-profile')
+        await fast.send_json({'type':'waterfall-speed','divisor':'high'})
+        fast_reply=await self.event(fast,'waterfall-speed')
+        self.assertEqual((fast_reply['divisor'],fast_reply['fps']),('high',11.7))
         divisors=(1,2,6)
         for ws,divisor in zip(sockets,divisors):
             await ws.send_json({'type':'waterfall-speed','divisor':divisor})
@@ -270,14 +277,15 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
                 except asyncio.TimeoutError:continue
                 if msg.type==WSMsgType.BINARY and msg.data[0]==7:found.append(decode(msg.data[1:])[1])
             return found
-        received=await asyncio.gather(*(sequences(ws) for ws in sockets),sequences(slow))
+        received=await asyncio.gather(*(sequences(ws) for ws in sockets),sequences(slow),sequences(fast))
         for values,divisor,minimum in zip(received,divisors,(20,10,3)):
             self.assertGreaterEqual(len(values),minimum)
-            self.assertTrue(all(sequence%divisor==0 for sequence in values[-3:]))
         self.assertGreater(len(received[0]),len(received[1])*1.5)
         self.assertGreater(len(received[1]),len(received[2])*2)
         self.assertGreaterEqual(len(received[3]),18)
         self.assertLess(len(received[3]),len(received[0]))
+        self.assertGreaterEqual(len(received[4]),40)
+        self.assertGreater(len(received[4]),len(received[0])*1.3)
 
     async def test_origins_controls_and_assets(self):
         for origin in ['null','https://untrusted.example']:

@@ -56,7 +56,8 @@ async def main():
             await expect(page.locator('#stream-warning')).to_contain_text('Cascada: conexión lenta')
             assert await page.locator('#stream-warning').evaluate("e=>getComputedStyle(e).color==='rgb(196, 0, 0)'")
             await page.locator('#stream-warning').evaluate("e=>e.hidden=true")
-            assert await page.locator('#wfspeed option').all_text_contents()==['normal','lento','muy lento']
+            assert await page.locator('#wfspeed option').all_text_contents()==['alta','normal','lento','muy lento']
+            assert await page.locator('#speed-high').evaluate('option=>option.disabled&&option.hidden')
             await expect(page.locator('#send-chat')).to_be_enabled()
             await expect(page.locator('#waterfall')).to_have_attribute('data-frames',re.compile(r'^[1-9][0-9]+$'))
             await expect(page.locator('#waterfall')).to_have_attribute('data-speed','1')
@@ -86,6 +87,13 @@ async def main():
             for profile in ('slow','low','balanced','high'):
                 await page.locator('#waterfall-quality').select_option(profile)
                 await expect(page.locator('#waterfall')).to_have_attribute('data-profile',profile)
+            assert await page.locator('#speed-high').evaluate('option=>!option.disabled&&!option.hidden')
+            await page.locator('#wfspeed').select_option('high')
+            await expect(page.locator('#waterfall')).to_have_attribute('data-speed','high')
+            await expect(page.locator('#waterfall-profile-status')).to_contain_text('11.7 fps')
+            await page.locator('#waterfall-quality').select_option('balanced')
+            await expect(page.locator('#wfspeed')).to_have_value('1')
+            assert await page.locator('#speed-high').evaluate('option=>option.disabled&&option.hidden')
             await page.locator('#waterfall-quality').select_option('auto')
             await expect(page.locator('#waterfall')).to_have_attribute('data-profile',expected_profile)
             await page.locator('[data-mode="USB"]:not([data-narrow])').click()

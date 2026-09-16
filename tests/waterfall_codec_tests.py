@@ -9,14 +9,14 @@ class WaterfallCodecTests(unittest.TestCase):
     def test_profiles_are_lossless_and_preserve_peaks(self):
         row=bytearray(random.Random(7100).randrange(256) for _ in range(65536))
         row[32000:32064]=bytes([255])*64
-        for profile,bins,code in [('slow',1024,4),('low',1024,4),('balanced',2048,5),('high',4096,6)]:
+        for profile,bins,code,error in [('slow',1024,7,4),('low',1024,4,0),('balanced',2048,5,0),('high',4096,6,0)]:
             packet=encode(row,profile,123456,0,len(row),6588500,1024000)
             got_code,sequence,lower,span,decoded=decode(packet)
             self.assertEqual((got_code,sequence,lower,span,len(decoded)),(code,123456,6588500,1024000,bins))
             self.assertEqual(decoded[bins*32000//65536],255)
             group=len(row)//bins
             expected=[max(row[i:i+group]) for i in range(0,len(row),group)]
-            self.assertEqual(expected,list(decoded))
+            self.assertLessEqual(max(abs(a-b) for a,b in zip(expected,decoded)),error)
 
     def test_zoom_window_has_real_bins_and_metadata(self):
         row=bytes(i%256 for i in range(65536))

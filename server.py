@@ -23,7 +23,7 @@ from opus_codec import OPUS_AVAILABLE, OpusEncoder
 from waterfall_codec import encode as encode_waterfall
 
 ROOT = Path(__file__).resolve().parent
-VERSION = "0.3.5-dev"
+VERSION = "0.3.6-dev"
 MODES = {"USB": (300, 2700), "LSB": (-2700, -300), "AM": (-4000, 4000),
          "CW": (450, 950), "NFM": (-5000, 5000)}
 
@@ -302,10 +302,14 @@ class Gateway:
         client["waterfall_profile"] = profile
         client["waterfall_phase"] = 0
         client["waterfall_emitted"] = 0
+        reset_speed = profile != "high" and client["waterfall_speed"] == "high"
+        if reset_speed: client["waterfall_speed"] = 1
         if preference is not None: client["waterfall_preference"] = preference
         if ceiling is not None: client["waterfall_ceiling"] = ceiling
         self.publish(json.dumps({"type":"waterfall-profile", "preference":client["waterfall_preference"],
             "profile":profile}), ident)
+        if reset_speed:
+            self.publish(json.dumps({"type":"waterfall-speed", "divisor":1, "fps":7.8}), ident)
 
     def audio_state(self, ident, enabled):
         client = self.clients.get(ident)
@@ -374,16 +378,18 @@ class Gateway:
         compressed = {}
         for ident, client in tuple(self.clients.items()):
             profile = client["waterfall_profile"]
-            if profile == "slow":
-                # The FFT produces 125 rows every 16 seconds. Emit 96 of
-                # those rows for an exact long-term cadence of 6 fps.
-                client["waterfall_phase"] += 96
-                if client["waterfall_phase"] < 125: continue
-                client["waterfall_phase"] -= 125
-                emitted = client["waterfall_emitted"]
-                client["waterfall_emitted"] += 1
-                if emitted % client["waterfall_speed"]: continue
-            elif sequence % client["waterfall_speed"]: continue
+            speed = client["waterfall_speed"]
+            # Source cadence is exactly 15.625 fps. Fractional accumulators
+            # select 5, 7.8125 or 11.71875 fps without duplicating rows.
+            numerator, denominator = ((8,25) if profile == "slow" else
+                                      (3,4) if speed == "high" else (1,2))
+            client["waterfall_phase"] += numerator
+            if client["waterfall_phase"] < denominator: continue
+            client["waterfall_phase"] -= denominator
+            emitted = client["waterfall_emitted"]
+            client["waterfall_emitted"] += 1
+            divisor = speed if isinstance(speed,int) else 1
+            if emitted % divisor: continue
             zoom, view_center = client["waterfall_zoom"], client["waterfall_center"]
             span = round(1024000/zoom)
             lower = round(view_center-span/2)
@@ -683,12 +689,16 @@ class Gateway:
                         continue
                     if update.get("type") == "waterfall-speed":
                         speed = update.get("divisor")
-                        if type(speed) is not int or speed not in (1,2,6):
+                        if speed == "high":
+                            if client["waterfall_profile"] != "high":
+                                raise ValueError("Velocidad alta requiere cascada en alta definición")
+                        elif type(speed) is not int or speed not in (1,2,6):
                             raise ValueError("Velocidad de cascada inválida")
                         client["waterfall_speed"] = speed
+                        client["waterfall_phase"] = 0
                         client["waterfall_emitted"] = 0
                         self.publish(json.dumps({"type":"waterfall-speed", "divisor":speed,
-                            "fps":round((6 if client["waterfall_profile"] == "slow" else 7.8)/speed, 1)}), ident)
+                            "fps":11.7 if speed == "high" else round((5 if client["waterfall_profile"] == "slow" else 7.8125)/speed, 1)}), ident)
                         continue
                     if update.get("type") == "audio":
                         enabled = update.get("enabled")

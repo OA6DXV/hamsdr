@@ -28,6 +28,8 @@ try {
 const canvas=$('waterfall'), ctx=canvas.getContext('2d'), scale=$('scale'), dial=scale.getContext('2d'), projectionCanvas=document.createElement('canvas');
 const lower=()=>viewCenter-rate/(2*zoom), width=()=>rate/zoom;
 const beat=()=>mode==='CW'?700:0;
+function waterfallFps(){if(waterfallSpeed==='high')return 11.71875;return(waterfallProfile==='slow'?5:7.8125)/waterfallSpeed;}
+function waterfallSourceGap(){if(waterfallSpeed==='high')return 4/3;return(waterfallProfile==='slow'?25/8:2)*waterfallSpeed;}
 function message(text=''){ $('message').textContent=text; }
 function reportStreamInterruption(reason){
   if(document.visibilityState==='hidden')return;
@@ -43,8 +45,8 @@ function reportStreamInterruption(reason){
 }
 window.reportStreamInterruption=reportStreamInterruption;
 function observeWaterfall(sequence){
-  const now=performance.now(),expected=Math.max(1,waterfallSpeed),delta=lastWaterfallSequence===null?expected:(sequence-lastWaterfallSequence)>>>0;
-  if(lastWaterfallSequence!==null&&(delta>expected*2||(lastWaterfallAt&&now-lastWaterfallAt>Math.max(1500,expected/7.8*3500))))reportStreamInterruption('waterfall');
+  const now=performance.now(),expected=waterfallSourceGap(),delta=lastWaterfallSequence===null?expected:(sequence-lastWaterfallSequence)>>>0;
+  if(lastWaterfallSequence!==null&&(delta>expected*2||(lastWaterfallAt&&now-lastWaterfallAt>Math.max(1500,3500/waterfallFps()))))reportStreamInterruption('waterfall');
   lastWaterfallSequence=sequence;lastWaterfallAt=now;
 }
 function resetOpusDecoder(){if(opusDecoder){if(opusDecoder.state!=='closed')opusDecoder.close();opusDecoder=null;}lastOpusSequence=null;}
@@ -96,11 +98,12 @@ function sendWaterfallPreference(forced){
   if(socket?.readyState===WebSocket.OPEN){socket.send(JSON.stringify({type:'waterfall',preference:waterfallPreference,profile}));lastProfileRequest=performance.now();}
 }
 function sendWaterfallView(){if(socket?.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type:'waterfall-view',zoom,center:Math.round(viewCenter)}));}
-function sendWaterfallSpeed(){if(socket?.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type:'waterfall-speed',divisor:Number($('wfspeed').value)}));}
+function sendWaterfallSpeed(){if(socket?.readyState===WebSocket.OPEN){const value=$('wfspeed').value;socket.send(JSON.stringify({type:'waterfall-speed',divisor:value==='high'?'high':Number(value)}));}}
 function sendAudioProfile(){if(socket?.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type:'audio-profile',profile:audioProfile}));}
 function showWaterfallProfile(){
-  const names={slow:'conexión lenta · 1024 bins/8 bits',low:'baja definición · 1024 bins/8 bits',balanced:'balanceado · 2048 bins/8 bits',high:'alta definición · 4096 bins/8 bits'};
-  const fps=(waterfallProfile==='slow'?6:7.8)/waterfallSpeed;
+  const names={slow:'conexión lenta · 1024 bins/6 bits',low:'baja definición · 1024 bins/8 bits',balanced:'balanceado · 2048 bins/8 bits',high:'alta definición · 4096 bins/8 bits'};
+  const highOption=$('speed-high'),unlocked=waterfallProfile==='high';highOption.hidden=!unlocked;highOption.disabled=!unlocked;
+  const fps=waterfallFps();
   $('waterfall-profile-status').textContent=`Activo: ${names[waterfallProfile]} · ${fps.toFixed(1).replace('.0','')} fps`;
   $('waterfall').dataset.profile=waterfallProfile;
 }
@@ -283,7 +286,7 @@ function connect(){
       }else if(msg.type==='waterfall-profile'){
         waterfallProfile=msg.profile;lastWaterfallSequence=null;lastWaterfallAt=0;showWaterfallProfile();
       }else if(msg.type==='waterfall-speed'){
-        waterfallSpeed=msg.divisor;lastWaterfallSequence=null;lastWaterfallAt=0;$('waterfall').dataset.speed=String(msg.divisor);showWaterfallProfile();
+        waterfallSpeed=msg.divisor;lastWaterfallSequence=null;lastWaterfallAt=0;$('wfspeed').value=String(msg.divisor);$('waterfall').dataset.speed=String(msg.divisor);showWaterfallProfile();
       }else if(msg.type==='stream-stats'){
         $('client-traffic').dataset.serverKbps=String(msg.kbps);
       }else if(msg.type==='audio-state'){
