@@ -31,6 +31,9 @@ class AudioProcessing {
 public:
     AudioProcessing(bool notch=false, unsigned reduction=0)
         : notch_enabled_(notch), reduction_(std::min(reduction,4U)) {}
+    void configure(bool notch, unsigned reduction) {
+        notch_enabled_=notch; reduction_=std::min(reduction,4U);
+    }
     float push(float x) {
         if (notch_enabled_) x-=notch_.push(x,24,0.04F);
         if (reduction_) {

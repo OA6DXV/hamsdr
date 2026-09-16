@@ -12,6 +12,7 @@ namespace hamsdr {
 class Receiver {
 public:
     Receiver(double offset, std::string mode, float low, float high, float squelch, bool notch=false, unsigned nr=0);
+    void configure(double offset, std::string mode, float low, float high, float squelch, bool notch=false, unsigned nr=0);
     std::vector<std::int16_t> push(std::span<const std::complex<float>> iq);
     float power_db() const;
 private:
@@ -20,10 +21,12 @@ private:
         std::size_t position{0};
         unsigned count{0}, decimation;
         Fir(unsigned size, float low, float high, float rate, unsigned decimation);
+        void retune(float low, float high, float rate);
         bool push(std::complex<float> x, std::complex<float>& out);
     };
     Fir first_, second_, channel_;
     std::complex<float> oscillator_{1,0}, rotation_, previous_{1,0};
+    double offset_;
     std::string mode_;
     float squelch_, power_{1e-12F}, envelope_{0.02F}, dc_x_{0}, dc_y_{0}, deemphasis_{0};
     unsigned phase_count_{0};

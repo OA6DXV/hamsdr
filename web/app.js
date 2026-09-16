@@ -24,7 +24,7 @@ try {
   const migratedAudio={original:'raw','opus-high':'balanced','opus-low':'mobile'}[savedAudio]||savedAudio;
   if(['raw','balanced','mobile'].includes(migratedAudio))audioProfile=migratedAudio;
 } catch {}
-const canvas=$('waterfall'), ctx=canvas.getContext('2d'), scale=$('scale'), dial=scale.getContext('2d');
+const canvas=$('waterfall'), ctx=canvas.getContext('2d'), scale=$('scale'), dial=scale.getContext('2d'), projectionCanvas=document.createElement('canvas');
 const lower=()=>viewCenter-rate/(2*zoom), width=()=>rate/zoom;
 const beat=()=>mode==='CW'?700:0;
 function message(text=''){ $('message').textContent=text; }
@@ -166,8 +166,8 @@ function controls(){
 function tune(){
   if(!Number.isFinite(frequency)||!Number.isFinite(low)||!Number.isFinite(high)||low < -6000||high > 6000||high-low<100){message('Revisa los límites del filtro (−6000 a 6000 Hz).');return;}
   frequency=Math.round(Math.max(center-500000,Math.min(center+500000,frequency)));
-  if(frequency<lower()||frequency>lower()+width()){ viewCenter=frequency; clampView(); redrawHistory();sendWaterfallView(); }
-  controls(); message(); resetAudio();
+  if(frequency<lower()||frequency>lower()+width()){const oldLower=lower(),oldWidth=width();viewCenter=frequency;clampView();reprojectWaterfall(oldLower,oldWidth);sendWaterfallView();}
+  controls(); message();
   clearTimeout(tuneTimer);
   tuneTimer=setTimeout(()=>{
     if(socket?.readyState===WebSocket.OPEN) socket.send(JSON.stringify({type:'tune',frequency,mode,low,high,squelch:$('squelch').checked?Number($('threshold').value):-150,notch:$('notch').checked,nr:Number($('nr').value)}));
@@ -176,9 +176,21 @@ function tune(){
 function clampView(){viewCenter=Math.max(center-rate/2+width()/2,Math.min(center+rate/2-width()/2,viewCenter));}
 function clearWaterfall(){ctx.fillStyle='#000';ctx.fillRect(0,0,canvas.width,canvas.height);}
 function redrawHistory(){clearWaterfall();lastDraw=0;const rows=spectrumHistory.slice(-canvas.height);if(isSpectrum()){if(rows.length)drawRow(rows.at(-1),true);}else for(const row of rows)drawRow(row,true);}
+function reprojectWaterfall(oldLower,oldWidth){
+  if(isSpectrum()){if(lastRow)drawRow(lastRow,true);return;}
+  const w=canvas.width,h=canvas.height,newLower=lower(),newWidth=width();
+  const start=Math.max(oldLower,newLower),end=Math.min(oldLower+oldWidth,newLower+newWidth);
+  if(projectionCanvas.width!==w)projectionCanvas.width=w;if(projectionCanvas.height!==h)projectionCanvas.height=h;
+  projectionCanvas.getContext('2d').drawImage(canvas,0,0);
+  clearWaterfall();if(end<=start)return;
+  const sx=(start-oldLower)/oldWidth*w,sw=(end-start)/oldWidth*w;
+  const dx=(start-newLower)/newWidth*w,dw=(end-start)/newWidth*w;
+  ctx.imageSmoothingEnabled=false;ctx.drawImage(projectionCanvas,sx,0,sw,h,dx,0,dw,h);
+}
 function changeZoom(next,anchor=frequency,fraction=.5){
+  const oldLower=lower(),oldWidth=width();
   zoom=Math.max(1,Math.min(64,next));viewCenter=anchor+(.5-fraction)*width();clampView();
-  $('zoom-label').value=`${zoom.toFixed(zoom<10?1:0).replace('.0','')}×`;redrawHistory();drawScale();sendWaterfallView();
+  $('zoom-label').value=`${zoom.toFixed(zoom<10?1:0).replace('.0','')}×`;reprojectWaterfall(oldLower,oldWidth);drawScale();sendWaterfallView();
 }
 function drawScale(){
   const w=scale.width; dial.fillStyle='#050505';dial.fillRect(0,0,w,44);dial.font='10px monospace';

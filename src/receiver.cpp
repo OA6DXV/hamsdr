@@ -8,12 +8,15 @@ namespace hamsdr {
 constexpr float pi = std::numbers::pi_v<float>;
 Receiver::Fir::Fir(unsigned size, float low, float high, float rate, unsigned dec)
     : taps(size), history(size), decimation(dec) {
+    retune(low,high,rate);
+}
+void Receiver::Fir::retune(float low, float high, float rate) {
     const float width = (high-low)/rate, center = (high+low)/(2*rate);
-    for (unsigned i=0; i<size; ++i) {
-        const float n = static_cast<float>(i) - static_cast<float>(size-1)/2;
+    for (unsigned i=0; i<taps.size(); ++i) {
+        const float n = static_cast<float>(i) - static_cast<float>(taps.size()-1)/2;
         const float sinc = n == 0 ? width : std::sin(pi*width*n)/(pi*n);
-        const float window = 0.42F-0.5F*std::cos(2*pi*static_cast<float>(i)/static_cast<float>(size-1))
-                             +0.08F*std::cos(4*pi*static_cast<float>(i)/static_cast<float>(size-1));
+        const float window = 0.42F-0.5F*std::cos(2*pi*static_cast<float>(i)/static_cast<float>(taps.size()-1))
+                             +0.08F*std::cos(4*pi*static_cast<float>(i)/static_cast<float>(taps.size()-1));
         const float phase=2*pi*center*n;
         taps[i] = sinc*window*std::complex<float>(std::cos(phase),std::sin(phase));
     }
@@ -34,11 +37,21 @@ Receiver::Receiver(double offset, std::string mode, float low, float high, float
     : first_(127,-40000,40000,1024000,8), second_(127,-6500,6500,128000,8),
       channel_(257,low,high,16000,1),
       rotation_(std::polar(1.0F, static_cast<float>(-2*std::numbers::pi*offset/1024000))),
-      mode_(std::move(mode)), squelch_(squelch), processing_(notch,nr) {
+      offset_(offset), mode_(std::move(mode)), squelch_(squelch), processing_(notch,nr) {
     if (!std::isfinite(offset) || std::abs(offset)>512000 || !std::isfinite(low) || !std::isfinite(high) ||
         low < -6000 || high > 6000 || high-low < 100 || !std::isfinite(squelch) ||
         (mode_!="AM" && mode_!="USB" && mode_!="LSB" && mode_!="CW" && mode_!="NFM"))
         throw std::invalid_argument("invalid receiver parameters");
+}
+void Receiver::configure(double offset, std::string mode, float low, float high, float squelch, bool notch, unsigned nr) {
+    if (!std::isfinite(offset) || std::abs(offset)>512000 || !std::isfinite(low) || !std::isfinite(high) ||
+        low < -6000 || high > 6000 || high-low < 100 || !std::isfinite(squelch) || nr>4 ||
+        (mode!="AM" && mode!="USB" && mode!="LSB" && mode!="CW" && mode!="NFM"))
+        throw std::invalid_argument("invalid receiver parameters");
+    if (offset!=offset_ || mode!=mode_) {previous_={1,0};deemphasis_=0;}
+    offset_=offset;mode_=std::move(mode);squelch_=squelch;
+    rotation_=std::polar(1.0F,static_cast<float>(-2*std::numbers::pi*offset/1024000));
+    channel_.retune(low,high,16000);processing_.configure(notch,nr);
 }
 float Receiver::power_db() const { return 10*std::log10(std::max(power_,1e-20F)); }
 std::vector<std::int16_t> Receiver::push(std::span<const std::complex<float>> iq) {

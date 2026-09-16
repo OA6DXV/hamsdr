@@ -101,7 +101,11 @@ int main(int argc,char** argv) {
             parser>>notch>>nr;
             if (notch>1 || nr>4) continue;
             if (!receivers.contains(id) && receivers.size()>=20) continue;
-            try { receivers[id]=std::make_unique<hamsdr::Receiver>(offset,mode,low,high,squelch,notch!=0,nr); }
+            try {
+                if (auto found=receivers.find(id);found!=receivers.end())
+                    found->second->configure(offset,mode,low,high,squelch,notch!=0,nr);
+                else receivers[id]=std::make_unique<hamsdr::Receiver>(offset,mode,low,high,squelch,notch!=0,nr);
+            }
             catch (const std::exception& e) { std::cerr<<e.what()<<'\n'; }
         }
     }

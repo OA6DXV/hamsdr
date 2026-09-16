@@ -15,11 +15,11 @@ async def main():
     Path("test-results").mkdir(exist_ok=True)
     async with async_playwright() as p:
         browser=await getattr(p,os.environ.get('BROWSER','chromium')).launch()
-        for viewport in [{"width":1440,"height":1000},{"width":768,"height":1024},{"width":390,"height":844}]:
+        for viewport in [{"width":2560,"height":1440},{"width":1440,"height":1000},{"width":768,"height":1024},{"width":390,"height":844}]:
             page=await browser.new_page(viewport=viewport)
             errors=[]
             page.on("pageerror",lambda error:errors.append(str(error)))
-            if viewport['width']==1440:
+            if viewport['width']>=1440:
                 async def delayed_community(route):
                     await asyncio.sleep(.75)
                     await route.continue_()
@@ -69,7 +69,7 @@ async def main():
             await expect(page.locator('#client-traffic')).to_have_text(re.compile(r'^(?:—|[0-9]+(?:\.[0-9]+)?) kb/s$'))
             await expect(page.locator('#client-traffic')).not_to_have_text('— kb/s',timeout=2000)
             expected_profile='mobile' if viewport['width']<=600 else 'balanced'
-            if viewport['width']==1440:
+            if viewport['width']>=1440:
                 await expect(page.locator('#audio-quality')).to_have_value('balanced')
             await expect(page.locator('#waterfall-quality')).to_have_value(expected_profile)
             await expect(page.locator('#waterfall')).to_have_attribute('data-profile',expected_profile)
@@ -77,7 +77,7 @@ async def main():
             assert await page.locator('#nr').evaluate("e=>e.closest('.signal-panel')!==null")
             layout=await page.evaluate("""()=>{const rect=s=>{const r=document.querySelector(s).getBoundingClientRect();return{x:r.x,y:r.y,w:r.width,right:r.right}};return{panorama:rect('#panorama'),controls:rect('.controls'),frequency:rect('.frequency-panel'),waterfall:rect('.waterfall-panel'),signal:rect('.signal-panel'),filter:rect('.filter-panel'),chat:rect('[aria-label=\"Chat en vivo\"]'),log:rect('[aria-label=\"Logbook\"]'),main:rect('main')}}""")
             assert abs(layout['panorama']['x']-layout['controls']['x'])<=1 and abs(layout['panorama']['right']-layout['controls']['right'])<=1,'receiver sections do not share margins'
-            if viewport['width']==1440:
+            if viewport['width']>=1440:
                 assert max(layout[name]['y'] for name in ('frequency','waterfall','signal','filter'))-min(layout[name]['y'] for name in ('frequency','waterfall','signal','filter'))<=1,'desktop control panels are not in one row'
                 assert abs(layout['chat']['y']-layout['log']['y'])<=1 and 2.8<=layout['chat']['w']/layout['log']['w']<=3.2,'community columns are not 3:1'
                 assert abs(layout['main']['x']-(viewport['width']-layout['main']['w'])/2)<=1,'page is not centered'
@@ -117,7 +117,8 @@ async def main():
             await page.locator('#listen').click()
             await expect(page.locator('#listen')).to_have_text('Pausar audio')
             history_before=int(await page.locator('#waterfall').get_attribute('data-history'))
-            await page.locator('#zoom-in').click()
+            zoom_block_ms=await page.locator('#zoom-in').evaluate("e=>{const start=performance.now();e.click();return performance.now()-start}")
+            assert zoom_block_ms<100,f'zoom blocked the browser main thread for {zoom_block_ms:.1f} ms'
             await expect(page.locator('#zoom-label')).to_have_text('2×')
             await expect(page.locator('#waterfall')).to_have_attribute('data-span','512000')
             history_after=int(await page.locator('#waterfall').get_attribute('data-history'))
@@ -135,8 +136,14 @@ async def main():
             await expect(page.locator('#frequency')).to_have_attribute('data-confirmed','7100000')
             await page.locator('[data-mode="USB"][data-narrow]').click()
             await expect(page.locator('#bandwidth')).to_have_text('1.70')
-            await page.locator('#filter-wide').click()
+            packets_before_controls=int(await page.locator('#audio-status').get_attribute('data-packets'))
+            filter_block_ms=await page.locator('#filter-wide').evaluate("e=>{const start=performance.now();e.click();return performance.now()-start}")
+            assert filter_block_ms<50,f'filter adjustment blocked the browser main thread for {filter_block_ms:.1f} ms'
             await expect(page.locator('#bandwidth')).to_have_text('1.80')
+            await page.wait_for_timeout(600)
+            packets_after_controls=int(await page.locator('#audio-status').get_attribute('data-packets'))
+            assert packets_after_controls>packets_before_controls,'audio stopped after zoom/filter adjustment'
+            await expect(page.locator('#stream-warning')).to_be_hidden()
             await page.locator('[data-mode="USB"]:not([data-narrow])').click()
             await page.locator('[data-step="1000"]').click()
             await expect(page.locator('#frequency')).to_have_attribute('data-confirmed','7101000')

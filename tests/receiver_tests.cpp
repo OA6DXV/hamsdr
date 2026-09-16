@@ -1,4 +1,5 @@
 #include "hamsdr/receiver.hpp"
+#include <algorithm>
 #include <cmath>
 #include <numbers>
 #include <iostream>
@@ -50,6 +51,23 @@ int main(){
     }
     auto muted=signal("USB",300,2700,1000,false,0);
     require(amplitude(muted,1000)==0,"squelch did not mute");
+    hamsdr::Receiver seamless(12300,"USB",300,2700,-150);
+    std::uint64_t sample_index=0;
+    auto iq_chunk=[&](std::size_t count){
+        std::vector<std::complex<float>> iq(count);
+        for(auto& x:iq){
+            const double t=static_cast<double>(sample_index++)/1024000.0;
+            const double phase=2*std::numbers::pi*(12300+1000)*t;
+            x=0.2F*std::complex<float>(std::cos(phase),std::sin(phase));
+        }
+        return iq;
+    };
+    seamless.push(iq_chunk(65536));
+    seamless.configure(12300,"USB",400,2600,-150,true,1);
+    const auto after_reconfigure=seamless.push(iq_chunk(16384));
+    require(after_reconfigure.size()==256,"reconfiguration changed audio cadence");
+    require(std::count_if(after_reconfigure.begin(),after_reconfigure.end(),[](auto x){return x!=0;})>128,
+            "reconfiguration inserted an audio dropout");
     bool threw=false;try{hamsdr::Receiver invalid(0,"USB",100,0,-150);}catch(const std::invalid_argument&){threw=true;}
     require(threw,"invalid filter accepted");
     std::cout<<"Receiver signal tests passed\n";
