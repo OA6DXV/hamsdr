@@ -847,4 +847,5 @@ if __name__ == "__main__":
         ssl_context = create_tls_context(args)
     except ValueError as error:
         parser.error(str(error))
-    web.run_app(application(args), host=args.bind, port=args.port, ssl_context=ssl_context, access_log=None)
+    web.run_app(application(args), host=args.bind, port=args.port, ssl_context=ssl_context,
+                shutdown_timeout=2, handler_cancellation=True, access_log=None)
