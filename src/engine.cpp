@@ -40,7 +40,7 @@ int main(int argc,char** argv) {
         const auto center=std::stoull(argv[3]),rate=std::stoull(argv[4]);
         const auto gain=std::stoll(argv[6]);
         if (!center || center>UINT32_MAX || rate!=1'024'000 ||
-            (gain_mode!="auto" && gain_mode!="manual") || gain < -1000 || gain > 1000) return 2;
+            (gain_mode!="auto" && gain_mode!="manual") || gain < 0 || gain > 500) return 2;
         center_frequency=static_cast<std::uint32_t>(center);
         sample_rate=static_cast<std::uint32_t>(rate);
         gain_tenth_db=static_cast<std::int32_t>(gain);
