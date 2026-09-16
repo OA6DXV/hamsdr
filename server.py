@@ -136,6 +136,7 @@ def load_runtime_config(requested=None):
         raise ValueError("site config: retention days must be 1..3650")
     return {
         "bind": bind, "port": port, "origin": secure_origin if secure_enable is not False else "",
+        "trusted_proxy": trusted_proxy,
         "max_clients": max_clients, "max_clients_per_ip": max_clients_per_ip,
         "tls_enabled": tls_enabled, "tls_certificate": tls_certificate,
         "tls_private_key": tls_private_key,
@@ -575,8 +576,14 @@ class Gateway:
         self.task = asyncio.create_task(self.supervise())
         self.stats_task = asyncio.create_task(self.stats())
         yield
-        for client in tuple(self.clients.values()):
-            await client["ws"].close(code=1001, message=b"Server stopping")
+        sockets = [client["ws"] for client in tuple(self.clients.values())]
+        if sockets:
+            try:
+                async with asyncio.timeout(2):
+                    await asyncio.gather(*(ws.close(code=1001, message=b"Server stopping") for ws in sockets),
+                                         return_exceptions=True)
+            except asyncio.TimeoutError:
+                logging.warning("Timed out while closing %d WebSocket(s)", len(sockets))
         self.task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await self.task

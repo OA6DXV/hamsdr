@@ -23,6 +23,7 @@ class SiteConfigTests(unittest.TestCase):
         self.assertEqual((runtime["source_host"], runtime["source_port"]), ("127.0.0.1", 1234))
         self.assertEqual(runtime["database"], ROOT / "var/community.sqlite3")
         self.assertEqual(runtime["retention_days"], 90)
+        self.assertEqual(runtime["trusted_proxy"], "")
         self.assertFalse(runtime["tls_enabled"])
         self.assertEqual(runtime["tls_certificate"], ROOT / "tls/fullchain.pem")
         self.assertEqual(runtime["tls_private_key"], ROOT / "tls/privkey.pem")
@@ -32,6 +33,8 @@ class SiteConfigTests(unittest.TestCase):
             path = Path(directory) / "site.toml"
             path.write_text('language="en"\nreceiver_name="Test"\ndescription=[]\nadministrator_label="By"\nfooter_administrator_label="Admin"\n[server]\nbind="0.0.0.0"\nport=18099\n[administrator]\nname="Admin"\nurl=""\n[logo]\nfile=""\nalt="Logo"\n')
             self.assertEqual(load_listen_config(path), ("0.0.0.0", 18099))
+            path.write_text('[server]\nbind="0.0.0.0"\nport=18099\ntrusted_proxy="100.120.0.10"\n')
+            self.assertEqual(load_runtime_config(path)["trusted_proxy"], "100.120.0.10")
             path.write_text('[server]\nbind="0.0.0.0"\nport=70000\n')
             with self.assertRaisesRegex(ValueError, "server port"):
                 load_listen_config(path)
