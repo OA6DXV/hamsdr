@@ -236,6 +236,7 @@ class Gateway:
         self.sent_bytes = 0
         self.metrics = {"cpu_percent": 0, "kbps": 0}
         self.stats_task = None
+        self.stopping = False
         self.waterfall_sequence = 0
         self.connection_attempts = OrderedDict()
         self.site_config, self.site_logo = load_site_config(getattr(args, "site_config", None))
@@ -576,6 +577,13 @@ class Gateway:
         self.task = asyncio.create_task(self.supervise())
         self.stats_task = asyncio.create_task(self.stats())
         yield
+        self.stopping = True
+        self.task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await self.task
+        self.stats_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await self.stats_task
         sockets = [client["ws"] for client in tuple(self.clients.values())]
         if sockets:
             try:
@@ -584,12 +592,6 @@ class Gateway:
                                          return_exceptions=True)
             except asyncio.TimeoutError:
                 logging.warning("Timed out while closing %d WebSocket(s)", len(sockets))
-        self.task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await self.task
-        self.stats_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await self.stats_task
         await self.history.close()
 
     async def health(self, request):
@@ -751,7 +753,8 @@ class Gateway:
                 sender.cancel()
                 with contextlib.suppress(asyncio.CancelledError, ConnectionError):
                     await sender
-            await self.command(f"del {ident}")
+            if not self.stopping:
+                await self.command(f"del {ident}")
             self.status()
             self.presence()
         return ws
