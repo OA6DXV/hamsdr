@@ -31,14 +31,19 @@ void state(std::string_view text) {
 }
 int main(int argc,char** argv) {
     std::signal(SIGPIPE,SIG_IGN);
-    if (argc!=5) { std::cerr<<"Usage: engine HOST PORT CENTER_HZ SAMPLE_RATE_HZ (or --demo 0 CENTER_HZ SAMPLE_RATE_HZ)\n"; return 2; }
+    if (argc!=7) { std::cerr<<"Usage: engine HOST PORT CENTER_HZ SAMPLE_RATE_HZ GAIN_MODE GAIN_TENTH_DB (or --demo 0 CENTER_HZ SAMPLE_RATE_HZ GAIN_MODE GAIN_TENTH_DB)\n"; return 2; }
     const bool demo=std::string(argv[1])=="--demo";
     std::uint32_t center_frequency=0,sample_rate=0;
+    std::int32_t gain_tenth_db=0;
+    const std::string gain_mode=argv[5];
     try {
         const auto center=std::stoull(argv[3]),rate=std::stoull(argv[4]);
-        if (!center || center>UINT32_MAX || rate!=1'024'000) return 2;
+        const auto gain=std::stoll(argv[6]);
+        if (!center || center>UINT32_MAX || rate!=1'024'000 ||
+            (gain_mode!="auto" && gain_mode!="manual") || gain < -1000 || gain > 1000) return 2;
         center_frequency=static_cast<std::uint32_t>(center);
         sample_rate=static_cast<std::uint32_t>(rate);
+        gain_tenth_db=static_cast<std::int32_t>(gain);
     } catch (...) { return 2; }
     std::mutex mutex;
     std::map<unsigned,std::unique_ptr<hamsdr::Receiver>> receivers;
@@ -87,6 +92,9 @@ int main(int argc,char** argv) {
         config.port=static_cast<std::uint16_t>(port);
         config.center_frequency=center_frequency;
         config.sample_rate=sample_rate;
+        config.control_device=true;
+        config.manual_gain=gain_mode=="manual";
+        config.gain_tenth_db=gain_tenth_db;
         source=std::make_unique<hamsdr::RtlTcpClient>(config,
             [&](auto bytes){consume(hamsdr::convert_u8_iq(bytes));},
             [&](auto event){

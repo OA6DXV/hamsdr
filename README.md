@@ -114,6 +114,13 @@ discovery under `[receiverbook]`, and persistence under `[storage]`. Band indexe
 must be contiguous from zero. The current engine accepts exactly one enabled
 band, `receiver_type = "rtltcp"`, and `sample_rate_khz = 1024.0`.
 
+On every connection and reconnection HamSDR sends the standard `rtl_tcp`
+commands for sample rate, center frequency and gain mode. In manual mode it
+also sends `gain_tenth_db`, expressed in tenths of a dB (`80` means 8.0 dB).
+Use `gain_mode = "auto"` when tuner AGC should select the gain. A passive port
+of a multi-client relay may ignore these commands; a classic or controlling
+`rtl_tcp` connection applies them before HamSDR consumes the IQ stream.
+
 `working_directory` must be absolute. Certificates, the station flag and the
 SQLite database are filename-only references and must live directly inside
 that directory; subdirectories, absolute per-file paths and traversal are

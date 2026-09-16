@@ -20,6 +20,8 @@ struct RtlTcpConfig {
     std::uint32_t center_frequency{7'100'500};
     std::uint32_t sample_rate{1'024'000};
     bool control_device{false};
+    bool manual_gain{false};
+    std::int32_t gain_tenth_db{0};
     std::size_t read_block_bytes{32 * 1024};
     std::chrono::milliseconds reconnect_min{250};
     std::chrono::milliseconds reconnect_max{10'000};

@@ -124,6 +124,8 @@ def load_station_config(data):
         receiver_type = source.get("receiver_type", "rtltcp")
         host = source.get("receiver_host", "127.0.0.1")
         port = source.get("receiver_port", 1231)
+        gain_mode = source.get("gain_mode", "auto")
+        gain_tenth_db = source.get("gain_tenth_db", 0)
         if enabled:
             if not name or not antenna:
                 raise ValueError(f"site config: enabled band.{index} requires name and antenna")
@@ -143,11 +145,17 @@ def load_station_config(data):
                 raise ValueError(f"site config: invalid band.{index} receiver host") from error
             if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
                 raise ValueError(f"site config: invalid band.{index} receiver port")
+            if gain_mode not in ("auto", "manual"):
+                raise ValueError(f"site config: band.{index} gain mode must be auto or manual")
+            if (isinstance(gain_tenth_db, bool) or not isinstance(gain_tenth_db, int) or
+                    not -1000 <= gain_tenth_db <= 1000):
+                raise ValueError(f"site config: invalid band.{index} gain")
         bands.append({
             "index": index, "enable": enabled, "name": name,
             "center_frequency_khz": float(center), "sample_rate_khz": float(sample_rate),
             "antenna": antenna, "receiver_type": receiver_type,
             "receiver_host": host, "receiver_port": port,
+            "gain_mode": gain_mode, "gain_tenth_db": gain_tenth_db,
         })
 
     # Keep installations using the previous single [receiver] section readable
@@ -159,7 +167,7 @@ def load_station_config(data):
             "center_frequency_khz": 7100.5, "sample_rate_khz": 1024.0,
             "antenna": "Receiver antenna", "receiver_type": receiver.get("type", "rtltcp"),
             "receiver_host": receiver.get("host", "127.0.0.1"),
-            "receiver_port": receiver.get("port", 1231),
+            "receiver_port": receiver.get("port", 1231), "gain_mode": "auto", "gain_tenth_db": 0,
         }]
 
     receiverbook = data.get("receiverbook", {})
@@ -249,6 +257,7 @@ def load_runtime_config(requested=None, allow_unconfigured=False):
             "center_frequency_khz": 7100.5, "sample_rate_khz": 1024.0,
             "antenna": "Demo source", "receiver_type": "rtltcp",
             "receiver_host": "127.0.0.1", "receiver_port": 1234,
+            "gain_mode": "auto", "gain_tenth_db": 0,
         }]
     if len(enabled_bands) != 1:
         raise ValueError("site config: exactly one band must be enabled by the current receiver engine")
@@ -256,6 +265,8 @@ def load_runtime_config(requested=None, allow_unconfigured=False):
     receiver_type = band["receiver_type"]
     source_host = band["receiver_host"]
     source_port = band["receiver_port"]
+    gain_mode = band["gain_mode"]
+    gain_tenth_db = band["gain_tenth_db"]
     center_frequency = round(band["center_frequency_khz"] * 1000)
     sample_rate = round(band["sample_rate_khz"] * 1000)
 
@@ -278,6 +289,7 @@ def load_runtime_config(requested=None, allow_unconfigured=False):
         "security_mode": security_mode, "tls_enabled": tls_enabled, "tls_certificate": tls_certificate,
         "tls_private_key": tls_private_key,
         "receiver_type": receiver_type, "source_host": source_host, "source_port": source_port,
+        "gain_mode": gain_mode, "gain_tenth_db": gain_tenth_db,
         "center_frequency": center_frequency, "sample_rate": sample_rate,
         "initial_frequency": round(center_frequency / 1000) * 1000,
         "station": station, "bands": bands, "receiverbook": receiverbook,
@@ -359,6 +371,8 @@ class Gateway:
         self.band_upper = self.center_frequency + self.sample_rate // 2
         self.initial_frequency = int(getattr(args, "initial_frequency",
                                              round(self.center_frequency / 1000) * 1000))
+        self.gain_mode = getattr(args, "gain_mode", "auto")
+        self.gain_tenth_db = int(getattr(args, "gain_tenth_db", 0))
         self.clients = {}
         self.next_id = 1
         self.process = None
@@ -677,6 +691,7 @@ class Gateway:
                     "--demo" if self.args.demo else self.args.source_host,
                     "0" if self.args.demo else str(self.args.source_port),
                     str(self.center_frequency), str(self.sample_rate),
+                    self.gain_mode, str(self.gain_tenth_db),
                     stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
                     limit=262144)
                 self.process = process

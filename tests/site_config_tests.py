@@ -38,6 +38,8 @@ antenna="Test antenna"
 receiver_type="rtltcp"
 receiver_host="127.0.0.1"
 receiver_port=1234
+gain_mode="manual"
+gain_tenth_db=80
 [receiverbook]
 enable=false
 tag=""
@@ -71,6 +73,7 @@ class SiteConfigTests(unittest.TestCase):
             self.assertEqual(runtime["receiver_type"], "rtltcp")
             self.assertEqual((runtime["source_host"], runtime["source_port"]), ("127.0.0.1", 1234))
             self.assertEqual((runtime["center_frequency"], runtime["sample_rate"]), (7100500, 1024000))
+            self.assertEqual((runtime["gain_mode"], runtime["gain_tenth_db"]), ("manual", 80))
             self.assertEqual(runtime["database"], Path(directory) / "community.sqlite3")
             self.assertEqual(runtime["retention_days"], 90)
 
@@ -110,6 +113,9 @@ class SiteConfigTests(unittest.TestCase):
             traversal = installation(directory).replace('database="community.sqlite3"', 'database="../outside.sqlite3"')
             path.write_text(traversal)
             with self.assertRaisesRegex(ValueError, "must be a filename"):
+                load_runtime_config(path)
+            path.write_text(installation(directory).replace('gain_mode="manual"', 'gain_mode="invalid"'))
+            with self.assertRaisesRegex(ValueError, "gain mode"):
                 load_runtime_config(path)
 
     def test_station_flag_and_receiverbook_validation(self):

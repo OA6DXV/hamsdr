@@ -121,9 +121,12 @@ bool RtlTcpClient::initialize_connection(int fd, std::stop_token stop) {
         std::scoped_lock lock(device_mutex_);
         device_ = RtlTcpDevice{read_be32(header.data() + 4), read_be32(header.data() + 8)};
     }
-    if (config_.control_device &&
-        (!write_command(fd, 0x02, config_.sample_rate) || !write_command(fd, 0x01, config_.center_frequency))) {
-        return false;
+    if (config_.control_device) {
+        if (!write_command(fd, 0x02, config_.sample_rate) ||
+            !write_command(fd, 0x01, config_.center_frequency) ||
+            !write_command(fd, 0x03, config_.manual_gain ? 1U : 0U)) return false;
+        if (config_.manual_gain &&
+            !write_command(fd, 0x04, static_cast<std::uint32_t>(config_.gain_tenth_db))) return false;
     }
     return true;
 }
