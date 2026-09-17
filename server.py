@@ -124,8 +124,10 @@ def load_station_config(data):
         receiver_type = source.get("receiver_type", "rtltcp")
         host = source.get("receiver_host", "127.0.0.1")
         port = source.get("receiver_port", 1231)
-        gain_mode = source.get("gain_mode", "auto")
-        gain_db = source.get("gain_db", 0.0)
+        gain = source.get("gain", "auto")
+        if gain != "auto" and (isinstance(gain, bool) or not isinstance(gain, (int, float)) or
+                               not math.isfinite(gain) or not 0 <= gain <= 50):
+            raise ValueError(f"site config: band.{index} gain must be auto or 0..50 dB")
         if enabled:
             if not name or not antenna:
                 raise ValueError(f"site config: enabled band.{index} requires name and antenna")
@@ -145,17 +147,12 @@ def load_station_config(data):
                 raise ValueError(f"site config: invalid band.{index} receiver host") from error
             if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
                 raise ValueError(f"site config: invalid band.{index} receiver port")
-            if gain_mode not in ("auto", "manual"):
-                raise ValueError(f"site config: band.{index} gain mode must be auto or manual")
-            if (isinstance(gain_db, bool) or not isinstance(gain_db, (int, float)) or
-                    not math.isfinite(gain_db) or not 0 <= gain_db <= 50):
-                raise ValueError(f"site config: invalid band.{index} gain")
         bands.append({
             "index": index, "enable": enabled, "name": name,
             "center_frequency_khz": float(center), "sample_rate_khz": float(sample_rate),
             "antenna": antenna, "receiver_type": receiver_type,
             "receiver_host": host, "receiver_port": port,
-            "gain_mode": gain_mode, "gain_db": float(gain_db),
+            "gain": "auto" if gain == "auto" else float(gain),
         })
 
     # Keep installations using the previous single [receiver] section readable
@@ -167,7 +164,7 @@ def load_station_config(data):
             "center_frequency_khz": 7100.5, "sample_rate_khz": 1024.0,
             "antenna": "Receiver antenna", "receiver_type": receiver.get("type", "rtltcp"),
             "receiver_host": receiver.get("host", "127.0.0.1"),
-            "receiver_port": receiver.get("port", 1231), "gain_mode": "auto", "gain_db": 0.0,
+            "receiver_port": receiver.get("port", 1231), "gain": "auto",
         }]
 
     receiverbook = data.get("receiverbook", {})
@@ -257,7 +254,7 @@ def load_runtime_config(requested=None, allow_unconfigured=False):
             "center_frequency_khz": 7100.5, "sample_rate_khz": 1024.0,
             "antenna": "Demo source", "receiver_type": "rtltcp",
             "receiver_host": "127.0.0.1", "receiver_port": 1234,
-            "gain_mode": "auto", "gain_db": 0.0,
+            "gain": "auto",
         }]
     if len(enabled_bands) != 1:
         raise ValueError("site config: exactly one band must be enabled by the current receiver engine")
@@ -265,8 +262,9 @@ def load_runtime_config(requested=None, allow_unconfigured=False):
     receiver_type = band["receiver_type"]
     source_host = band["receiver_host"]
     source_port = band["receiver_port"]
-    gain_mode = band["gain_mode"]
-    gain_db = band["gain_db"]
+    gain = band["gain"]
+    gain_mode = "auto" if gain == "auto" else "manual"
+    gain_db = 0.0 if gain == "auto" else gain
     gain_tenth_db = math.floor(gain_db * 10 + 0.5)
     center_frequency = round(band["center_frequency_khz"] * 1000)
     sample_rate = round(band["sample_rate_khz"] * 1000)
@@ -290,7 +288,7 @@ def load_runtime_config(requested=None, allow_unconfigured=False):
         "security_mode": security_mode, "tls_enabled": tls_enabled, "tls_certificate": tls_certificate,
         "tls_private_key": tls_private_key,
         "receiver_type": receiver_type, "source_host": source_host, "source_port": source_port,
-        "gain_mode": gain_mode, "gain_db": gain_db, "gain_tenth_db": gain_tenth_db,
+        "gain": gain, "gain_mode": gain_mode, "gain_tenth_db": gain_tenth_db,
         "center_frequency": center_frequency, "sample_rate": sample_rate,
         "initial_frequency": round(center_frequency / 1000) * 1000,
         "station": station, "bands": bands, "receiverbook": receiverbook,

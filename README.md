@@ -115,11 +115,11 @@ must be contiguous from zero. The current engine accepts exactly one enabled
 band, `receiver_type = "rtltcp"`, and `sample_rate_khz = 1024.0`.
 
 On every connection and reconnection HamSDR sends the standard `rtl_tcp`
-commands for sample rate, center frequency and gain mode. In manual mode it
-also sends `gain_db`, configured directly from 0.0 to 50.0 dB. HamSDR converts
-that value internally to the tenths-of-a-dB integer required by the protocol.
-Use `gain_mode = "auto"` when tuner AGC should select the gain. A passive port
-of a multi-client relay may ignore these commands; a classic or controlling
+commands for sample rate, center frequency and gain. Set `gain = "auto"` (also
+the default when omitted) for tuner AGC, or use a numeric value from 0.0 to
+50.0 dB for manual gain. HamSDR converts numeric values internally to the
+tenths-of-a-dB integer required by the protocol. A passive port of a
+multi-client relay may ignore these commands; a classic or controlling
 `rtl_tcp` connection applies them before HamSDR consumes the IQ stream.
 
 `working_directory` must be absolute. Certificates, the station flag and the
