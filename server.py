@@ -124,10 +124,10 @@ def load_station_config(data):
         receiver_type = source.get("receiver_type", "rtltcp")
         host = source.get("receiver_host", "127.0.0.1")
         port = source.get("receiver_port", 1231)
-        gain = source.get("gain", "auto")
+        gain = source.get("receiver_gain", "auto")
         if gain != "auto" and (isinstance(gain, bool) or not isinstance(gain, (int, float)) or
                                not math.isfinite(gain)):
-            raise ValueError(f"site config: band.{index} gain must be auto or a finite dB value")
+            raise ValueError(f"site config: band.{index} receiver_gain must be auto or a finite dB value")
         if enabled:
             if not name or not antenna:
                 raise ValueError(f"site config: enabled band.{index} requires name and antenna")
@@ -152,7 +152,7 @@ def load_station_config(data):
             "center_frequency_khz": float(center), "sample_rate_khz": float(sample_rate),
             "antenna": antenna, "receiver_type": receiver_type,
             "receiver_host": host, "receiver_port": port,
-            "gain": "auto" if gain == "auto" else float(gain),
+            "receiver_gain": "auto" if gain == "auto" else float(gain),
         })
 
     # Keep installations using the previous single [receiver] section readable
@@ -164,7 +164,7 @@ def load_station_config(data):
             "center_frequency_khz": 7100.5, "sample_rate_khz": 1024.0,
             "antenna": "Receiver antenna", "receiver_type": receiver.get("type", "rtltcp"),
             "receiver_host": receiver.get("host", "127.0.0.1"),
-            "receiver_port": receiver.get("port", 1231), "gain": "auto",
+            "receiver_port": receiver.get("port", 1231), "receiver_gain": "auto",
         }]
 
     receiverbook = data.get("receiverbook", {})
@@ -254,7 +254,7 @@ def load_runtime_config(requested=None, allow_unconfigured=False):
             "center_frequency_khz": 7100.5, "sample_rate_khz": 1024.0,
             "antenna": "Demo source", "receiver_type": "rtltcp",
             "receiver_host": "127.0.0.1", "receiver_port": 1234,
-            "gain": "auto",
+            "receiver_gain": "auto",
         }]
     if len(enabled_bands) != 1:
         raise ValueError("site config: exactly one band must be enabled by the current receiver engine")
@@ -262,7 +262,7 @@ def load_runtime_config(requested=None, allow_unconfigured=False):
     receiver_type = band["receiver_type"]
     source_host = band["receiver_host"]
     source_port = band["receiver_port"]
-    gain = band["gain"]
+    gain = band["receiver_gain"]
     gain_mode = "auto" if gain == "auto" else "manual"
     gain_db = 0.0 if gain == "auto" else gain
     scaled_gain = gain_db * 10
@@ -292,7 +292,7 @@ def load_runtime_config(requested=None, allow_unconfigured=False):
         "security_mode": security_mode, "tls_enabled": tls_enabled, "tls_certificate": tls_certificate,
         "tls_private_key": tls_private_key,
         "receiver_type": receiver_type, "source_host": source_host, "source_port": source_port,
-        "gain": gain, "gain_mode": gain_mode, "gain_tenth_db": gain_tenth_db,
+        "receiver_gain": gain, "gain_mode": gain_mode, "gain_tenth_db": gain_tenth_db,
         "center_frequency": center_frequency, "sample_rate": sample_rate,
         "initial_frequency": round(center_frequency / 1000) * 1000,
         "station": station, "bands": bands, "receiverbook": receiverbook,

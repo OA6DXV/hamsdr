@@ -38,7 +38,7 @@ antenna="Test antenna"
 receiver_type="rtltcp"
 receiver_host="127.0.0.1"
 receiver_port=1234
-gain=8.0
+receiver_gain=8.0
 [receiverbook]
 enable=false
 tag=""
@@ -72,13 +72,13 @@ class SiteConfigTests(unittest.TestCase):
             self.assertEqual(runtime["receiver_type"], "rtltcp")
             self.assertEqual((runtime["source_host"], runtime["source_port"]), ("127.0.0.1", 1234))
             self.assertEqual((runtime["center_frequency"], runtime["sample_rate"]), (7100500, 1024000))
-            self.assertEqual((runtime["gain"], runtime["gain_mode"], runtime["gain_tenth_db"]),
+            self.assertEqual((runtime["receiver_gain"], runtime["gain_mode"], runtime["gain_tenth_db"]),
                              (8.0, "manual", 80))
             self.assertEqual(runtime["database"], Path(directory) / "community.sqlite3")
             self.assertEqual(runtime["retention_days"], 90)
-            path.write_text(installation(directory).replace('gain=8.0\n', ''))
+            path.write_text(installation(directory).replace('receiver_gain=8.0\n', ''))
             automatic = load_runtime_config(path)
-            self.assertEqual((automatic["gain"], automatic["gain_mode"], automatic["gain_tenth_db"]),
+            self.assertEqual((automatic["receiver_gain"], automatic["gain_mode"], automatic["gain_tenth_db"]),
                              ("auto", "auto", 0))
 
     def test_listener_configuration_and_validation(self):
@@ -118,15 +118,15 @@ class SiteConfigTests(unittest.TestCase):
             path.write_text(traversal)
             with self.assertRaisesRegex(ValueError, "must be a filename"):
                 load_runtime_config(path)
-            path.write_text(installation(directory).replace('gain=8.0', 'gain="manual"'))
-            with self.assertRaisesRegex(ValueError, "gain must"):
+            path.write_text(installation(directory).replace('receiver_gain=8.0', 'receiver_gain="manual"'))
+            with self.assertRaisesRegex(ValueError, "receiver_gain must"):
                 load_runtime_config(path)
-            path.write_text(installation(directory).replace('gain=8.0', 'gain=-5.5'))
+            path.write_text(installation(directory).replace('receiver_gain=8.0', 'receiver_gain=-5.5'))
             negative = load_runtime_config(path)
-            self.assertEqual((negative["gain"], negative["gain_tenth_db"]), (-5.5, -55))
-            path.write_text(installation(directory).replace('gain=8.0', 'gain=72.5'))
+            self.assertEqual((negative["receiver_gain"], negative["gain_tenth_db"]), (-5.5, -55))
+            path.write_text(installation(directory).replace('receiver_gain=8.0', 'receiver_gain=72.5'))
             above_typical = load_runtime_config(path)
-            self.assertEqual((above_typical["gain"], above_typical["gain_tenth_db"]), (72.5, 725))
+            self.assertEqual((above_typical["receiver_gain"], above_typical["gain_tenth_db"]), (72.5, 725))
 
     def test_station_flag_and_receiverbook_validation(self):
         with tempfile.TemporaryDirectory() as directory:

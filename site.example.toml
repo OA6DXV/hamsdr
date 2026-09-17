@@ -46,7 +46,7 @@ antenna = ""
 receiver_type = "rtltcp"
 receiver_host = "127.0.0.1"
 receiver_port = 1234
-gain = "auto"
+receiver_gain = "auto"
 
 # Paste the complete confirmation meta tag into tag before enabling discovery.
 [receiverbook]
