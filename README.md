@@ -130,6 +130,10 @@ rejected. Flags may be SVG, PNG, JPEG or WebP up to 2 MB. Equivalent
 command-line options override the file when supplied. An external configuration
 may be supplied with:
 
+`[storage].max_size_mb` limits the main SQLite community database and defaults
+to 50 MB. Events do not expire by age. When space is needed, HamSDR removes the
+oldest chat or logbook entries first and SQLite reuses the released pages.
+
 ```sh
 .venv/bin/python server.py --site-config /etc/hamsdr/site.toml
 ```

@@ -277,13 +277,13 @@ def load_runtime_config(requested=None, allow_unconfigured=False):
     if not isinstance(storage, dict):
         raise ValueError("site config: invalid storage")
     database = storage.get("database", "community.sqlite3")
-    retention_days = storage.get("retention_days", 90)
+    max_size_mb = storage.get("max_size_mb", 50)
     if not isinstance(database, str) or not database.strip() or "\0" in database:
         raise ValueError("site config: invalid database path")
     database = working_file(root, database, "database", {".sqlite", ".sqlite3", ".db"})
-    if (isinstance(retention_days, bool) or not isinstance(retention_days, int) or
-            not 1 <= retention_days <= 3650):
-        raise ValueError("site config: retention days must be 1..3650")
+    if (isinstance(max_size_mb, bool) or not isinstance(max_size_mb, int) or
+            not 1 <= max_size_mb <= 1048576):
+        raise ValueError("site config: database maximum must be 1..1048576 MB")
     return {
         "working_directory": root,
         "bind": bind, "port": port, "origin": secure_origin if security_mode != "insecure" else "",
@@ -296,7 +296,7 @@ def load_runtime_config(requested=None, allow_unconfigured=False):
         "center_frequency": center_frequency, "sample_rate": sample_rate,
         "initial_frequency": round(center_frequency / 1000) * 1000,
         "station": station, "bands": bands, "receiverbook": receiverbook,
-        "database": database, "retention_days": retention_days,
+        "database": database, "max_size_mb": max_size_mb,
     }
 
 def load_listen_config(requested=None):
@@ -386,7 +386,7 @@ class Gateway:
         self.task = None
         self.lock = asyncio.Lock()
         self.history = History(getattr(args, "database", ROOT / "var/community.sqlite3"),
-                               getattr(args, "retention_days", 90))
+                               getattr(args, "max_size_mb", 50))
         self.community_lock = asyncio.Lock()
         self.community_tokens, self.community_last = 30.0, time.monotonic()
         self.sent_bytes = 0
@@ -998,7 +998,7 @@ if __name__ == "__main__":
     parser.add_argument("--tls-private-key", type=Path, help="PEM private key (overrides site config)")
     parser.add_argument("--demo", action="store_true")
     parser.add_argument("--database", type=Path, help="Community database path (overrides site config)")
-    parser.add_argument("--retention-days", type=int, help="History retention (overrides site config)")
+    parser.add_argument("--max-size-mb", type=int, help="Community database maximum size in MB")
     parser.add_argument("--site-config", type=Path, help="Site configuration TOML (defaults to ./site.toml, then generic example)")
     args = parser.parse_args()
     try:
@@ -1026,8 +1026,8 @@ if __name__ == "__main__":
             parser.error("origin must be an exact http(s) origin, or *")
     if (not 1 <= args.source_port <= 65535 or not 1 <= args.port <= 65535 or
             not 1 <= args.max_clients <= 20 or not 1 <= args.max_clients_per_ip <= args.max_clients or
-            not 1 <= args.retention_days <= 3650):
-        parser.error("Ports: 1..65535; clients: 1..20; retention: 1..3650")
+            not 1 <= args.max_size_mb <= 1048576):
+        parser.error("Ports: 1..65535; clients: 1..20; database maximum: 1..1048576 MB")
     try:
         ssl_context = create_tls_context(args)
     except ValueError as error:

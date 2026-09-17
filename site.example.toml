@@ -55,4 +55,4 @@ tag = ""
 
 [storage]
 database = "community.sqlite3"
-retention_days = 90
+max_size_mb = 50

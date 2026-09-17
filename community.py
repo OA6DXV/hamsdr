@@ -3,7 +3,6 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import sqlite3
-import time
 import unicodedata
 
 
@@ -19,9 +18,10 @@ def plain_text(value, limit, allow_empty=False):
 
 
 class History:
-    def __init__(self, path, retention_days=90, max_rows=10000):
+    def __init__(self, path, max_size_mb=50):
         self.path = Path(path)
-        self.retention_days, self.max_rows = retention_days, max_rows
+        self.max_size_bytes = max_size_mb * 1024 * 1024
+        self.max_pages = 0
         self.worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="history")
         self.db = None
 
@@ -52,20 +52,50 @@ class History:
             CREATE INDEX IF NOT EXISTS events_kind_id ON events(kind,id);
             PRAGMA user_version=1;
         """)
-        self._prune()
+        page_size = self.db.execute("PRAGMA page_size").fetchone()[0]
+        self.max_pages = self.max_size_bytes // page_size
+        if self.max_pages < 16:
+            raise ValueError("Community database size must allow at least 16 SQLite pages")
+        current_pages = self.db.execute("PRAGMA page_count").fetchone()[0]
+        while current_pages > self.max_pages:
+            rows = self.db.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+            if not rows:
+                raise ValueError("Community database maximum is smaller than its schema")
+            proportional = (rows * (current_pages - self.max_pages) + current_pages - 1) // current_pages
+            delete_count = min(rows, max(1, proportional + max(1, rows // 20)))
+            with self.db:
+                self.db.execute(
+                    "DELETE FROM events WHERE id IN (SELECT id FROM events ORDER BY id LIMIT ?)",
+                    (delete_count,))
+            self.db.execute("VACUUM")
+            current_pages = self.db.execute("PRAGMA page_count").fetchone()[0]
+        configured_pages = self.db.execute(f"PRAGMA max_page_count={self.max_pages}").fetchone()[0]
+        if configured_pages != self.max_pages:
+            raise RuntimeError("Could not apply community database size limit")
+        self._make_room()
 
-    def _prune(self):
-        with self.db:
-            self.db.execute("DELETE FROM events WHERE time < ?", (int(time.time())-self.retention_days*86400,))
-            for kind in ("chat", "log"):
-                self.db.execute("DELETE FROM events WHERE kind=? AND id NOT IN (SELECT id FROM events WHERE kind=? ORDER BY id DESC LIMIT ?)",
-                                (kind, kind, self.max_rows))
+    def _make_room(self):
+        """Keep free pages for the next event, removing the oldest rows first."""
+        reserve = min(8, max(2, self.max_pages // 20))
+        target = self.max_pages - reserve
+        while True:
+            pages = self.db.execute("PRAGMA page_count").fetchone()[0]
+            free = self.db.execute("PRAGMA freelist_count").fetchone()[0]
+            if pages - free <= target:
+                return
+            with self.db:
+                deleted = self.db.execute(
+                    "DELETE FROM events WHERE id IN (SELECT id FROM events ORDER BY id LIMIT 256)"
+                ).rowcount
+            if not deleted:
+                return
 
     @staticmethod
     def public(row):
         return {key: row[key] for key in ("id", "kind", "time", "name", "text", "frequency", "mode", "call")}
 
     def _append(self, event):
+        self._make_room()
         with self.db:
             cursor = self.db.execute("""INSERT OR IGNORE INTO events
                 (kind,time,name,text,frequency,mode,call,client_key,request_id)
@@ -74,11 +104,10 @@ class History:
             created = cursor.rowcount == 1
             row = self.db.execute("SELECT * FROM events WHERE client_key=? AND request_id=?",
                                   (event["client_key"], event["request_id"])).fetchone()
-        self._prune()
+        self._make_room()
         return self.public(row), created
 
     def _history(self, kind, before):
-        self._prune()
         rows = self.db.execute("SELECT * FROM events WHERE kind=? AND id < ? ORDER BY id DESC LIMIT 201",
                                (kind, before or 9223372036854775807)).fetchall()
         return {"type": "history", "kind": kind, "events": [self.public(r) for r in reversed(rows[:200])],

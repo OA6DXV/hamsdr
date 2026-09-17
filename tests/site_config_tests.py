@@ -44,7 +44,7 @@ enable=false
 tag=""
 [storage]
 database="community.sqlite3"
-retention_days=90
+max_size_mb=50
 '''
 
 
@@ -75,7 +75,7 @@ class SiteConfigTests(unittest.TestCase):
             self.assertEqual((runtime["receiver_gain"], runtime["gain_mode"], runtime["gain_tenth_db"]),
                              (8.0, "manual", 80))
             self.assertEqual(runtime["database"], Path(directory) / "community.sqlite3")
-            self.assertEqual(runtime["retention_days"], 90)
+            self.assertEqual(runtime["max_size_mb"], 50)
             path.write_text(installation(directory).replace('receiver_gain=8.0\n', ''))
             automatic = load_runtime_config(path)
             self.assertEqual((automatic["receiver_gain"], automatic["gain_mode"], automatic["gain_tenth_db"]),
