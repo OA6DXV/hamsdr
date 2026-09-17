@@ -126,8 +126,8 @@ def load_station_config(data):
         port = source.get("receiver_port", 1231)
         gain = source.get("gain", "auto")
         if gain != "auto" and (isinstance(gain, bool) or not isinstance(gain, (int, float)) or
-                               not math.isfinite(gain) or not 0 <= gain <= 50):
-            raise ValueError(f"site config: band.{index} gain must be auto or 0..50 dB")
+                               not math.isfinite(gain)):
+            raise ValueError(f"site config: band.{index} gain must be auto or a finite dB value")
         if enabled:
             if not name or not antenna:
                 raise ValueError(f"site config: enabled band.{index} requires name and antenna")
@@ -265,7 +265,11 @@ def load_runtime_config(requested=None, allow_unconfigured=False):
     gain = band["gain"]
     gain_mode = "auto" if gain == "auto" else "manual"
     gain_db = 0.0 if gain == "auto" else gain
-    gain_tenth_db = math.floor(gain_db * 10 + 0.5)
+    scaled_gain = gain_db * 10
+    gain_tenth_db = (math.floor(scaled_gain + 0.5) if scaled_gain >= 0
+                     else math.ceil(scaled_gain - 0.5))
+    if not -2147483648 <= gain_tenth_db <= 2147483647:
+        raise ValueError("site config: gain exceeds the rtl_tcp signed 32-bit protocol field")
     center_frequency = round(band["center_frequency_khz"] * 1000)
     sample_rate = round(band["sample_rate_khz"] * 1000)
 

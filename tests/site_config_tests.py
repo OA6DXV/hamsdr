@@ -121,9 +121,12 @@ class SiteConfigTests(unittest.TestCase):
             path.write_text(installation(directory).replace('gain=8.0', 'gain="manual"'))
             with self.assertRaisesRegex(ValueError, "gain must"):
                 load_runtime_config(path)
-            path.write_text(installation(directory).replace('gain=8.0', 'gain=50.1'))
-            with self.assertRaisesRegex(ValueError, "gain must"):
-                load_runtime_config(path)
+            path.write_text(installation(directory).replace('gain=8.0', 'gain=-5.5'))
+            negative = load_runtime_config(path)
+            self.assertEqual((negative["gain"], negative["gain_tenth_db"]), (-5.5, -55))
+            path.write_text(installation(directory).replace('gain=8.0', 'gain=72.5'))
+            above_typical = load_runtime_config(path)
+            self.assertEqual((above_typical["gain"], above_typical["gain_tenth_db"]), (72.5, 725))
 
     def test_station_flag_and_receiverbook_validation(self):
         with tempfile.TemporaryDirectory() as directory:

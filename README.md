@@ -116,9 +116,10 @@ band, `receiver_type = "rtltcp"`, and `sample_rate_khz = 1024.0`.
 
 On every connection and reconnection HamSDR sends the standard `rtl_tcp`
 commands for sample rate, center frequency and gain. Set `gain = "auto"` (also
-the default when omitted) for tuner AGC, or use a numeric value from 0.0 to
-50.0 dB for manual gain. HamSDR converts numeric values internally to the
-tenths-of-a-dB integer required by the protocol. A passive port of a
+the default when omitted) for tuner AGC, or use any finite numeric dB value for
+manual gain, including negative values. HamSDR does not impose tuner-specific
+limits; it converts the value internally and lets `rtl_tcp` or the SDR handle
+unsupported levels. A passive port of a
 multi-client relay may ignore these commands; a classic or controlling
 `rtl_tcp` connection applies them before HamSDR consumes the IQ stream.
 
