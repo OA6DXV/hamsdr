@@ -19,6 +19,8 @@ from waterfall_codec import decode
 class RadioTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.args = SimpleNamespace(demo=True, source_host='127.0.0.1',source_port=1231,max_clients=5,origin='')
+        self.args.full_quality_sessions_per_ip=5
+        self.args.max_bandwidth_kbps_per_ip=1000000
         self.args.site_config=Path(__file__).resolve().parents[1]/'site.example.toml'
         self.temp = tempfile.TemporaryDirectory()
         self.args.database=Path(self.temp.name)/'community.sqlite3'
@@ -351,6 +353,32 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
         one=await self.session.ws_connect(self.url+'/ws',origin=self.url,headers={'X-HamSDR-Client-IP':'192.0.2.1'})
         two=await self.session.ws_connect(self.url+'/ws',origin=self.url,headers={'X-HamSDR-Client-IP':'192.0.2.2'})
         self.sockets.extend((one,two))
+
+    async def test_shared_ip_resource_profiles(self):
+        gateway=self.app[GATEWAY]
+        gateway.args.max_clients_per_ip=4
+        gateway.args.full_quality_sessions_per_ip=2
+        gateway.args.max_bandwidth_kbps_per_ip=1000
+        first,second=await self.connect(),await self.connect()
+        await first.send_json({'type':'waterfall','preference':'high','profile':'high'})
+        self.assertEqual((await self.event(first,'waterfall-profile'))['profile'],'high')
+        await first.send_json({'type':'audio-profile','profile':'raw'})
+        self.assertEqual((await self.event(first,'audio-profile'))['profile'],'raw')
+
+        third=await self.connect()
+        self.assertEqual((await self.event(first,'waterfall-profile'))['profile'],'balanced')
+        self.assertEqual((await self.event(first,'audio-profile'))['profile'],'balanced')
+        limit=await self.event(first,'resource-limit')
+        self.assertEqual((limit['waterfall_max'],limit['audio_max']),('balanced','balanced'))
+        await third.send_json({'type':'waterfall','preference':'high','profile':'high'})
+        self.assertIn('hasta balanced',(await self.event(third,'error'))['message'])
+        await third.send_json({'type':'audio-profile','profile':'raw'})
+        self.assertIn('hasta balanced',(await self.event(third,'error'))['message'])
+
+        gateway.address_limit_stage['127.0.0.1']=2
+        gateway.enforce_address_limits('127.0.0.1')
+        self.assertEqual((await self.event(first,'waterfall-profile'))['profile'],'low')
+        self.assertEqual((await self.event(first,'audio-profile'))['profile'],'mobile')
 
     async def test_cw_carrier_frequency_and_narrow_filter(self):
         ws=await self.connect()

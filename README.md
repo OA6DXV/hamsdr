@@ -96,6 +96,14 @@ to three. If a CDN is present, normalize its authenticated client address in
 the reverse proxy before setting `X-HamSDR-Client-IP`; never trust that header
 from arbitrary peers.
 
+Shared-address resource policy is configured with
+`full_quality_sessions_per_ip` and `max_bandwidth_kbps_per_ip`. By default, at
+most two sessions behind one address may select high-definition waterfall or
+raw PCM audio. The server measures aggregate egress every five seconds; above
+1,000 kb/s it progressively reduces waterfall and audio profiles instead of
+randomly dropping audio packets. The connection ceiling remains an independent
+last-resort control.
+
 ## Site customization
 
 Create one installation directory, copy the generic configuration into it and

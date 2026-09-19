@@ -303,7 +303,8 @@ function connect(){
         audioEnabled=msg.enabled;if(msg.profile)audioProfile=msg.profile;showAudioProfile();showAudioState();
       }else if(msg.type==='audio-profile'){
         audioProfile=msg.profile;resetAudio();showAudioProfile();
-      }else if(msg.type==='error')message(msg.message);
+      }else if(msg.type==='resource-limit')message(msg.message);
+      else if(msg.type==='error')message(msg.message);
       else if(msg.type==='tuned'){$('frequency').dataset.confirmed=String(msg.frequency);}
       return;
     }

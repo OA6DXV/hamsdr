@@ -200,6 +200,8 @@ def load_runtime_config(requested=None, allow_unconfigured=False):
     trusted_proxy = server.get("trusted_proxy", "")
     max_clients = server.get("max_clients", 10)
     max_clients_per_ip = server.get("max_clients_per_ip", 3)
+    full_quality_sessions_per_ip = server.get("full_quality_sessions_per_ip", 2)
+    max_bandwidth_kbps_per_ip = server.get("max_bandwidth_kbps_per_ip", 1000)
     secure = data.get("secure", server.get("tls", {}))
     if not isinstance(bind, str):
         raise ValueError("site config: invalid server bind")
@@ -220,6 +222,14 @@ def load_runtime_config(requested=None, allow_unconfigured=False):
             isinstance(max_clients_per_ip, bool) or not isinstance(max_clients_per_ip, int) or
             not 1 <= max_clients <= 20 or not 1 <= max_clients_per_ip <= max_clients):
         raise ValueError("site config: clients must be 1..20 and per-IP must not exceed total")
+    if (isinstance(full_quality_sessions_per_ip, bool) or
+            not isinstance(full_quality_sessions_per_ip, int) or
+            not 1 <= full_quality_sessions_per_ip <= max_clients_per_ip):
+        raise ValueError("site config: full-quality sessions must be 1..max_clients_per_ip")
+    if (isinstance(max_bandwidth_kbps_per_ip, bool) or
+            not isinstance(max_bandwidth_kbps_per_ip, int) or
+            not 1 <= max_bandwidth_kbps_per_ip <= 1000000):
+        raise ValueError("site config: per-IP bandwidth maximum must be 1..1000000 kb/s")
     if not isinstance(secure, dict):
         raise ValueError("site config: invalid secure")
     security_mode = secure.get("mode")
@@ -289,6 +299,8 @@ def load_runtime_config(requested=None, allow_unconfigured=False):
         "bind": bind, "port": port, "origin": secure_origin if security_mode != "insecure" else "",
         "trusted_proxy": trusted_proxy,
         "max_clients": max_clients, "max_clients_per_ip": max_clients_per_ip,
+        "full_quality_sessions_per_ip": full_quality_sessions_per_ip,
+        "max_bandwidth_kbps_per_ip": max_bandwidth_kbps_per_ip,
         "security_mode": security_mode, "tls_enabled": tls_enabled, "tls_certificate": tls_certificate,
         "tls_private_key": tls_private_key,
         "receiver_type": receiver_type, "source_host": source_host, "source_port": source_port,
@@ -395,6 +407,7 @@ class Gateway:
         self.stopping = False
         self.waterfall_sequence = 0
         self.connection_attempts = OrderedDict()
+        self.address_limit_stage = {}
         (self.site_config, self.site_logo, self.station,
          self.bands, self.receiverbook) = load_site_config(getattr(args, "site_config", None))
 
@@ -486,6 +499,50 @@ class Gateway:
             "profile":profile}), ident)
         if reset_speed:
             self.publish(json.dumps({"type":"waterfall-speed", "divisor":1, "fps":7.8}), ident)
+
+    def address_clients(self, address):
+        return [(ident, client) for ident, client in self.clients.items()
+                if client["address"] == address]
+
+    def address_profile_limits(self, address):
+        """Return the highest profiles currently allowed for one public address."""
+        crowded = len(self.address_clients(address)) > getattr(
+            self.args, "full_quality_sessions_per_ip", 2)
+        stage = self.address_limit_stage.get(address, 0)
+        if stage >= 3:
+            return "slow", "mobile", True
+        if stage >= 2:
+            return "low", "mobile", True
+        if crowded or stage >= 1:
+            return "balanced", "balanced", True
+        return "high", "raw", False
+
+    def enforce_address_limits(self, address, notify=True):
+        """Reduce expensive profiles without dropping an otherwise healthy session."""
+        waterfall_max, audio_max, restricted = self.address_profile_limits(address)
+        waterfall_levels = ["slow", "low", "balanced", "high"]
+        audio_levels = ["mobile", "balanced", "raw"]
+        changed = []
+        for ident, client in self.address_clients(address):
+            altered = False
+            if waterfall_levels.index(client["waterfall_profile"]) > waterfall_levels.index(waterfall_max):
+                self.waterfall_profile(ident, waterfall_max, waterfall_max, waterfall_max)
+                altered = True
+            if audio_levels.index(client["audio_profile"]) > audio_levels.index(audio_max):
+                if audio_max in ("balanced", "mobile") and not OPUS_AVAILABLE:
+                    self.audio_state(ident, False)
+                else:
+                    self.audio_profile(ident, audio_max)
+                altered = True
+            if altered:
+                changed.append(ident)
+        if notify and changed:
+            message = ("Esta red alcanzó su límite compartido de recursos; "
+                       f"se aplicaron cascada {waterfall_max} y audio {audio_max}.")
+            for ident in changed:
+                self.publish(json.dumps({"type":"resource-limit", "message":message,
+                    "waterfall_max":waterfall_max, "audio_max":audio_max,
+                    "restricted":restricted}), ident)
 
     def audio_state(self, ident, enabled):
         client = self.clients.get(ident)
@@ -613,9 +670,11 @@ class Gateway:
                             "kbps": round((self.sent_bytes-sent)*8/elapsed/1000, 1)}
             previous, last, sent = current, now, self.sent_bytes
             levels = ["slow", "low", "balanced", "high"]
+            address_rates = {}
             for ident, client in tuple(self.clients.items()):
                 rate = round((client["sent_bytes"]-client["last_sent"])*8/elapsed/1000, 1)
                 client["last_sent"] = client["sent_bytes"]
+                address_rates[client["address"]] = address_rates.get(client["address"], 0.0) + rate
                 if client["waterfall_preference"] == "auto":
                     current_level, ceiling = levels.index(client["waterfall_profile"]), levels.index(client["waterfall_ceiling"])
                     if client["congestion"] >= 2 and current_level > 0:
@@ -631,6 +690,18 @@ class Gateway:
                 self.publish(json.dumps({"type":"stream-stats", "kbps":rate,
                     "waterfall_profile":client["waterfall_profile"],
                     "audio_profile":client["audio_profile"]}), ident)
+            maximum = getattr(self.args, "max_bandwidth_kbps_per_ip", 1000)
+            active_addresses = set(address_rates)
+            for address, rate in address_rates.items():
+                previous_stage = self.address_limit_stage.get(address, 0)
+                if rate > maximum:
+                    self.address_limit_stage[address] = min(3, previous_stage + 1)
+                    self.enforce_address_limits(address)
+                else:
+                    self.address_limit_stage.pop(address, None)
+                    self.enforce_address_limits(address, notify=False)
+            for address in set(self.address_limit_stage) - active_addresses:
+                self.address_limit_stage.pop(address, None)
             self.status()
 
     async def community(self, ident, update):
@@ -810,6 +881,7 @@ class Gateway:
                   "audio_enabled": False, "audio_profile": "balanced",
                   "opus_encoder": None, "opus_pending": bytearray(), "opus_sequence": 0}
         self.clients[ident] = client
+        self.enforce_address_limits(address)
         sender = None
         try:
             await ws.prepare(request)
@@ -861,6 +933,10 @@ class Gateway:
                             raise ValueError("Perfil de cascada desconocido")
                         if preference != "auto" and preference != profile:
                             raise ValueError("Perfil de cascada inconsistente")
+                        waterfall_max = self.address_profile_limits(address)[0]
+                        levels = ("slow", "low", "balanced", "high")
+                        if levels.index(profile) > levels.index(waterfall_max):
+                            raise ValueError(f"Esta red permite cascada hasta {waterfall_max}")
                         self.waterfall_profile(ident, profile, preference, profile)
                         continue
                     if update.get("type") == "waterfall-view":
@@ -888,12 +964,19 @@ class Gateway:
                     if update.get("type") == "audio":
                         enabled = update.get("enabled")
                         if type(enabled) is not bool: raise ValueError("Estado de audio inválido")
+                        if (enabled and client["audio_profile"] == "raw" and
+                                self.address_profile_limits(address)[1] != "raw"):
+                            raise ValueError("Audio raw no está permitido para esta red compartida")
                         self.audio_state(ident, enabled)
                         continue
                     if update.get("type") == "audio-profile":
                         profile = update.get("profile")
                         if profile not in ("raw", "balanced", "mobile"):
                             raise ValueError("Perfil de audio desconocido")
+                        audio_max = self.address_profile_limits(address)[1]
+                        levels = ("mobile", "balanced", "raw")
+                        if levels.index(profile) > levels.index(audio_max):
+                            raise ValueError(f"Esta red permite audio hasta {audio_max}")
                         self.audio_profile(ident, profile)
                         continue
                     if update.get("type") != "tune":
@@ -925,6 +1008,8 @@ class Gateway:
                     self.publish(json.dumps({"type": "error", "message": "No se pudo guardar. Tu texto sigue en el formulario; vuelve a intentar."}), ident)
         finally:
             self.clients.pop(ident, None)
+            if not self.address_clients(address):
+                self.address_limit_stage.pop(address, None)
             if sender:
                 sender.cancel()
                 with contextlib.suppress(asyncio.CancelledError, ConnectionError):
@@ -990,6 +1075,10 @@ if __name__ == "__main__":
     parser.add_argument("--source-port", type=int, help="Receiver port (overrides site config)")
     parser.add_argument("--max-clients", type=int, help="Global connection limit (overrides site config)")
     parser.add_argument("--max-clients-per-ip", type=int, help="Per-IP limit (overrides site config)")
+    parser.add_argument("--full-quality-sessions-per-ip", type=int,
+                        help="Sessions allowed premium profiles per IP")
+    parser.add_argument("--max-bandwidth-kbps-per-ip", type=int,
+                        help="Adaptive aggregate egress limit per IP")
     parser.add_argument("--trusted-proxy", help="Proxy IP allowed to set X-HamSDR-Client-IP")
     parser.add_argument("--origin", help="Exact public origin, or * to disable origin protection")
     parser.add_argument("--tls", dest="tls_enabled", action=argparse.BooleanOptionalAction,
@@ -1026,8 +1115,10 @@ if __name__ == "__main__":
             parser.error("origin must be an exact http(s) origin, or *")
     if (not 1 <= args.source_port <= 65535 or not 1 <= args.port <= 65535 or
             not 1 <= args.max_clients <= 20 or not 1 <= args.max_clients_per_ip <= args.max_clients or
+            not 1 <= args.full_quality_sessions_per_ip <= args.max_clients_per_ip or
+            not 1 <= args.max_bandwidth_kbps_per_ip <= 1000000 or
             not 1 <= args.max_size_mb <= 1048576):
-        parser.error("Ports: 1..65535; clients: 1..20; database maximum: 1..1048576 MB")
+        parser.error("Invalid ports, clients, bandwidth or database limits")
     try:
         ssl_context = create_tls_context(args)
     except ValueError as error:

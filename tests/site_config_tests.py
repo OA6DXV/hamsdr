@@ -15,6 +15,8 @@ port=18093
 trusted_proxy=""
 max_clients=10
 max_clients_per_ip=3
+full_quality_sessions_per_ip=2
+max_bandwidth_kbps_per_ip=1000
 [secure]
 {secure}
 [html]
@@ -76,6 +78,8 @@ class SiteConfigTests(unittest.TestCase):
                              (8.0, "manual", 80))
             self.assertEqual(runtime["database"], Path(directory) / "community.sqlite3")
             self.assertEqual(runtime["max_size_mb"], 50)
+            self.assertEqual(runtime["full_quality_sessions_per_ip"], 2)
+            self.assertEqual(runtime["max_bandwidth_kbps_per_ip"], 1000)
             path.write_text(installation(directory).replace('receiver_gain=8.0\n', ''))
             automatic = load_runtime_config(path)
             self.assertEqual((automatic["receiver_gain"], automatic["gain_mode"], automatic["gain_tenth_db"]),
