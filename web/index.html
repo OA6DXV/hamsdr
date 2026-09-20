@@ -18,6 +18,7 @@
 <label><b>Audio:</b> <select id="audio-quality"><option value="raw">raw</option><option value="balanced" selected>balanceado</option><option value="mobile">bajo consumo</option></select></label>
 <label><b>Cascada:</b> <select id="waterfall-quality"><option value="auto">automático</option><option value="slow">conexión lenta</option><option value="low">baja definición</option><option value="balanced" selected>balanceado</option><option value="high">alta definición</option></select></label>
 <small id="audio-profile-status">Opus · 32 kb/s · 16 kHz</small><small id="waterfall-profile-status">Negociando cascada…</small>
+<p id="resource-policy" role="status" aria-live="polite" hidden></p>
 <p id="stream-warning" role="status" aria-live="polite" hidden>Se detectaron cortes en la transmisión. Prueba Audio: Opus bajo consumo y Cascada: conexión lenta.</p></div>
 <div id="panorama"><canvas id="waterfall" width="1024" height="100" aria-label="Cascada de señales. Pulse para sintonizar."></canvas>
 <div id="spectrum-axis" hidden aria-label="Escala vertical del espectro en dBFS"></div>
@@ -51,7 +52,7 @@ Grabar audio<br><button id="record">iniciar</button> <span id="record-status" ro
 <p id="message" role="alert"></p><hr>
 <div class="community-layout">
 <section class="ctl community-panel" aria-label="Chat en vivo"><b>Chatbox:</b>
-<p class="chat-notice">Este chatbox es para discutir la operación del HamSDR. El nombre es elegido por cada oyente. Los mensajes son públicos y se conservan durante 90 días, hasta 10 000 mensajes.</p>
+<p class="chat-notice">Este chatbox es para discutir la operación del HamSDR. El nombre es elegido por cada oyente. Los mensajes son públicos y se conservan mientras la base comunitaria disponga de espacio.</p>
 <button id="older-chat" class="small" hidden>Ver mensajes anteriores</button><div id="chatbox" role="log" aria-live="polite" aria-label="Mensajes del chat"></div>
 <form id="chatform"><input id="chat-text" maxlength="500" aria-label="Mensaje de chat" autocomplete="off" required><button class="primary" id="send-chat">Enviar comentarios</button></form><p id="chat-status" role="status">Conectando al chat…</p></section>
 <section class="ctl community-panel" aria-label="Logbook"><b>Logbook:</b>

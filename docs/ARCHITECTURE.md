@@ -38,19 +38,21 @@ input frames at 16 kHz and is decoded through WebCodecs before entering the
 same AudioWorklet output path.
 
 The browser uses a same-origin `/ws` connection. Text messages are JSON
-`tune`, `tuned`, `status`, `error`, `identify`, `identified`, `presence`,
+`hello`, `tune`, `tuned`, `status`, `error`, `identify`, `identified`, `presence`,
 `chat`, `log`, `event`, `ack`, and `history`. Binary frames have one type byte followed
-by spectrum, PCM or meter payload. On `unstable`, browser kind 7 carries a
+by spectrum, PCM or meter payload. Browser kind 7 carries a
 versioned, independently decodable max-pooled and bit-packed spectrum row;
 protocol v2 carries every profile with its frequency window and sequence. A shared
 65536-bin FFT lets the gateway project a client's zoom to at most 1024, 2048 or
 4096 directly drawable bins without increasing packet size. Audio delivery is separately
 negotiated and defaults off; disabling it purges queued PCM or Opus before the server
-acknowledges the state. The private protocol is versioned;
+acknowledges the state. The private protocol is versioned. The client must
+negotiate application protocol version 1 and waterfall protocol version 2
+before sending controls;
 waterfall cadence is negotiated per client from a 15.625 rows/s source. High
 definition can use 11.7 rows/s; normal, slow and very slow use 7.8, 3.9 or 1.3,
 so slower display settings reduce transport instead of discarding browser frames.
-version negotiation is required before any stable release. Browsers without a
+Browsers without a
 compatible WebCodecs Opus decoder fall back to raw PCM16.
 
 Client-side diagnostics observe AudioWorklet underruns, gaps or large delays
@@ -93,7 +95,7 @@ self-declared; no password, verified identity, or IP address is broadcast.
 Presence includes name, frequency, mode and color, updated after a tune,
 rename, connection or disconnection.
 
-History is SQLite schema version 1, WAL + synchronous FULL. A single executor
+History is SQLite schema version 1, PERSIST journal + synchronous FULL. A single executor
 thread owns the database connection, keeping fsync and queries off the audio
 event loop. Chat/log events are committed before acknowledgement; the unique
 (client_key, request_id) pair deduplicates reconnect retries. Snapshot delivery
@@ -104,8 +106,9 @@ AV has a discard-oldest queue of 32 frames. JSON control/history events use a
 separate queue of 64 messages, prioritized for delivery. A stalled reliable
 queue closes the connection and the browser reloads persisted history. Chat
 is limited per connection and globally; only plain text is rendered. Records
-expire at the configured retention (default 90 days) with a 10,000-row cap per
-category. Browser history maps are capped at 10,000 entries too.
+do not expire by age. The database-size ceiling defaults to 50 MB; when space
+must be reused, the oldest chat or logbook records are removed first. Browser
+history maps remain capped at 10,000 entries.
 
 Runtime data belongs outside Git. Backups must use SQLite's online backup API
-rather than copying an active WAL file alone.
+rather than copying an active database and its journal independently.

@@ -1,11 +1,12 @@
 'use strict';
 const $ = id => document.getElementById(id);
 const utf8Encoder=new TextEncoder();
+const protocolVersion=1,waterfallProtocolVersion=2;
 const defaults = {LSB:[-2700,-300],USB:[300,2700],AM:[-4000,4000],CW:[450,950],NFM:[-5000,5000]};
 const narrowDefaults={LSB:[-2200,-500],USB:[500,2200],AM:[-2500,2500],CW:[600,800],NFM:[-3000,3000]};
 let narrow=false, peakPower=-120, lastPeak=0, lastGraph=0, lastDraw=0, occupants=[];
 let frequency=7100000, mode='LSB', low=-2700, high=-300, center=7100500, rate=1024000;
-let bandConfigured=false;
+let bandConfigured=false,protocolReady=false,opusAvailable=true,currentResourcePolicy=null;
 let zoom=1, viewCenter=center, socket, retry=500, timer, tuneTimer, lastRow, view='waterfall', muted=false;
 let dynamicSpectrumBottom=null,dynamicSpectrumTop=null;
 let context, node, gain, audioStarting=false, audioEnabled=false, audioEverStarted=false, audioProfile='balanced', opusDecoder=null, opusSupportPromise=null, lastOpusSequence=null, spectrumFrames=0, audioPackets=0;
@@ -32,6 +33,20 @@ const beat=()=>mode==='CW'?700:0;
 function waterfallFps(){if(waterfallSpeed==='high')return 11.71875;return(waterfallProfile==='slow'?5:7.8125)/waterfallSpeed;}
 function waterfallSourceGap(){if(waterfallSpeed==='high')return 4/3;return(waterfallProfile==='slow'?25/8:2)*waterfallSpeed;}
 function message(text=''){ $('message').textContent=text; }
+function applyResourcePolicy(policy){
+  if(policy!==undefined)currentResourcePolicy=policy;
+  policy=currentResourcePolicy;
+  const waterfallRanks={slow:0,low:1,balanced:2,high:3},audioRanks={mobile:0,balanced:1,raw:2};
+  const waterfallMax=policy?.waterfall_max||'high',audioMax=policy?.audio_max||'raw';
+  document.querySelectorAll('#waterfall-quality option').forEach(option=>{
+    option.disabled=option.value!=='auto'&&waterfallRanks[option.value]>waterfallRanks[waterfallMax];
+  });
+  document.querySelectorAll('#audio-quality option').forEach(option=>{
+    option.disabled=audioRanks[option.value]>audioRanks[audioMax]||(option.value!=='raw'&&!opusAvailable);
+  });
+  const notice=$('resource-policy');notice.hidden=!policy?.restricted;
+  notice.textContent=policy?.restricted?`${policy.message} Máximo: cascada ${waterfallMax}, audio ${audioMax}.`:'';
+}
 function reportStreamInterruption(reason){
   if(document.visibilityState==='hidden')return;
   const now=performance.now();
@@ -269,13 +284,16 @@ function connect(){
   const address=new URL('./ws',location.href);address.protocol=location.protocol==='https:'?'wss:':'ws:';
   socket=new WebSocket(address);
   socket.binaryType='arraybuffer';
-  socket.onopen=()=>{retry=500;socketOpenedAt=performance.now();lastWaterfallSequence=null;lastWaterfallAt=0;if(bandConfigured){tune();sendWaterfallView();}sendWaterfallPreference();sendWaterfallSpeed();sendAudioProfile();window.radioSend({type:'audio',enabled:audioEnabled});window.dispatchEvent(new Event('radio-open'));};
+  socket.onopen=()=>{retry=500;socketOpenedAt=performance.now();lastWaterfallSequence=null;lastWaterfallAt=0;protocolReady=false;socket.send(JSON.stringify({type:'hello',protocol:protocolVersion,waterfall:waterfallProtocolVersion}));};
   socket.onmessage=({data})=>{
     trafficBytes+=typeof data==='string'?utf8Encoder.encode(data).byteLength:data.byteLength;
     if(typeof data==='string'){
       const msg=JSON.parse(data);
       window.dispatchEvent(new CustomEvent('radio-event',{detail:msg}));
-      if(msg.type==='status'){
+      if(msg.type==='hello'){
+        if(msg.protocol!==protocolVersion||msg.waterfall!==waterfallProtocolVersion){message('El servidor usa un protocolo incompatible.');socket.close(1002,'Incompatible protocol');return;}
+        protocolReady=true;if(bandConfigured){tune();sendWaterfallView();}sendWaterfallPreference();sendWaterfallSpeed();sendAudioProfile();window.radioSend({type:'audio',enabled:audioEnabled});window.dispatchEvent(new Event('radio-open'));
+      }else if(msg.type==='status'){
         center=msg.center;rate=msg.sample_rate;$('listeners').textContent=msg.users;
         if(!bandConfigured){
           frequency=Number.isFinite(msg.initial_frequency)?msg.initial_frequency:Math.round(center/1000)*1000;
@@ -284,17 +302,17 @@ function connect(){
           $('frequency').min=String(minimum);$('frequency').max=String(maximum);
           scale.setAttribute('aria-valuemin',String(minimum));scale.setAttribute('aria-valuemax',String(maximum));
           memories=memories.filter(memory=>memory.frequency>=center-rate/2&&memory.frequency<=center+rate/2);
-          controls();renderMemories();sendWaterfallView();tune();
+          controls();renderMemories();if(protocolReady){sendWaterfallView();tune();}
         }
         $('demo').hidden=!msg.demo;
         const labels={streaming:'● Receptor conectado',demo:'● Receptor de prueba',connecting:'Conectando al SDR…',disconnected:'SDR desconectado · reconectando…',reconnecting:'Recuperando receptor…','connect-failed':'SDR no disponible · reintentando…','invalid-header':'Entrada IQ incompatible','stopped':'SDR detenido'};
         $('connection').textContent=labels[msg.source]||msg.source;
         $('stats').textContent=`Carga: ${msg.cpu_percent??0}% de un núcleo · ${msg.users} oyente(s) · Tráfico total: ${msg.kbps??0} kb/s · Recuperaciones: ${msg.restarts}`;
-        document.querySelectorAll('#audio-quality option:not([value="raw"])').forEach(option=>option.disabled=msg.opus_available===false);
+        opusAvailable=msg.opus_available!==false;applyResourcePolicy();
         if(msg.opus_available===false&&audioProfile!=='raw')fallbackFromOpus('Opus no está instalado en el servidor.');
         if(!['streaming','demo'].includes(msg.source))resetAudio();
       }else if(msg.type==='waterfall-profile'){
-        waterfallProfile=msg.profile;lastWaterfallSequence=null;lastWaterfallAt=0;showWaterfallProfile();
+        waterfallProfile=msg.profile;if(msg.preference){waterfallPreference=msg.preference;$('waterfall-quality').value=waterfallPreference;}lastWaterfallSequence=null;lastWaterfallAt=0;showWaterfallProfile();
       }else if(msg.type==='waterfall-speed'){
         waterfallSpeed=msg.divisor;lastWaterfallSequence=null;lastWaterfallAt=0;$('wfspeed').value=String(msg.divisor);$('waterfall').dataset.speed=String(msg.divisor);showWaterfallProfile();
       }else if(msg.type==='stream-stats'){
@@ -303,7 +321,8 @@ function connect(){
         audioEnabled=msg.enabled;if(msg.profile)audioProfile=msg.profile;showAudioProfile();showAudioState();
       }else if(msg.type==='audio-profile'){
         audioProfile=msg.profile;resetAudio();showAudioProfile();
-      }else if(msg.type==='resource-limit')message(msg.message);
+      }else if(msg.type==='resource-policy')applyResourcePolicy(msg);
+      else if(msg.type==='resource-limit')message(msg.message);
       else if(msg.type==='error')message(msg.message);
       else if(msg.type==='tuned'){$('frequency').dataset.confirmed=String(msg.frequency);}
       return;
@@ -320,7 +339,7 @@ function connect(){
     if([10,11].includes(kind)&&audioEnabled){audioPackets++;$('audio-status').dataset.packets=String(audioPackets);decodeOpusPacket(bytes.subarray(1));}
     if(kind===3)updateMeter(Number(new TextDecoder().decode(bytes.subarray(1))));
   };
-  socket.onclose=()=>{if(socketOpenedAt&&performance.now()-socketOpenedAt>3000)reportStreamInterruption('websocket');socketOpenedAt=0;lastWaterfallSequence=null;lastWaterfallAt=0;resetAudio();occupants=[];drawUsers();window.dispatchEvent(new Event('radio-close'));$('connection').textContent='Conexión interrumpida · reintentando…';timer=setTimeout(connect,retry);retry=Math.min(retry*2,10000);};
+  socket.onclose=()=>{if(socketOpenedAt&&performance.now()-socketOpenedAt>3000)reportStreamInterruption('websocket');socketOpenedAt=0;protocolReady=false;lastWaterfallSequence=null;lastWaterfallAt=0;resetAudio();occupants=[];drawUsers();window.dispatchEvent(new Event('radio-close'));$('connection').textContent='Conexión interrumpida · reintentando…';timer=setTimeout(connect,retry);retry=Math.min(retry*2,10000);};
   socket.onerror=()=>socket.close();
 }
 window.radioSend=data=>{if(socket?.readyState!==WebSocket.OPEN)return false;socket.send(JSON.stringify(data));return true;};

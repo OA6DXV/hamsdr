@@ -56,7 +56,7 @@ class SiteConfigTests(unittest.TestCase):
         self.assertEqual(generic["receiver_name"], "HamSDR")
         self.assertEqual(generic["callsign"], "N0CALL")
         self.assertTrue(generic["show_admin"])
-        self.assertEqual(generic["version"], "0.3.7-dev")
+        self.assertEqual(generic["version"], "0.4.0")
         self.assertIsNone(logo)
         self.assertEqual(station["mobile_page"], "/")
         self.assertFalse(bands[0]["enable"])

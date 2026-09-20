@@ -99,10 +99,18 @@ from arbitrary peers.
 Shared-address resource policy is configured with
 `full_quality_sessions_per_ip` and `max_bandwidth_kbps_per_ip`. By default, at
 most two sessions behind one address may select high-definition waterfall or
-raw PCM audio. The server measures aggregate egress every five seconds; above
-1,000 kb/s it progressively reduces waterfall and audio profiles instead of
-randomly dropping audio packets. The connection ceiling remains an independent
-last-resort control.
+raw PCM audio. The server measures application payload egress every five
+seconds. Three consecutive samples above 1,000 kb/s progressively reduce
+waterfall and audio profiles; three samples below 80% of the threshold release
+each reduction stage. TLS, WebSocket, TCP, reverse-proxy and CDN overhead are
+not included, so this is an adaptive application limit rather than an exact
+network shaper. The connection ceiling remains an independent last-resort
+control.
+
+Each WebSocket starts with an explicit protocol handshake. The current
+application protocol is version 1 and negotiates waterfall protocol version 2
+before the server accepts tuning, profile, chat or logbook controls. An
+incompatible or silent client is closed rather than receiving binary streams.
 
 ## Site customization
 

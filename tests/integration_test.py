@@ -46,6 +46,9 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
     async def connect(self):
         ws=await self.session.ws_connect(self.url+'/ws',origin=self.url)
         self.sockets.append(ws)
+        await ws.send_json({'type':'hello','protocol':1,'waterfall':2})
+        reply=await self.event(ws,'hello')
+        self.assertEqual((reply['protocol'],reply['waterfall']),(1,2))
         return ws
 
     async def event(self, ws, kind, predicate=lambda x: True):
@@ -353,6 +356,18 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
         one=await self.session.ws_connect(self.url+'/ws',origin=self.url,headers={'X-HamSDR-Client-IP':'192.0.2.1'})
         two=await self.session.ws_connect(self.url+'/ws',origin=self.url,headers={'X-HamSDR-Client-IP':'192.0.2.2'})
         self.sockets.extend((one,two))
+        for ws in (one,two):
+            await ws.send_json({'type':'hello','protocol':1,'waterfall':2})
+            await self.event(ws,'hello')
+
+    async def test_protocol_negotiation_rejects_incompatible_clients(self):
+        ws=await self.session.ws_connect(self.url+'/ws',origin=self.url)
+        self.sockets.append(ws)
+        await ws.send_json({'type':'hello','protocol':99,'waterfall':2})
+        async with asyncio.timeout(3):
+            while not ws.closed:
+                await ws.receive()
+        self.assertEqual(ws.close_code,1002)
 
     async def test_shared_ip_resource_profiles(self):
         gateway=self.app[GATEWAY]
@@ -379,6 +394,18 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
         gateway.enforce_address_limits('127.0.0.1')
         self.assertEqual((await self.event(first,'waterfall-profile'))['profile'],'low')
         self.assertEqual((await self.event(first,'audio-profile'))['profile'],'mobile')
+
+        gateway.address_limit_stage.pop('127.0.0.1',None)
+        gateway.address_bandwidth_samples.pop('127.0.0.1',None)
+        gateway.observe_address_bandwidth('127.0.0.1',1100)
+        gateway.observe_address_bandwidth('127.0.0.1',1100)
+        self.assertNotIn('127.0.0.1',gateway.address_limit_stage)
+        gateway.observe_address_bandwidth('127.0.0.1',1100)
+        self.assertEqual(gateway.address_limit_stage['127.0.0.1'],1)
+        gateway.observe_address_bandwidth('127.0.0.1',900)
+        self.assertEqual(gateway.address_limit_stage['127.0.0.1'],1)
+        for _ in range(3):gateway.observe_address_bandwidth('127.0.0.1',700)
+        self.assertNotIn('127.0.0.1',gateway.address_limit_stage)
 
     async def test_cw_carrier_frequency_and_narrow_filter(self):
         ws=await self.connect()

@@ -20,10 +20,11 @@ from urllib.parse import urlsplit
 from aiohttp import web, WSMsgType
 from community import History, plain_text
 from opus_codec import OPUS_AVAILABLE, OpusEncoder
-from waterfall_codec import encode as encode_waterfall
+from waterfall_codec import VERSION as WATERFALL_PROTOCOL_VERSION, encode as encode_waterfall
 
 ROOT = Path(__file__).resolve().parent
-VERSION = "0.3.7-dev"
+VERSION = "0.4.0"
+PROTOCOL_VERSION = 1
 MODES = {"USB": (300, 2700), "LSB": (-2700, -300), "AM": (-4000, 4000),
          "CW": (450, 950), "NFM": (-5000, 5000)}
 
@@ -408,6 +409,7 @@ class Gateway:
         self.waterfall_sequence = 0
         self.connection_attempts = OrderedDict()
         self.address_limit_stage = {}
+        self.address_bandwidth_samples = {}
         (self.site_config, self.site_logo, self.station,
          self.bands, self.receiverbook) = load_site_config(getattr(args, "site_config", None))
 
@@ -471,6 +473,8 @@ class Gateway:
         for ident, client in tuple(self.clients.items()):
             if target and target != ident:
                 continue
+            if not isinstance(packet, str) and not client.get("protocol_ready", False):
+                continue
             queue = client["reliable"] if isinstance(packet, str) else client["queue"]
             if queue.full():
                 if isinstance(packet, str):
@@ -517,6 +521,34 @@ class Gateway:
             return "balanced", "balanced", True
         return "high", "raw", False
 
+    def publish_address_policy(self, address, rate=None):
+        """Tell every session which profiles its shared address may select."""
+        waterfall_max, audio_max, restricted = self.address_profile_limits(address)
+        sessions = len(self.address_clients(address))
+        crowded = sessions > getattr(self.args, "full_quality_sessions_per_ip", 2)
+        bandwidth_limited = self.address_limit_stage.get(address, 0) > 0
+        if bandwidth_limited and crowded:
+            reason = "sessions-and-bandwidth"
+            message = "Calidad limitada por sesiones múltiples y tráfico agregado de esta red."
+        elif bandwidth_limited:
+            reason = "bandwidth"
+            message = "Calidad limitada porque esta red superó el máximo de tráfico agregado."
+        elif crowded:
+            reason = "sessions"
+            message = "Calidad limitada porque esta red tiene más de dos sesiones activas."
+        else:
+            reason, message = "none", ""
+        signature = (restricted, waterfall_max, audio_max, reason)
+        for ident, client in self.address_clients(address):
+            if client.get("resource_policy") == signature:
+                continue
+            client["resource_policy"] = signature
+            self.publish(json.dumps({"type":"resource-policy", "restricted":restricted,
+                "reason":reason, "message":message, "sessions":sessions,
+                "waterfall_max":waterfall_max, "audio_max":audio_max,
+                "measured_kbps":round(rate, 1) if rate is not None else None,
+                "max_kbps":getattr(self.args, "max_bandwidth_kbps_per_ip", 1000)}), ident)
+
     def enforce_address_limits(self, address, notify=True):
         """Reduce expensive profiles without dropping an otherwise healthy session."""
         waterfall_max, audio_max, restricted = self.address_profile_limits(address)
@@ -543,6 +575,39 @@ class Gateway:
                 self.publish(json.dumps({"type":"resource-limit", "message":message,
                     "waterfall_max":waterfall_max, "audio_max":audio_max,
                     "restricted":restricted}), ident)
+        self.publish_address_policy(address)
+
+    def observe_address_bandwidth(self, address, rate):
+        """Apply three-sample activation and release hysteresis to one address."""
+        maximum = getattr(self.args, "max_bandwidth_kbps_per_ip", 1000)
+        state = self.address_bandwidth_samples.setdefault(address, {"over": 0, "under": 0})
+        stage = self.address_limit_stage.get(address, 0)
+        changed = False
+        if rate > maximum:
+            state["over"] += 1
+            state["under"] = 0
+            if state["over"] >= 3:
+                new_stage = min(3, stage + 1)
+                changed = new_stage != stage
+                self.address_limit_stage[address] = new_stage
+                state["over"] = 0
+        elif rate < maximum * 0.8:
+            state["under"] += 1
+            state["over"] = 0
+            if state["under"] >= 3:
+                new_stage = max(0, stage - 1)
+                changed = new_stage != stage
+                if new_stage:
+                    self.address_limit_stage[address] = new_stage
+                else:
+                    self.address_limit_stage.pop(address, None)
+                state["under"] = 0
+        else:
+            state["over"] = state["under"] = 0
+        if changed:
+            self.enforce_address_limits(address)
+        else:
+            self.publish_address_policy(address, rate)
 
     def audio_state(self, ident, enabled):
         client = self.clients.get(ident)
@@ -690,18 +755,12 @@ class Gateway:
                 self.publish(json.dumps({"type":"stream-stats", "kbps":rate,
                     "waterfall_profile":client["waterfall_profile"],
                     "audio_profile":client["audio_profile"]}), ident)
-            maximum = getattr(self.args, "max_bandwidth_kbps_per_ip", 1000)
             active_addresses = set(address_rates)
             for address, rate in address_rates.items():
-                previous_stage = self.address_limit_stage.get(address, 0)
-                if rate > maximum:
-                    self.address_limit_stage[address] = min(3, previous_stage + 1)
-                    self.enforce_address_limits(address)
-                else:
-                    self.address_limit_stage.pop(address, None)
-                    self.enforce_address_limits(address, notify=False)
+                self.observe_address_bandwidth(address, rate)
             for address in set(self.address_limit_stage) - active_addresses:
                 self.address_limit_stage.pop(address, None)
+                self.address_bandwidth_samples.pop(address, None)
             self.status()
 
     async def community(self, ident, update):
@@ -879,10 +938,12 @@ class Gateway:
                   "waterfall_speed": 1, "waterfall_phase": 0, "waterfall_emitted": 0,
                   "congestion": 0, "stable_intervals": 0, "sent_bytes": 0, "last_sent": 0,
                   "audio_enabled": False, "audio_profile": "balanced",
-                  "opus_encoder": None, "opus_pending": bytearray(), "opus_sequence": 0}
+                  "opus_encoder": None, "opus_pending": bytearray(), "opus_sequence": 0,
+                  "protocol_ready": False, "resource_policy": None}
         self.clients[ident] = client
         self.enforce_address_limits(address)
         sender = None
+        protocol_timer = None
         try:
             await ws.prepare(request)
             await self.command(self.settings_command(ident, settings))
@@ -903,11 +964,11 @@ class Gateway:
                 except (ConnectionError, asyncio.TimeoutError):
                     await ws.close()
             sender = asyncio.create_task(send())
-            self.status()
-            self.presence()
-            async with self.community_lock:
-                self.publish(json.dumps(await self.history.history("chat")), ident)
-                self.publish(json.dumps(await self.history.history("log")), ident)
+            async def require_protocol():
+                await asyncio.sleep(5)
+                if not client["protocol_ready"]:
+                    await ws.close(code=1002, message=b"Protocol negotiation timeout")
+            protocol_timer = asyncio.create_task(require_protocol())
             tokens, last = 30.0, time.monotonic()
             async for message in ws:
                 if message.type != WSMsgType.TEXT:
@@ -923,6 +984,26 @@ class Gateway:
                     update = json.loads(message.data)
                     if not isinstance(update, dict):
                         raise ValueError("Control desconocido")
+                    if update.get("type") == "hello":
+                        if client["protocol_ready"]:
+                            raise ValueError("El protocolo ya fue negociado")
+                        if (update.get("protocol") != PROTOCOL_VERSION or
+                                update.get("waterfall") != WATERFALL_PROTOCOL_VERSION):
+                            await ws.close(code=1002, message=b"Incompatible protocol")
+                            break
+                        client["protocol_ready"] = True
+                        protocol_timer.cancel()
+                        self.publish(json.dumps({"type":"hello", "protocol":PROTOCOL_VERSION,
+                            "waterfall":WATERFALL_PROTOCOL_VERSION}), ident)
+                        self.status()
+                        self.presence()
+                        async with self.community_lock:
+                            self.publish(json.dumps(await self.history.history("chat")), ident)
+                            self.publish(json.dumps(await self.history.history("log")), ident)
+                        continue
+                    if not client["protocol_ready"]:
+                        await ws.close(code=1002, message=b"Protocol negotiation required")
+                        break
                     if update.get("type") in ("identify", "history", "chat", "log"):
                         await self.community(ident, update)
                         continue
@@ -1010,10 +1091,17 @@ class Gateway:
             self.clients.pop(ident, None)
             if not self.address_clients(address):
                 self.address_limit_stage.pop(address, None)
+                self.address_bandwidth_samples.pop(address, None)
+            else:
+                self.enforce_address_limits(address, notify=False)
             if sender:
                 sender.cancel()
                 with contextlib.suppress(asyncio.CancelledError, ConnectionError):
                     await sender
+            if protocol_timer:
+                protocol_timer.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await protocol_timer
             if not self.stopping:
                 await self.command(f"del {ident}")
             self.status()
