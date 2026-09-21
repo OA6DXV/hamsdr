@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 """Bounded real-source smoke/load probe. Never sends hardware tuning commands."""
 import asyncio
 import json

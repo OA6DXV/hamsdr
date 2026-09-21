@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 import ssl
 import subprocess
 from pathlib import Path

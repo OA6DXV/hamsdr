@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 """Protocol, multi-user isolation, restart, and invalid-control regression tests."""
 import asyncio
 import contextlib

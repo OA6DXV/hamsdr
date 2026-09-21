@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 """Online SQLite backup, safe with a live WAL database. Never overwrites a file."""
 import argparse
 from datetime import datetime, timezone

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 'use strict';
 window.decodeWaterfallRow=bytes=>{
   if(!(bytes instanceof Uint8Array)||bytes.length<17)return null;

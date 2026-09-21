@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 #include "hamsdr/iq.hpp"
 
 namespace hamsdr {

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 #include "hamsdr/rtl_tcp_client.hpp"
 
 #include <arpa/inet.h>

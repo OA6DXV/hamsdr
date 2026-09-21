@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 """Cursor pagination, durable backup, size limiting and retry uniqueness."""
 import asyncio
 from pathlib import Path

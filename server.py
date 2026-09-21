@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 """Small HTTP/WebSocket gateway. DSP stays in one shared C++ subprocess."""
 import argparse
 import asyncio

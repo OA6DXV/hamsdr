@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 'use strict';
 // Low-latency HTTP fallback for browsers that block AudioWorklet outside a secure context.
 (() => {

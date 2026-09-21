@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 """Durable community history. Database work runs off the audio event loop."""
 import asyncio
 from concurrent.futures import ThreadPoolExecutor

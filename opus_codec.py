@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 """Minimal ctypes binding to the system libopus for low-latency mono packets."""
 import ctypes
 import ctypes.util

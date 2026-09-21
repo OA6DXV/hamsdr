@@ -1,5 +1,7 @@
 # HamSDR
 
+Copyright (C) 2026 OA6DXV
+
 HamSDR is a lightweight, multi-user software-defined radio receiver with a
 responsive browser interface and server-side DSP.
 
@@ -192,5 +194,14 @@ only for controlled diagnostics.
 - `dev`: active implementation and integration testing.
 - `main`: stable releases only.
 
-No project license has been selected yet. Public availability alone does not
-grant permission to copy, modify or redistribute the source.
+## License
+
+HamSDR is licensed under the GNU General Public License, version 3
+(GPL-3.0-only). See [LICENSE](LICENSE).
+
+The source tree includes no receiver-specific configuration, credentials,
+certificates, databases, or bundled third-party binaries. Installation-specific
+files belong outside the repository.
+
+Third-party runtime dependencies and redistribution notes are listed in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

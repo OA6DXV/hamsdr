@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 # Every installation-specific file must be placed directly in this directory.
 working_directory = "/etc/hamsdr"
 

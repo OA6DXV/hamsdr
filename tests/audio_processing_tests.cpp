@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 #include "hamsdr/audio_processing.hpp"
 #include <cmath>
 #include <numbers>

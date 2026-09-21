@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 """Versioned, independently decodable waterfall row codec.
 
 This codec deliberately has no dependency between rows: a dropped WebSocket

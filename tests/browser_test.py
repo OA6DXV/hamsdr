@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 """Visual/control/audio smoke checks; community writes are restricted to local demo."""
 import asyncio
 from pathlib import Path

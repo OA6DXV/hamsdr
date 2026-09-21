@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 cmake_minimum_required(VERSION 3.20)
 project(hamsdr_next VERSION 0.4.0 LANGUAGES CXX)
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 'use strict';
 // Interpolate the familiar purple/yellow radio palette once at startup.
 window.radioPalette = Array.from({length:256},(_,i)=>{

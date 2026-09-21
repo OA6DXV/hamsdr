@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
 /* Keep two-finger gestures under the waterfall's own zoom handler. */
 #waterfall{touch-action:none}
 #waterfall-profile-status{display:block;color:#555;font-size:11px}

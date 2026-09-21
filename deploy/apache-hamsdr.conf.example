@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 <VirtualHost *:443>
     ServerName radio.example.com
 

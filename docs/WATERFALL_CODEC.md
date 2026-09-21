@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+
 # Waterfall protocol v2
 
 The waterfall codec remains independent from the separately selectable PCM/Opus

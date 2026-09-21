@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+
 # Architecture
 
 HamSDR is an original implementation informed by observed radio behavior,
