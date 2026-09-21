@@ -4,6 +4,7 @@ const $ = id => document.getElementById(id);
 const utf8Encoder=new TextEncoder();
 const protocolVersion=1,waterfallProtocolVersion=2;
 const sharedParams=new URLSearchParams(location.search);
+const siteConfig=window.hamSdrSiteConfig||{};
 const defaults = {LSB:[-2700,-300],USB:[300,2700],AM:[-4000,4000],CW:[450,950],NFM:[-5000,5000]};
 const narrowDefaults={LSB:[-2200,-500],USB:[500,2200],AM:[-2500,2500],CW:[600,800],NFM:[-3000,3000]};
 let narrow=false, peakPower=-120, lastPeak=0, lastGraph=0, lastDraw=0, occupants=[];
@@ -12,6 +13,7 @@ let bandConfigured=false,sharedTuningApplied=false,protocolReady=false,opusAvail
 let zoom=1, viewCenter=center, socket, retry=500, timer, tuneTimer, lastRow, view='waterfall', muted=false;
 let dynamicSpectrumBottom=null,dynamicSpectrumTop=null;
 let context, node, gain, audioStarting=false, audioEnabled=false, audioEverStarted=false, audioProfile='balanced', opusDecoder=null, opusSupportPromise=null, lastOpusSequence=null, spectrumFrames=0, audioPackets=0;
+let digimodesAvailable=!!siteConfig.digimodes,digitalMode=null,digitalWorker=null,digitalRows=[],digitalDownloadUrl=null,digitalDecoderNotice=false;
 let spectrumHistory=[];
 let waterfallPreference='balanced',waterfallProfile='balanced',waterfallSpeed=1,drawAverage=0,lastProfileRequest=0,profileTimer,pendingRow,waterfallFrame;
 let trafficBytes=0,trafficAt=performance.now();
@@ -118,6 +120,78 @@ function sendWaterfallPreference(forced){
 function sendWaterfallView(){if(socket?.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type:'waterfall-view',zoom,center:Math.round(viewCenter)}));}
 function sendWaterfallSpeed(){if(socket?.readyState===WebSocket.OPEN){const value=$('wfspeed').value;socket.send(JSON.stringify({type:'waterfall-speed',divisor:value==='high'?'high':Number(value)}));}}
 function sendAudioProfile(){if(socket?.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type:'audio-profile',profile:audioProfile}));}
+function sendDigitalMode(){if(socket?.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type:'digital-mode',mode:digitalMode}));}
+function setDigitalControlsVisible(visible){
+  document.querySelectorAll('[data-digital-mode],[data-digital-menu]').forEach(button=>button.hidden=!visible);
+  if(!visible&&digitalMode)setDigitalMode(null);
+}
+function drawDigitalSamples(samples){
+  const canvas=$('digital-waterfall'),g=canvas.getContext('2d'),w=canvas.width,h=canvas.height;
+  g.drawImage(canvas,0,1,w,h-1,0,0,w,h-1);
+  const row=g.createImageData(w,1),step=Math.max(1,Math.floor(samples.length/w));
+  for(let x=0;x<w;x++){
+    let peak=0;
+    for(let i=x*step;i<Math.min(samples.length,(x+1)*step);i++)peak=Math.max(peak,Math.abs(samples[i]));
+    const v=Math.max(0,Math.min(1,peak/20000)),r=Math.round(35+220*v),b=Math.round(65+130*v);
+    row.data[x*4]=r;row.data[x*4+1]=Math.round(14+210*Math.max(0,v-.72));row.data[x*4+2]=b;row.data[x*4+3]=255;
+  }
+  g.putImageData(row,0,h-1);
+}
+function ensureDigitalWorker(){
+  if(digitalWorker)return digitalWorker;
+  digitalWorker=new Worker(new URL('./digital-worker.js',location.href),{type:'module'});
+  digitalWorker.onmessage=({data})=>{
+    if(data.type==='status')$('digital-state').textContent=data.message;
+    if(data.type==='notice'&&!digitalDecoderNotice){digitalDecoderNotice=true;addDigitalRow({utc:new Date().toISOString().slice(11,19),snr:'',dt:'',hz:'',text:data.message,placeholder:true});}
+    if(data.type==='decoded')addDigitalRow(data.result);
+  };
+  return digitalWorker;
+}
+function stopDigitalWorker(){
+  if(digitalWorker){digitalWorker.terminate();digitalWorker=null;}
+  digitalDecoderNotice=false;
+}
+function addDigitalRow(row){
+  const autoclear=$('digital-autoclear').checked;
+  digitalRows.push(row);
+  if(autoclear&&digitalRows.length>300)digitalRows.splice(0,digitalRows.length-300);
+  renderDigitalRows();
+}
+function renderDigitalRows(){
+  const body=$('digital-log').tBodies[0];body.replaceChildren();
+  for(const row of digitalRows.slice(-500).reverse()){
+    const tr=document.createElement('tr');if(row.placeholder)tr.className='digital-placeholder';
+    for(const key of ['utc','snr','dt','hz','text']){
+      const cell=document.createElement('td');cell.textContent=String(row[key]??'');tr.append(cell);
+    }
+    body.append(tr);
+  }
+  $('digital-download').disabled=!digitalRows.length;
+}
+function setDigitalMode(next){
+  if(next&&!digimodesAvailable){message('Digimodos no están habilitados en este receptor.');return;}
+  digitalMode=digitalMode===next?null:next;
+  document.querySelectorAll('[data-digital-mode]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.digitalMode===digitalMode)));
+  $('digital-panel').hidden=!digitalMode;$('digital-separator').hidden=!digitalMode;
+  if(digitalMode){
+    $('digital-title').textContent=`${digitalMode} · ${mode} · ${(frequency/1000).toFixed(3)} kHz`;
+    $('digital-state').textContent=audioEnabled?'Esperando muestras de 12 kHz…':'Inicia audio para decodificar.';
+    ensureDigitalWorker().postMessage({type:'start',mode:digitalMode,rate:12000,frequency,demodulation:mode});
+  }else{
+    stopDigitalWorker();$('digital-state').textContent='Inactivo';
+  }
+  sendDigitalMode();
+}
+function handleDigitalPacket(bytes){
+  if(!digitalMode||!audioEnabled||bytes.byteLength<16)return;
+  const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength),modeCode=view.getUint8(0);
+  const packetMode=modeCode===1?'FT8':modeCode===2?'FT4':'';
+  if(packetMode!==digitalMode)return;
+  const sequence=view.getUint32(1,true),timestampUs=Number(view.getBigUint64(5,true)),sampleCount=view.getUint16(13,true);
+  const payload=bytes.slice(15),samples=new Int16Array(payload.buffer,payload.byteOffset,Math.floor(payload.byteLength/2));
+  drawDigitalSamples(samples);
+  ensureDigitalWorker().postMessage({type:'samples',mode:packetMode,sequence,timestampUs,sampleCount,payload:payload.buffer},[payload.buffer]);
+}
 function showWaterfallProfile(){
   const names={slow:'conexión lenta · 1024 bins/6 bits',low:'baja definición · 1024 bins/8 bits',balanced:'balanceado · 2048 bins/8 bits',high:'alta definición · 4096 bins/8 bits'};
   const highOption=$('speed-high'),unlocked=waterfallProfile==='high';highOption.hidden=!unlocked;highOption.disabled=!unlocked;
@@ -177,6 +251,7 @@ function renderSpectrumAxis(){
 function controls(){
   $('frequency').value=(frequency/1000).toFixed(2);
   $('mode-display').textContent=mode==='NFM'?'FM':mode;
+  if(digitalMode&&!$('digital-panel').hidden)$('digital-title').textContent=`${digitalMode} · ${mode} · ${(frequency/1000).toFixed(3)} kHz`;
   $('low').value=low; $('high').value=high;
   $('bandwidth').value=((high-low)/1000).toFixed(2);
   document.querySelectorAll('[data-mode]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.mode===mode&&!!b.dataset.narrow===narrow)));
@@ -317,9 +392,10 @@ function connect(){
       window.dispatchEvent(new CustomEvent('radio-event',{detail:msg}));
       if(msg.type==='hello'){
         if(msg.protocol!==protocolVersion||msg.waterfall!==waterfallProtocolVersion){message('El servidor usa un protocolo incompatible.');socket.close(1002,'Incompatible protocol');return;}
-        protocolReady=true;if(bandConfigured){tune();sendWaterfallView();}sendWaterfallPreference();sendWaterfallSpeed();sendAudioProfile();window.radioSend({type:'audio',enabled:audioEnabled});window.dispatchEvent(new Event('radio-open'));
+        protocolReady=true;if(bandConfigured){tune();sendWaterfallView();}sendWaterfallPreference();sendWaterfallSpeed();sendAudioProfile();sendDigitalMode();window.radioSend({type:'audio',enabled:audioEnabled});window.dispatchEvent(new Event('radio-open'));
       }else if(msg.type==='status'){
         center=msg.center;rate=msg.sample_rate;$('listeners').textContent=msg.users;
+        digimodesAvailable=msg.digimodes!==false&&!!siteConfig.digimodes;setDigitalControlsVisible(digimodesAvailable);
         if(!bandConfigured){
           frequency=Number.isFinite(msg.initial_frequency)?msg.initial_frequency:Math.round(center/1000)*1000;
           viewCenter=center;bandConfigured=true;
@@ -344,8 +420,12 @@ function connect(){
         $('client-traffic').dataset.serverKbps=String(msg.kbps);
       }else if(msg.type==='audio-state'){
         audioEnabled=msg.enabled;if(msg.profile)audioProfile=msg.profile;showAudioProfile();showAudioState();
+        if(!audioEnabled&&digitalMode){stopDigitalWorker();$('digital-state').textContent='Recepción detenida; inicia audio para decodificar.';}
       }else if(msg.type==='audio-profile'){
         audioProfile=msg.profile;resetAudio();showAudioProfile();
+      }else if(msg.type==='digital-mode'){
+        if(msg.mode!==digitalMode&&msg.mode!==null)digitalMode=msg.mode;
+        if(digitalMode)$('digital-state').textContent=audioEnabled?'Esperando muestras de 12 kHz…':'Inicia audio para decodificar.';
       }else if(msg.type==='resource-policy')applyResourcePolicy(msg);
       else if(msg.type==='resource-limit')message(msg.message);
       else if(msg.type==='error')message(msg.message);
@@ -362,6 +442,7 @@ function connect(){
       if(node&&context.state==='running')node.port.postMessage({codec:'pcm16',rate,payload,record:false},[payload]);
     }
     if([10,11].includes(kind)&&audioEnabled){audioPackets++;$('audio-status').dataset.packets=String(audioPackets);decodeOpusPacket(bytes.subarray(1));}
+    if(kind===12)handleDigitalPacket(bytes.subarray(1));
     if(kind===3)updateMeter(Number(new TextDecoder().decode(bytes.subarray(1))));
   };
   socket.onclose=()=>{if(socketOpenedAt&&performance.now()-socketOpenedAt>3000)reportStreamInterruption('websocket');socketOpenedAt=0;protocolReady=false;lastWaterfallSequence=null;lastWaterfallAt=0;resetAudio();occupants=[];drawUsers();window.dispatchEvent(new Event('radio-close'));$('connection').textContent='Conexión interrumpida · reintentando…';timer=setTimeout(connect,retry);retry=Math.min(retry*2,10000);};
@@ -403,6 +484,7 @@ async function listen(){
     if(audioProfile!=='raw'&&!await browserSupportsOpus())fallbackFromOpus('Este navegador no ofrece decodificación Opus mediante WebCodecs.');
     gain.gain.value=muted?0:10**(Number($('volume').value)/20);
     audioEnabled=true;audioEverStarted=true;window.radioSend({type:'audio',enabled:true});showAudioState();message();
+    if(digitalMode)ensureDigitalWorker().postMessage({type:'start',mode:digitalMode,rate:12000,frequency,demodulation:mode});
   }catch(error){message(error.message);$('audio-status').textContent='No se pudo iniciar el audio. Pulsa Escuchar para reintentar.';}
   finally{audioStarting=false;}
 }
@@ -413,7 +495,7 @@ function showAudioState(){
   $('audio-status').textContent=audioEnabled?'Audio activado.':'Audio detenido; no consume ancho de banda.';
 }
 async function pauseAudio(){
-  if(!audioEnabled)return;audioEnabled=false;window.radioSend({type:'audio',enabled:false});resetAudio();stopRecording();
+  if(!audioEnabled)return;audioEnabled=false;window.radioSend({type:'audio',enabled:false});resetAudio();stopDigitalWorker();stopRecording();
   if(context?.state==='running')await context.suspend();showAudioState();
 }
 $('listen').addEventListener('click',()=>audioEnabled?pauseAudio():listen());
@@ -431,6 +513,7 @@ $('copy-link').addEventListener('click',async()=>{
 document.querySelectorAll('[data-step]').forEach(b=>b.addEventListener('click',()=>{frequency+=Number(b.dataset.step);tune();}));
 document.querySelectorAll('[data-fix]').forEach(b=>b.addEventListener('click',()=>{frequency=Math.round(frequency/1000)*1000;tune();}));
 document.querySelectorAll('[data-mode]').forEach(b=>b.addEventListener('click',()=>{mode=b.dataset.mode;narrow=!!b.dataset.narrow;[low,high]=(narrow?narrowDefaults:defaults)[mode];tune();}));
+document.querySelectorAll('[data-digital-mode]').forEach(b=>b.addEventListener('click',()=>setDigitalMode(b.dataset.digitalMode)));
 function updateSquelchControl(){const active=$('squelch').checked;$('threshold').disabled=!active;$('squelch-threshold').dataset.active=String(active);$('threshold-value').value=`${String($('threshold').value).replace('-', '−')} dBFS`;}
 for(const id of ['low','high','threshold','notch','nr'])$(id).addEventListener('change',()=>{low=Number($('low').value);high=Number($('high').value);tune();});
 $('threshold').addEventListener('input',updateSquelchControl);
@@ -449,6 +532,14 @@ $('waterfall-quality').value=waterfallPreference;
 $('waterfall-quality').addEventListener('change',()=>{waterfallPreference=$('waterfall-quality').value;try{localStorage.setItem('hamsdr-waterfall',waterfallPreference);}catch{}sendWaterfallPreference();});
 $('audio-quality').value=audioProfile;
 $('audio-quality').addEventListener('change',async()=>{if(recording)stopRecording();audioProfile=$('audio-quality').value;if(audioProfile!=='raw'&&!await browserSupportsOpus()){fallbackFromOpus('Este navegador no ofrece decodificación Opus mediante WebCodecs.');return;}try{localStorage.setItem('hamsdr-audio-profile',audioProfile);}catch{}resetAudio();showAudioProfile();sendAudioProfile();});
+$('digital-clear').addEventListener('click',()=>{digitalRows=[];renderDigitalRows();const canvas=$('digital-waterfall');canvas.getContext('2d').clearRect(0,0,canvas.width,canvas.height);});
+$('digital-download').addEventListener('click',()=>{
+  const lines=[`HamSDR ${digitalMode||'digital'} decode export`, `Frequency: ${(frequency/1000).toFixed(3)} kHz`, `Demodulation: ${mode}`, `Exported: ${new Date().toISOString()}`, '', 'UTC\tSNR\tDT\tHz\tMessage'];
+  for(const row of digitalRows)lines.push([row.utc,row.snr,row.dt,row.hz,row.text].map(value=>String(value??'')).join('\t'));
+  if(digitalDownloadUrl)URL.revokeObjectURL(digitalDownloadUrl);
+  digitalDownloadUrl=URL.createObjectURL(new Blob([lines.join('\n')+'\n'],{type:'text/plain'}));
+  const link=document.createElement('a');link.href=digitalDownloadUrl;link.download=`hamsdr-${(digitalMode||'digital').toLowerCase()}-${new Date().toISOString().replaceAll(':','-')}.txt`;link.click();
+});
 let suppressWaterfallClick=false;
 canvas.addEventListener('click',e=>{if(suppressWaterfallClick){suppressWaterfallClick=false;return;}const rect=canvas.getBoundingClientRect();frequency=lower()+(e.clientX-rect.left)/rect.width*width();tune();});
 canvas.addEventListener('wheel',e=>{e.preventDefault();changeZoom(e.deltaY<0?zoom*2:zoom/2);},{passive:false});

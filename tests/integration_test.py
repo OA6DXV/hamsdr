@@ -22,6 +22,7 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
         self.args = SimpleNamespace(demo=True, source_host='127.0.0.1',source_port=1231,max_clients=5,origin='')
         self.args.full_quality_sessions_per_ip=5
         self.args.max_bandwidth_kbps_per_ip=1000000
+        self.args.digimodes=False
         self.args.site_config=Path(__file__).resolve().parents[1]/'site.example.toml'
         self.temp = tempfile.TemporaryDirectory()
         self.args.database=Path(self.temp.name)/'community.sqlite3'
@@ -321,6 +322,35 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
         await self.tune(ws,'USB',7100000)
         audio,_=await self.collect(ws)
         self.assertGreater(max(audio),1000)
+
+    async def test_optional_digital_audio_stream(self):
+        ws=await self.connect()
+        await ws.send_json({'type':'digital-mode','mode':'FT8'})
+        error=await self.event(ws,'error')
+        self.assertIn('Digimodos',error['message'])
+        self.app[GATEWAY].args.digimodes=True
+        await ws.send_json({'type':'digital-mode','mode':'FT8'})
+        reply=await self.event(ws,'digital-mode')
+        self.assertEqual((reply['mode'],reply['rate']),('FT8',12000))
+        await self.tune(ws,'USB',7100000)
+        await ws.send_json({'type':'audio','enabled':True});await self.event(ws,'audio-state')
+        async with asyncio.timeout(4):
+            while True:
+                msg=await ws.receive()
+                if msg.type==WSMsgType.BINARY and msg.data[0]==12:
+                    mode_code,sequence,timestamp_us,count=struct.unpack('<BIQH',msg.data[1:16])
+                    self.assertEqual(mode_code,1)
+                    self.assertEqual(sequence,0)
+                    self.assertGreater(timestamp_us,0)
+                    self.assertEqual(count*2,len(msg.data)-16)
+                    self.assertEqual(count,192)
+                    break
+        await ws.send_json({'type':'audio','enabled':False});await self.event(ws,'audio-state')
+        deadline=asyncio.get_running_loop().time()+1
+        while asyncio.get_running_loop().time()<deadline:
+            try:message=await asyncio.wait_for(ws.receive(),.2)
+            except asyncio.TimeoutError:continue
+            self.assertFalse(message.type==WSMsgType.BINARY and message.data[0]==12)
 
     async def test_receiverbook_status_and_confirmation_tag(self):
         gateway = self.app[GATEWAY]

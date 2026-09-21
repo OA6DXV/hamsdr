@@ -28,6 +28,8 @@ VERSION = "0.5.0-unstable"
 PROTOCOL_VERSION = 1
 MODES = {"USB": (300, 2700), "LSB": (-2700, -300), "AM": (-4000, 4000),
          "CW": (450, 950), "NFM": (-5000, 5000)}
+DIGITAL_AUDIO_RATE = 12000
+DIGITAL_PACKET_KIND = 12
 
 def read_site_config(requested=None):
     """Read the installation-specific configuration outside application code."""
@@ -204,6 +206,7 @@ def load_runtime_config(requested=None, allow_unconfigured=False):
     max_clients_per_ip = server.get("max_clients_per_ip", 3)
     full_quality_sessions_per_ip = server.get("full_quality_sessions_per_ip", 2)
     max_bandwidth_kbps_per_ip = server.get("max_bandwidth_kbps_per_ip", 1000)
+    digimodes = server.get("digimodes", False)
     secure = data.get("secure", server.get("tls", {}))
     if not isinstance(bind, str):
         raise ValueError("site config: invalid server bind")
@@ -232,6 +235,8 @@ def load_runtime_config(requested=None, allow_unconfigured=False):
             not isinstance(max_bandwidth_kbps_per_ip, int) or
             not 1 <= max_bandwidth_kbps_per_ip <= 1000000):
         raise ValueError("site config: per-IP bandwidth maximum must be 1..1000000 kb/s")
+    if not isinstance(digimodes, bool):
+        raise ValueError("site config: digimodes must be true or false")
     if not isinstance(secure, dict):
         raise ValueError("site config: invalid secure")
     security_mode = secure.get("mode")
@@ -303,6 +308,7 @@ def load_runtime_config(requested=None, allow_unconfigured=False):
         "max_clients": max_clients, "max_clients_per_ip": max_clients_per_ip,
         "full_quality_sessions_per_ip": full_quality_sessions_per_ip,
         "max_bandwidth_kbps_per_ip": max_bandwidth_kbps_per_ip,
+        "digimodes": digimodes,
         "security_mode": security_mode, "tls_enabled": tls_enabled, "tls_certificate": tls_certificate,
         "tls_private_key": tls_private_key,
         "receiver_type": receiver_type, "source_host": source_host, "source_port": source_port,
@@ -358,6 +364,10 @@ def load_site_config(requested=None):
     show_admin = html.get("show_admin", True)
     if not isinstance(show_admin, bool):
         raise ValueError("site config: show_admin must be true or false")
+    server = data.get("server", {})
+    digimodes = server.get("digimodes", False) if isinstance(server, dict) else False
+    if not isinstance(digimodes, bool):
+        raise ValueError("site config: digimodes must be true or false")
 
     station, bands, receiverbook = load_station_config(data)
     legacy_logo = data.get("logo", {})
@@ -374,6 +384,7 @@ def load_site_config(requested=None):
         "description": [line.strip() for line in description],
         "callsign": callsign,
         "show_admin": show_admin,
+        "digimodes": digimodes,
         "version": VERSION,
         "logo": {"enabled": logo_path is not None, "url": "./site-logo" if logo_path else "", "alt": logo_alt},
     }
@@ -439,6 +450,8 @@ class Gateway:
         return {"type": "status", "version": VERSION, "source": self.source, "users": len(self.clients),
                 "center": self.center_frequency, "sample_rate": self.sample_rate,
                 "initial_frequency": self.initial_frequency, "audio_rate": 16000,
+                "digital_audio_rate": DIGITAL_AUDIO_RATE,
+                "digimodes": bool(getattr(self.args, "digimodes", False)),
                 "audio_profiles": {"raw": 16000, "balanced": 16000, "mobile": 16000},
                 "opus_available": OPUS_AVAILABLE,
                 "fft_size": 65536, "demo": getattr(self.args, "demo", False), "restarts": self.restarts,
@@ -616,10 +629,12 @@ class Gateway:
         client["audio_enabled"] = enabled
         if not enabled:
             self.reset_audio_codec(client)
+            self.reset_digital_audio(client)
             retained = []
             while not client["queue"].empty():
                 packet = client["queue"].get_nowait()
-                if not isinstance(packet, bytes) or not packet or packet[0] not in (2, 10, 11): retained.append(packet)
+                if not isinstance(packet, bytes) or not packet or packet[0] not in (2, 10, 11, DIGITAL_PACKET_KIND):
+                    retained.append(packet)
             for packet in retained: client["queue"].put_nowait(packet)
         self.publish(json.dumps({"type":"audio-state", "enabled":enabled,
             "profile":client["audio_profile"]}), ident)
@@ -634,7 +649,8 @@ class Gateway:
         retained = []
         while not client["queue"].empty():
             packet = client["queue"].get_nowait()
-            if not isinstance(packet, bytes) or not packet or packet[0] not in (2, 10, 11): retained.append(packet)
+            if not isinstance(packet, bytes) or not packet or packet[0] not in (2, 10, 11):
+                retained.append(packet)
         for packet in retained: client["queue"].put_nowait(packet)
         details = {"raw":("pcm16",16000,256000), "balanced":("opus",16000,32000),
                    "mobile":("opus",16000,12000)}[profile]
@@ -650,10 +666,72 @@ class Gateway:
         client["opus_pending"] = bytearray()
         client["opus_sequence"] = 0
 
+    @staticmethod
+    def reset_digital_audio(client):
+        client["digital_tail"] = bytearray()
+        client["digital_sequence"] = 0
+
+    def digital_mode(self, ident, mode):
+        client = self.clients.get(ident)
+        if not client:
+            return
+        if mode not in (None, "FT8", "FT4"):
+            raise ValueError("Modo digital desconocido")
+        if mode and not getattr(self.args, "digimodes", False):
+            raise ValueError("Digimodos no están habilitados en este receptor")
+        if client["digital_mode"] != mode:
+            self.reset_digital_audio(client)
+        client["digital_mode"] = mode
+        if mode is None:
+            retained = []
+            while not client["queue"].empty():
+                packet = client["queue"].get_nowait()
+                if not isinstance(packet, bytes) or not packet or packet[0] != DIGITAL_PACKET_KIND:
+                    retained.append(packet)
+            for packet in retained:
+                client["queue"].put_nowait(packet)
+        self.publish(json.dumps({"type":"digital-mode", "mode":mode,
+            "enabled":bool(mode), "rate":DIGITAL_AUDIO_RATE}), ident)
+
+    def publish_digital_audio(self, ident, data):
+        client = self.clients.get(ident)
+        if not client or not client["audio_enabled"] or client["digital_mode"] not in ("FT8", "FT4"):
+            return
+        pending = client["digital_tail"]
+        pending.extend(data)
+        block_bytes = 8
+        if len(pending) < block_bytes:
+            return
+        usable = len(pending) - (len(pending) % block_bytes)
+        source = memoryview(pending)[:usable]
+        samples = struct.unpack("<" + "h" * (usable // 2), source)
+        out = bytearray()
+        for index in range(0, len(samples), 4):
+            a, b, c, d = samples[index:index+4]
+            converted = (
+                a,
+                round(b * (2 / 3) + c * (1 / 3)),
+                round(c * (1 / 3) + d * (2 / 3)),
+            )
+            for sample in converted:
+                out.extend(struct.pack("<h", max(-32768, min(32767, sample))))
+        del source
+        del pending[:usable]
+        if not out:
+            return
+        sequence = client["digital_sequence"]
+        client["digital_sequence"] = (sequence + 1) & 0xffffffff
+        mode_code = 1 if client["digital_mode"] == "FT8" else 2
+        timestamp_us = time.time_ns() // 1000
+        sample_count = len(out) // 2
+        header = struct.pack("<BIQH", mode_code, sequence, timestamp_us, sample_count)
+        self.publish(bytes([DIGITAL_PACKET_KIND]) + header + out, ident)
+
     def publish_audio(self, ident, data):
         client = self.clients.get(ident)
         if not client or not client["audio_enabled"]:
             return
+        self.publish_digital_audio(ident, data)
         profile = client["audio_profile"]
         if profile == "raw":
             self.publish(bytes([2])+data, ident)
@@ -940,6 +1018,7 @@ class Gateway:
                   "congestion": 0, "stable_intervals": 0, "sent_bytes": 0, "last_sent": 0,
                   "audio_enabled": False, "audio_profile": "balanced",
                   "opus_encoder": None, "opus_pending": bytearray(), "opus_sequence": 0,
+                  "digital_mode": None, "digital_tail": bytearray(), "digital_sequence": 0,
                   "protocol_ready": False, "resource_policy": None}
         self.clients[ident] = client
         self.enforce_address_limits(address)
@@ -1061,6 +1140,12 @@ class Gateway:
                             raise ValueError(f"Esta red permite audio hasta {audio_max}")
                         self.audio_profile(ident, profile)
                         continue
+                    if update.get("type") == "digital-mode":
+                        mode = update.get("mode")
+                        if mode == "":
+                            mode = None
+                        self.digital_mode(ident, mode)
+                        continue
                     if update.get("type") != "tune":
                         raise ValueError("Control desconocido")
                     mode = update.get("mode", settings["mode"])
@@ -1116,7 +1201,7 @@ async def security(request, handler):
         response.headers.update({"X-Content-Type-Options": "nosniff", "Referrer-Policy": "same-origin",
             "Cache-Control": "no-store", "Permissions-Policy": "camera=(), geolocation=(), microphone=(), payment=(), usb=()",
             "Cross-Origin-Opener-Policy": "same-origin",
-            "Content-Security-Policy": "default-src 'self'; base-uri 'none'; form-action 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; media-src 'self' blob:; object-src 'none'; frame-ancestors 'none'"})
+            "Content-Security-Policy": "default-src 'self'; base-uri 'none'; form-action 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; media-src 'self' blob:; worker-src 'self'; object-src 'none'; frame-ancestors 'none'"})
     return response
 
 GATEWAY = web.AppKey("gateway", Gateway)
@@ -1144,7 +1229,9 @@ def application(args):
     app.router.add_get("/~~orgstatus", receiverbook_status)
     async def asset(request):
         name = request.match_info.get("name", "index.html")
-        if name not in {"index.html", "style.css", "zoom.css", "site.js", "app.js", "audio-worklet.js", "classic-audio.js", "waterfall-codec.js", "community.js", "palette.js"}:
+        if name not in {"index.html", "style.css", "zoom.css", "site.js", "app.js", "audio-worklet.js", "classic-audio.js", "digital-worker.js", "mfsk-decoder.js", "mfsk-decoder_bg.wasm", "waterfall-codec.js", "community.js", "palette.js"}:
+            raise web.HTTPNotFound()
+        if name in {"mfsk-decoder.js", "mfsk-decoder_bg.wasm"} and not (ROOT / "web" / name).exists():
             raise web.HTTPNotFound()
         if name == "index.html" and gateway.receiverbook["enable"]:
             document = (ROOT / "web/index.html").read_text(encoding="utf-8")

@@ -11,6 +11,8 @@ reserved for stable releases.
 ## 0.5.0-unstable
 
 - Development line opened for optional client-side digital mode decoding.
+- Optional FT8/FT4 UI and 12 kHz PCM digital transport are gated by
+  `server.digimodes`.
 
 ## 0.4.1-stable
 

@@ -18,6 +18,7 @@ max_clients=10
 max_clients_per_ip=3
 full_quality_sessions_per_ip=2
 max_bandwidth_kbps_per_ip=1000
+digimodes=true
 [secure]
 {secure}
 [html]
@@ -58,6 +59,7 @@ class SiteConfigTests(unittest.TestCase):
         self.assertEqual(generic["callsign"], "N0CALL")
         self.assertTrue(generic["show_admin"])
         self.assertEqual(generic["version"], "0.5.0-unstable")
+        self.assertFalse(generic["digimodes"])
         self.assertIsNone(logo)
         self.assertEqual(station["mobile_page"], "/")
         self.assertFalse(bands[0]["enable"])
@@ -81,6 +83,7 @@ class SiteConfigTests(unittest.TestCase):
             self.assertEqual(runtime["max_size_mb"], 50)
             self.assertEqual(runtime["full_quality_sessions_per_ip"], 2)
             self.assertEqual(runtime["max_bandwidth_kbps_per_ip"], 1000)
+            self.assertTrue(runtime["digimodes"])
             path.write_text(installation(directory).replace('receiver_gain=8.0\n', ''))
             automatic = load_runtime_config(path)
             self.assertEqual((automatic["receiver_gain"], automatic["gain_mode"], automatic["gain_tenth_db"]),

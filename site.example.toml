@@ -11,6 +11,7 @@ max_clients = 10
 max_clients_per_ip = 3
 full_quality_sessions_per_ip = 2
 max_bandwidth_kbps_per_ip = 1000
+digimodes = false
 
 # Modes: "insecure" = direct HTTP with classic audio; "native" = HTTPS/WSS
 # using the certificate below; "proxy" = HTTP behind an HTTPS reverse proxy.

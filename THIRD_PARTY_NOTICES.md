@@ -6,6 +6,7 @@ build or runtime; they are not copied into this repository.
 - FFTW3f, GPL-2.0-or-later, for shared spectrum FFT processing.
 - aiohttp 3.14.3, Apache-2.0 or MIT, for HTTP and WebSocket transport.
 - libopus, BSD-3-Clause, for optional Opus audio encoding.
+- mfsk-core, GPL-3.0, for optional browser WebAssembly FT8/FT4 decoding.
 
 Python standard-library modules, SQLite and browser Web APIs are provided by
 the operating system or browser. Distributors that bundle any dependency must
