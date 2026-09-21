@@ -430,7 +430,10 @@ $('copy-link').addEventListener('click',async()=>{
 document.querySelectorAll('[data-step]').forEach(b=>b.addEventListener('click',()=>{frequency+=Number(b.dataset.step);tune();}));
 document.querySelectorAll('[data-fix]').forEach(b=>b.addEventListener('click',()=>{frequency=Math.round(frequency/1000)*1000;tune();}));
 document.querySelectorAll('[data-mode]').forEach(b=>b.addEventListener('click',()=>{mode=b.dataset.mode;narrow=!!b.dataset.narrow;[low,high]=(narrow?narrowDefaults:defaults)[mode];tune();}));
-for(const id of ['low','high','squelch','threshold','notch','nr'])$(id).addEventListener('change',()=>{low=Number($('low').value);high=Number($('high').value);tune();});
+function updateSquelchControl(){const active=$('squelch').checked;$('threshold').disabled=!active;$('squelch-threshold').dataset.active=String(active);$('threshold-value').value=`${String($('threshold').value).replace('-', '−')} dBFS`;}
+for(const id of ['low','high','threshold','notch','nr'])$(id).addEventListener('change',()=>{low=Number($('low').value);high=Number($('high').value);tune();});
+$('threshold').addEventListener('input',updateSquelchControl);
+$('squelch').addEventListener('change',()=>{updateSquelchControl();tune();});
 $('filter-narrow').onclick=()=>{if(high-low>200){low+=50;high-=50;tune();}};
 $('filter-wide').onclick=()=>{low=Math.max(-6000,low-50);high=Math.min(6000,high+50);tune();};
 $('zoom-in').addEventListener('click',()=>changeZoom(zoom*2));$('zoom-out').addEventListener('click',()=>changeZoom(zoom/2));$('full-band').addEventListener('click',()=>changeZoom(1));
@@ -484,7 +487,7 @@ new ResizeObserver(()=>{const available=Math.max(1,Math.round($('panorama').getB
 const networkConnection=navigator.connection||navigator.mozConnection||navigator.webkitConnection;
 if(networkConnection?.addEventListener)networkConnection.addEventListener('change',()=>{if(waterfallPreference==='auto')sendWaterfallPreference();});
 setInterval(()=>{const now=performance.now(),elapsed=(now-trafficAt)/1000;$('client-traffic').textContent=`${(trafficBytes*8/elapsed/1000).toFixed(1)} kb/s`;trafficBytes=0;trafficAt=now;},1000);
-clearWaterfall();controls();renderMemories();showAudioProfile();showAudioState();connect();
+clearWaterfall();controls();renderMemories();showAudioProfile();showAudioState();updateSquelchControl();connect();
 let recording=false,recordChunks=[],recordBytes=0,recordingRate=16000,recordTimer,downloadURL;
 function recordPCM(pcm){
   recordChunks.push(pcm);recordBytes+=pcm.byteLength;
