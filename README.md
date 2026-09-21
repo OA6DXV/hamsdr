@@ -8,6 +8,13 @@ responsive browser interface and server-side DSP.
 The current `dev` branch is a development preview. The `main` branch is
 reserved for stable releases.
 
+## 0.4.1
+
+- Shareable URLs preserve frequency, mode, filter and zoom.
+- The station flag is used as the browser icon.
+- The squelch threshold remains visible and is disabled until squelch is enabled.
+- Project source is now GPL-3.0-only.
+
 ## Features
 
 - Native C++20 IQ acquisition, shared spectrum FFT and independent receivers.
