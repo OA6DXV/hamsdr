@@ -8,7 +8,7 @@ responsive browser interface and server-side DSP.
 The current `dev` branch is a development preview. The `main` branch is
 reserved for stable releases.
 
-## 0.4.1
+## 0.4.1-stable
 
 - Shareable URLs preserve frequency, mode, filter and zoom.
 - The station flag is used as the browser icon.
