@@ -10,7 +10,11 @@
   const footerText=document.getElementById('site-footer-text');
   heading.textContent=config.receiver_name;
   logo.hidden=!config.logo.enabled;
-  if(config.logo.enabled){logo.src=config.logo.url;logo.alt=config.logo.alt;}
+  if(config.logo.enabled){
+    logo.src=config.logo.url;logo.alt=config.logo.alt;
+    document.getElementById('site-icon').href=config.logo.url;
+    document.getElementById('site-touch-icon').href=config.logo.url;
+  }
   description.querySelectorAll('[data-site-description]').forEach(item=>item.remove());
   description.prepend(...config.description.map(line=>{
     const item=document.createElement('li');item.dataset.siteDescription='';item.textContent=line;return item;

@@ -19,6 +19,7 @@ reserved for stable releases.
 - Listener identification, live chat and persistent SQLite logbook.
 - Same-origin WebSockets, bounded queues and automatic DSP recovery.
 - Site identity and optional logo configured outside the frontend source.
+- The configured station flag is also used as the favicon and touch icon.
 
 The current preview accepts 1.024 Msps unsigned 8-bit IQ and produces 16 kHz
 mono PCM internally. The center frequency and source endpoint are selected by

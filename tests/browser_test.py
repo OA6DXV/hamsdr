@@ -34,6 +34,8 @@ async def main():
             assert await page.locator('#site-footer-operator').text_content()==site['callsign']
             assert await page.locator('#site-footer-operator-row').is_visible()==site['show_admin']
             assert await page.locator('#site-logo').is_visible()==site['logo']['enabled']
+            assert await page.locator('#site-icon').get_attribute('href')==(site['logo']['url'] if site['logo']['enabled'] else None)
+            assert await page.locator('#site-touch-icon').get_attribute('href')==(site['logo']['url'] if site['logo']['enabled'] else None)
             assert await page.locator('[name="view"],#allowkeys,#audio-format').count()==0
             await expect(page.locator('#site-footer-text')).to_have_text(f"HamSDR v{site['version']}")
             assert await page.locator('#site-operator-row').count()==0
