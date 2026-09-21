@@ -44,6 +44,14 @@ AudioWorklet. Unsupported clients fall back to raw PCM16. Audio is opt-in: pausi
 it stops its network frames instead of applying only a local mute. WAV
 recording follows the decoded audio sample rate.
 
+The current tuning state is reflected in a shareable URL. `freq` is expressed
+in kHz; `mode` accepts `LSB`, `USB`, `AM`, `CW` or `NFM`; optional `low` and
+`high` values describe the audio filter in Hz, and `zoom` accepts 1 through 64.
+For example: `/?freq=7100&mode=LSB&zoom=4`. Values outside the configured band
+or control ranges are ignored. The Copy link button writes the canonical
+current URL to the clipboard. Audio remains user-initiated to comply with
+browser autoplay policies.
+
 The client observes actual audio buffer underruns, missing or late waterfall
 sequence numbers and unexpected WebSocket reconnects. It displays a temporary
 red recommendation only after three interruption samples within 30 seconds,

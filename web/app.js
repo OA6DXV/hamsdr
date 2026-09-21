@@ -2,11 +2,12 @@
 const $ = id => document.getElementById(id);
 const utf8Encoder=new TextEncoder();
 const protocolVersion=1,waterfallProtocolVersion=2;
+const sharedParams=new URLSearchParams(location.search);
 const defaults = {LSB:[-2700,-300],USB:[300,2700],AM:[-4000,4000],CW:[450,950],NFM:[-5000,5000]};
 const narrowDefaults={LSB:[-2200,-500],USB:[500,2200],AM:[-2500,2500],CW:[600,800],NFM:[-3000,3000]};
 let narrow=false, peakPower=-120, lastPeak=0, lastGraph=0, lastDraw=0, occupants=[];
 let frequency=7100000, mode='LSB', low=-2700, high=-300, center=7100500, rate=1024000;
-let bandConfigured=false,protocolReady=false,opusAvailable=true,currentResourcePolicy=null;
+let bandConfigured=false,sharedTuningApplied=false,protocolReady=false,opusAvailable=true,currentResourcePolicy=null;
 let zoom=1, viewCenter=center, socket, retry=500, timer, tuneTimer, lastRow, view='waterfall', muted=false;
 let dynamicSpectrumBottom=null,dynamicSpectrumTop=null;
 let context, node, gain, audioStarting=false, audioEnabled=false, audioEverStarted=false, audioProfile='balanced', opusDecoder=null, opusSupportPromise=null, lastOpusSequence=null, spectrumFrames=0, audioPackets=0;
@@ -182,11 +183,34 @@ function controls(){
   scale.setAttribute('aria-valuetext',`${(frequency/1000).toFixed(2)} kHz, ${mode}`);
   drawScale();
 }
+function sharedUrl(){
+  const url=new URL(location.href),base=defaults[mode];url.search='';
+  url.searchParams.set('freq',String(Number((frequency/1000).toFixed(3))));
+  url.searchParams.set('mode',mode);
+  if(low!==base[0]||high!==base[1]){url.searchParams.set('low',String(low));url.searchParams.set('high',String(high));}
+  if(Math.abs(zoom-1)>.001)url.searchParams.set('zoom',String(Number(zoom.toFixed(2))));
+  return url;
+}
+function updateSharedUrl(){if(bandConfigured&&sharedTuningApplied)history.replaceState(null,'',sharedUrl());}
+function applySharedTuning(){
+  if(sharedTuningApplied)return;
+  const requestedMode=(sharedParams.get('mode')||'').toUpperCase();
+  if(defaults[requestedMode]){mode=requestedMode;narrow=false;[low,high]=defaults[mode];}
+  const requestedFrequency=Number(sharedParams.get('freq'))*1000;
+  if(sharedParams.has('freq')&&Number.isFinite(requestedFrequency)&&requestedFrequency>=center-rate/2&&requestedFrequency<=center+rate/2)frequency=Math.round(requestedFrequency);
+  const requestedLow=sharedParams.has('low')?Number(sharedParams.get('low')):low;
+  const requestedHigh=sharedParams.has('high')?Number(sharedParams.get('high')):high;
+  if(Number.isFinite(requestedLow)&&Number.isFinite(requestedHigh)&&requestedLow>=-6000&&requestedHigh<=6000&&requestedHigh-requestedLow>=100){low=requestedLow;high=requestedHigh;}
+  const requestedZoom=Number(sharedParams.get('zoom'));
+  if(sharedParams.has('zoom')&&Number.isFinite(requestedZoom)&&requestedZoom>=1&&requestedZoom<=64)zoom=requestedZoom;
+  viewCenter=frequency;clampView();sharedTuningApplied=true;
+  $('zoom-label').value=`${zoom.toFixed(zoom<10?1:0).replace('.0','')}×`;
+}
 function tune(){
   if(!Number.isFinite(frequency)||!Number.isFinite(low)||!Number.isFinite(high)||low < -6000||high > 6000||high-low<100){message('Revisa los límites del filtro (−6000 a 6000 Hz).');return;}
   frequency=Math.round(Math.max(center-rate/2,Math.min(center+rate/2,frequency)));
   if(frequency<lower()||frequency>lower()+width()){const oldLower=lower(),oldWidth=width();viewCenter=frequency;clampView();reprojectWaterfall(oldLower,oldWidth);sendWaterfallView();}
-  controls(); message();
+  controls();updateSharedUrl();message();
   clearTimeout(tuneTimer);
   tuneTimer=setTimeout(()=>{
     if(socket?.readyState===WebSocket.OPEN) socket.send(JSON.stringify({type:'tune',frequency,mode,low,high,squelch:$('squelch').checked?Number($('threshold').value):-150,notch:$('notch').checked,nr:Number($('nr').value)}));
@@ -209,7 +233,7 @@ function reprojectWaterfall(oldLower,oldWidth){
 function changeZoom(next,anchor=frequency,fraction=.5){
   const oldLower=lower(),oldWidth=width();
   zoom=Math.max(1,Math.min(64,next));viewCenter=anchor+(.5-fraction)*width();clampView();
-  $('zoom-label').value=`${zoom.toFixed(zoom<10?1:0).replace('.0','')}×`;reprojectWaterfall(oldLower,oldWidth);drawScale();sendWaterfallView();
+  $('zoom-label').value=`${zoom.toFixed(zoom<10?1:0).replace('.0','')}×`;reprojectWaterfall(oldLower,oldWidth);drawScale();sendWaterfallView();updateSharedUrl();
 }
 function drawScale(){
   const w=scale.width; dial.fillStyle='#050505';dial.fillRect(0,0,w,44);dial.font='10px monospace';
@@ -302,7 +326,7 @@ function connect(){
           $('frequency').min=String(minimum);$('frequency').max=String(maximum);
           scale.setAttribute('aria-valuemin',String(minimum));scale.setAttribute('aria-valuemax',String(maximum));
           memories=memories.filter(memory=>memory.frequency>=center-rate/2&&memory.frequency<=center+rate/2);
-          controls();renderMemories();if(protocolReady){sendWaterfallView();tune();}
+          applySharedTuning();controls();renderMemories();updateSharedUrl();if(protocolReady){sendWaterfallView();tune();}
         }
         $('demo').hidden=!msg.demo;
         const labels={streaming:'● Receptor conectado',demo:'● Receptor de prueba',connecting:'Conectando al SDR…',disconnected:'SDR desconectado · reconectando…',reconnecting:'Recuperando receptor…','connect-failed':'SDR no disponible · reintentando…','invalid-header':'Entrada IQ incompatible','stopped':'SDR detenido'};
@@ -395,6 +419,14 @@ $('listen').addEventListener('click',()=>audioEnabled?pauseAudio():listen());
 $('mute').addEventListener('change',()=>{muted=$('mute').checked;$('mute').setAttribute('aria-pressed',String(muted));if(gain)gain.gain.value=muted?0:10**(Number($('volume').value)/20);});
 $('volume').addEventListener('input',()=>{if(gain)gain.gain.value=muted?0:10**(Number($('volume').value)/20);});
 $('frequency').addEventListener('change',()=>{frequency=Number($('frequency').value)*1000;tune();});
+$('copy-link').addEventListener('click',async()=>{
+  const link=sharedUrl().href;
+  try{
+    if(!navigator.clipboard?.writeText)throw new Error('Clipboard unavailable');
+    await navigator.clipboard.writeText(link);
+    const button=$('copy-link');button.textContent='Copiado';setTimeout(()=>button.textContent='Copiar enlace',1500);
+  }catch{message(`Copia este enlace: ${link}`);}
+});
 document.querySelectorAll('[data-step]').forEach(b=>b.addEventListener('click',()=>{frequency+=Number(b.dataset.step);tune();}));
 document.querySelectorAll('[data-fix]').forEach(b=>b.addEventListener('click',()=>{frequency=Math.round(frequency/1000)*1000;tune();}));
 document.querySelectorAll('[data-mode]').forEach(b=>b.addEventListener('click',()=>{mode=b.dataset.mode;narrow=!!b.dataset.narrow;[low,high]=(narrow?narrowDefaults:defaults)[mode];tune();}));

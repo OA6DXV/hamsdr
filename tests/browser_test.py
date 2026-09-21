@@ -24,7 +24,9 @@ async def main():
                     await asyncio.sleep(.75)
                     await route.continue_()
                 await page.route('**/community.js',delayed_community)
-            await page.goto(url)
+            target=url
+            if viewport['width']==768:target=f"{url}?freq=7102.5&mode=USB&low=350&high=2450&zoom=4"
+            await page.goto(target)
             site=await page.evaluate("window.hamSdrSiteConfig")
             assert site and await page.locator('#site-name').text_content()==site['receiver_name']
             assert await page.title()==f"{site['receiver_name']} · Preview"
@@ -43,6 +45,18 @@ async def main():
             assert await page.locator('.stream-profile-control #audio-quality').count()==1
             assert await page.locator('.stream-profile-control #waterfall-quality').count()==1
             assert await page.locator('.waterfall-panel #waterfall-quality').count()==0
+            if viewport['width']==768:
+                await expect(page.locator('#frequency')).to_have_value('7102.50')
+                await expect(page.locator('#mode-display')).to_have_text('USB')
+                await expect(page.locator('#low')).to_have_value('350')
+                await expect(page.locator('#high')).to_have_value('2450')
+                await expect(page.locator('#zoom-label')).to_have_text('4×')
+                assert 'freq=7102.5' in page.url and 'mode=USB' in page.url and 'zoom=4' in page.url
+                await page.evaluate("Object.defineProperty(navigator,'clipboard',{value:{writeText:text=>{window.copiedLink=text;return Promise.resolve();}},configurable:true})")
+                await page.locator('#copy-link').click()
+                await expect(page.locator('#copy-link')).to_have_text('Copiado')
+                assert 'freq=7102.5' in await page.evaluate('window.copiedLink')
+                await page.goto(url)
             waterfall_options=await page.locator('#waterfall-quality option').evaluate_all('(options)=>options.map(option=>[option.value,option.textContent])')
             assert waterfall_options==[['auto','automático'],['slow','conexión lenta'],['low','baja definición'],['balanced','balanceado'],['high','alta definición']]
             await expect(page.locator('#stream-warning')).to_be_hidden()
