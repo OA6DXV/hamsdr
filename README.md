@@ -8,6 +8,10 @@ responsive browser interface and server-side DSP.
 The current `dev` branch is a development preview. The `main` branch is
 reserved for stable releases.
 
+## 0.5.0-unstable
+
+- Development line opened for optional client-side digital mode decoding.
+
 ## 0.4.1-stable
 
 - Shareable URLs preserve frequency, mode, filter and zoom.
