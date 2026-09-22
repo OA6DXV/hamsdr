@@ -1224,7 +1224,7 @@ class Gateway:
                     numbers = [new[k] for k in ("frequency", "low", "high", "squelch")]
                     if not all(math.isfinite(x) for x in numbers):
                         raise ValueError("Número inválido")
-                    filter_valid = (0 <= new["low"] < new["high"] <= 5000 if client["digital_mode"]
+                    filter_valid = (-5000 <= new["low"] < new["high"] <= 5000 if client["digital_mode"]
                                     else -6000 <= new["low"] < new["high"] <= 6000)
                     if not (self.band_lower <= new["frequency"] <= self.band_upper and filter_valid
                             and new["high"]-new["low"] >= 100 and -150 <= new["squelch"] <= 0):

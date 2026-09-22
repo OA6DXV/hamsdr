@@ -46,7 +46,7 @@
 <div class="dsp-control"><b>DSP reducción de ruido:</b> <select id="nr" aria-label="Nivel de reducción de ruido"><option value="0">Apagado</option><option value="1">Bajo</option><option value="2">Medio</option><option value="3">Alto</option><option value="4">Muy Alto</option></select></div></section>
 <section class="ctl filter-panel" aria-label="Filtro y grabación">
 Filter: <b><output id="bandwidth">2.40</output> <span id="filter-unit">kHz</span></b> <button id="filter-narrow">-</button> <button id="filter-wide">+</button>
-<details><summary>Límites del filtro</summary><label>Inferior <input id="low" type="number" min="-6000" max="5900" step="50" value="-2700"> Hz</label><label>Superior <input id="high" type="number" min="-5900" max="6000" step="50" value="-300"> Hz</label></details><hr>
+<div class="filter-limits"><label>Inferior <span><input id="low" type="number" min="-6000" max="5900" step="50" value="-2700"> Hz</span></label><label>Superior <span><input id="high" type="number" min="-5900" max="6000" step="50" value="-300"> Hz</span></label></div><hr>
 <label><input id="squelch" type="checkbox"> squelch</label> <label><input id="notch" type="checkbox"> autonotch</label>
 <label id="squelch-threshold">Umbral squelch <input id="threshold" type="range" min="-110" max="-10" value="-70" aria-label="Umbral squelch" disabled> <output id="threshold-value">−70 dBFS</output></label><hr>
 Grabar audio<br><button id="record">iniciar</button> <span id="record-status" role="status"></span><a id="download" hidden>Descargar grabación</a></section></div></section>

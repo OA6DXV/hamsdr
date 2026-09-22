@@ -419,6 +419,11 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((reply['mode'],reply['rate']),('RTTY',12000))
         gateway=self.app[GATEWAY];ident=next(iter(gateway.clients));client=gateway.clients[ident]
         self.assertEqual(client['audio_profile'],'digiraw')
+        await ws.send_json({'type':'tune','mode':'LSB','frequency':7100000,
+                            'low':-3000,'high':0,'squelch':0,'notch':True,'nr':4})
+        tuned=await self.event(ws,'tuned');self.assertEqual((tuned['mode'],tuned['low'],tuned['high']),('LSB',-3000.0,0.0))
+        effective=gateway.settings_command(ident,client['settings']).split()
+        self.assertEqual((effective[3],*map(float,effective[4:7]),*map(int,effective[7:9])),('LSB',-3000.0,0.0,-150.0,0,0))
         await ws.send_json({'type':'audio','enabled':True});await self.event(ws,'audio-state')
         async with asyncio.timeout(4):
             while True:

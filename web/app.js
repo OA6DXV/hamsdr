@@ -10,6 +10,7 @@ const sharedMuted=sharedParams.get('mute')==='1';
 const siteConfig=window.hamSdrSiteConfig||{};
 const defaults = {LSB:[-2700,-300],USB:[300,2700],AM:[-4000,4000],CW:[450,950],NFM:[-5000,5000]};
 const narrowDefaults={LSB:[-2200,-500],USB:[500,2200],AM:[-2500,2500],CW:[600,800],NFM:[-3000,3000]};
+const digitalDefaults={LSB:[-3000,0],USB:[0,3000],AM:[-4000,4000],CW:[450,950],NFM:[-5000,5000]};
 let narrow=false, peakPower=-120, lastPeak=0, lastGraph=0, lastDraw=0, occupants=[];
 let frequency=7100000, mode='LSB', low=-2700, high=-300, center=7100500, rate=1024000;
 let bandConfigured=false,sharedTuningApplied=false,sharedDigitalApplied=false,protocolReady=false,opusAvailable=true,currentResourcePolicy=null;
@@ -143,27 +144,28 @@ function digitalPercentile(values,fraction){
   return maximum;
 }
 function smoothDigitalScale(current,target){return current===null?target:current+(target-current)*.12;}
+function digitalDisplayRange(){return{minimum:0,maximum:Math.max(100,Math.min(digitalFilterMaximum,Math.max(Math.abs(low),Math.abs(high))))};}
 function updateDigitalSpectrumRange(){
   if(!digitalMode)return;
-  const canvas=$('digital-waterfall'),next=`${low}:${high}`;
+  const {minimum,maximum}=digitalDisplayRange(),canvas=$('digital-waterfall'),next=`${minimum}:${maximum}`;
   if(canvas.dataset.frequencyRange!==next){canvas.dataset.frequencyRange=next;resetDigitalSpectrum();}
-  canvas.setAttribute('aria-label',`Cascada espectral de audio digital de ${low} a ${high} Hz`);
+  canvas.setAttribute('aria-label',`Cascada espectral de audio digital de ${minimum} a ${maximum} Hz`);
   const axis=document.querySelector('.digital-frequency-axis');axis.replaceChildren();
   for(let index=0;index<=6;index++){
-    const value=Math.round(low+(high-low)*index/6),label=document.createElement('span');
+    const value=Math.round(minimum+(maximum-minimum)*index/6),label=document.createElement('span');
     label.textContent=`${value}${index===6?' Hz':''}`;axis.append(label);
   }
 }
 function updateRttySpectrumRange(clear=false){
-  const canvas=$('rtty-waterfall'),next=`${low}:${high}`;
+  const {minimum,maximum}=digitalDisplayRange(),canvas=$('rtty-waterfall'),next=`${minimum}:${maximum}`;
   if(clear||canvas.dataset.frequencyRange!==next){
     canvas.dataset.frequencyRange=next;canvas.getContext('2d').clearRect(0,0,canvas.width,canvas.height);
     rttyNoiseFloor=null;rttyColorCeiling=null;rttySpectrumFrames=0;canvas.dataset.frames='0';
   }
-  canvas.setAttribute('aria-label',`Cascada espectral RTTY de ${low} a ${high} Hz`);
+  canvas.setAttribute('aria-label',`Cascada espectral RTTY de ${minimum} a ${maximum} Hz`);
   const axis=document.querySelector('.rtty-frequency-axis');axis.replaceChildren();
   for(let index=0;index<=6;index++){
-    const value=Math.round(low+(high-low)*index/6),label=document.createElement('span');
+    const value=Math.round(minimum+(maximum-minimum)*index/6),label=document.createElement('span');
     label.textContent=`${value}${index===6?' Hz':''}`;axis.append(label);
   }
   renderRttyStreams();
@@ -171,7 +173,7 @@ function updateRttySpectrumRange(clear=false){
 function drawRttySpectrum(data){
   if(!rttyActive||!data.levels?.length)return;
   const canvas=$('rtty-waterfall'),g=canvas.getContext('2d'),w=canvas.width,h=canvas.height,levels=new Float32Array(w);
-  const source=data.levels,minimum=Math.max(0,Math.floor(low*data.fftSize/data.sampleRate)),maximum=Math.min(source.length-1,Math.ceil(high*data.fftSize/data.sampleRate)),span=Math.max(1,maximum-minimum);
+  const source=data.levels,display=digitalDisplayRange(),minimum=Math.max(0,Math.floor(display.minimum*data.fftSize/data.sampleRate)),maximum=Math.min(source.length-1,Math.ceil(display.maximum*data.fftSize/data.sampleRate)),span=Math.max(1,maximum-minimum);
   for(let x=0;x<w;x++){
     const first=minimum+Math.floor(x*span/w),last=Math.min(maximum+1,Math.max(first+1,minimum+Math.ceil((x+1)*span/w)));
     let peak=-160;for(let bin=first;bin<last;bin++)peak=Math.max(peak,source[bin]);levels[x]=peak;
@@ -210,7 +212,7 @@ function digitalSpectrumRow(){
   const canvas=$('digital-waterfall'),g=canvas.getContext('2d'),w=canvas.width,h=canvas.height;
   if(!w||!h)return;
   g.drawImage(canvas,0,1,w,h-1,0,0,w,h-1);
-  const row=g.createImageData(w,1),minBin=Math.floor(low*size/digitalSampleRate),maxBin=Math.ceil(high*size/digitalSampleRate),binSpan=Math.max(1,maxBin-minBin),levels=new Float32Array(w);
+  const display=digitalDisplayRange(),row=g.createImageData(w,1),minBin=Math.floor(display.minimum*size/digitalSampleRate),maxBin=Math.ceil(display.maximum*size/digitalSampleRate),binSpan=Math.max(1,maxBin-minBin),levels=new Float32Array(w);
   for(let x=0;x<w;x++){
     const first=minBin+Math.floor(x*binSpan/w),last=Math.min(maxBin,Math.max(first+1,minBin+Math.ceil((x+1)*binSpan/w)));
     let magnitude=0;
@@ -305,8 +307,8 @@ function setDigitalCompatibility(compatible){
 function setDigitalDspState(active){
   for(const id of ['squelch','notch','nr'])$(id).disabled=active;
   const lowInput=$('low'),highInput=$('high');
-  lowInput.min=active?'0':'-6000';lowInput.max=active?'4900':'5900';lowInput.step=active?'any':'50';
-  highInput.min=active?'100':'-5900';highInput.max=active?'5000':'6000';highInput.step=active?'any':'50';
+  lowInput.min=active?'-5000':'-6000';lowInput.max=active?'4900':'5900';lowInput.step=active?'any':'50';
+  highInput.min=active?'-4900':'-5900';highInput.max=active?'5000':'6000';highInput.step=active?'any':'50';
   updateSquelchControl();
 }
 function setDigitalMode(next,{autoStartAudio=true}={}){
@@ -358,16 +360,17 @@ function setDigitalMode(next,{autoStartAudio=true}={}){
   showDigitalAudioStarter();
   updateSharedUrl();
 }
-function rttyConfiguration(){const shift=Number($('rtty-shift').value);return{type:'config',sampleRate:12000,externalPcm:true,baud:Number($('rtty-baud').value),shift,centerFrequency:Number($('rtty-center').value),reverse:$('rtty-reverse').checked,afc:$('rtty-afc').checked,afcRange:50,filterBandwidth:Math.max(250,shift+100),stopBits:1.5,multi:$('rtty-multi').checked,low,high};}
+function rttyConfiguration(){const shift=Number($('rtty-shift').value),display=digitalDisplayRange();return{type:'config',sampleRate:12000,externalPcm:true,baud:Number($('rtty-baud').value),shift,centerFrequency:Number($('rtty-center').value),reverse:$('rtty-reverse').checked,afc:$('rtty-afc').checked,afcRange:50,filterBandwidth:Math.max(250,shift+100),stopBits:1.5,multi:$('rtty-multi').checked,low:display.minimum,high:display.maximum};}
 function sendRttyConfiguration(){if(rttyNode)rttyNode.port.postMessage(rttyConfiguration());updateSharedUrl();}
 function renderRttyStreams(){
   const body=$('rtty-multi-table').tBodies[0],markers=$('rtty-markers');body.replaceChildren();markers.replaceChildren();
+  const display=digitalDisplayRange();
   const streams=[...rttyStreams.values()].sort((a,b)=>a.centerFrequency-b.centerFrequency);$('rtty-multi-count').value=String(streams.length);
   if(!streams.length){const row=document.createElement('tr'),cell=document.createElement('td');row.className='rtty-multi-empty';cell.colSpan=2;cell.textContent='Buscando transmisiones RTTY 45.45/170…';row.append(cell);body.append(row);return;}
   for(const stream of streams){
     const row=document.createElement('tr'),frequencyCell=document.createElement('td'),textCell=document.createElement('td'),decoded=document.createElement('pre');
     frequencyCell.textContent=`${stream.centerFrequency.toFixed(0)} Hz`;decoded.textContent=stream.text||'…';textCell.append(decoded);row.append(frequencyCell,textCell);body.append(row);
-    if(stream.centerFrequency>=low&&stream.centerFrequency<=high){const marker=document.createElement('div'),label=document.createElement('span');marker.className='rtty-marker';marker.style.left=`${(stream.centerFrequency-low)/(high-low)*100}%`;label.textContent=`${stream.centerFrequency.toFixed(0)}`;marker.append(label);markers.append(marker);}
+    if(stream.centerFrequency>=display.minimum&&stream.centerFrequency<=display.maximum){const marker=document.createElement('div'),label=document.createElement('span');marker.className='rtty-marker';marker.style.left=`${(stream.centerFrequency-display.minimum)/(display.maximum-display.minimum)*100}%`;label.textContent=`${stream.centerFrequency.toFixed(0)}`;marker.append(label);markers.append(marker);}
   }
 }
 function updateRttyStreams(streams){
@@ -548,17 +551,18 @@ function applySharedDigitalState(){
   if(sharedDigitalMode&&digimodesAvailable){
     setDigitalMode(sharedDigitalMode,{autoStartAudio:false});
     const requestedLow=Number(sharedParams.get('low')),requestedHigh=Number(sharedParams.get('high'));
-    if(sharedParams.has('low')&&sharedParams.has('high')&&Number.isFinite(requestedLow)&&Number.isFinite(requestedHigh)&&requestedLow>=0&&requestedHigh<=digitalFilterMaximum&&requestedHigh-requestedLow>=100){low=requestedLow;high=requestedHigh;tune();}
+    if(sharedParams.has('low')&&sharedParams.has('high')&&Number.isFinite(requestedLow)&&Number.isFinite(requestedHigh)&&requestedLow>=-digitalFilterMaximum&&requestedHigh<=digitalFilterMaximum&&requestedHigh-requestedLow>=100){low=requestedLow;high=requestedHigh;tune();}
   }else if(sharedRtty&&digimodesAvailable){
     for(const [id,key,minimum,maximum] of [['rtty-baud','baud',30,300],['rtty-shift','shift',50,1000],['rtty-center','center',100,5000]]){const value=Number(sharedParams.get(key));if(sharedParams.has(key)&&Number.isFinite(value)&&value>=minimum&&value<=maximum){const control=$(id);if(control.tagName==='SELECT'&&!Array.from(control.options).some(option=>Number(option.value)===value))control.add(new Option(String(value),String(value)));control.value=String(value);}}
     $('rtty-reverse').checked=sharedParams.get('reverse')==='1';$('rtty-afc').checked=sharedParams.get('afc')!=='0';$('rtty-multi').checked=sharedParams.get('multi')==='1';$('rtty-multi-panel').hidden=!$('rtty-multi').checked;setRttyMode(true,{autoStartAudio:false});
+    const requestedMode=(sharedParams.get('mode')||'').toUpperCase();if(digitalDefaults[requestedMode]){mode=requestedMode;narrow=false;[low,high]=digitalDefaults[mode];}
     const requestedLow=Number(sharedParams.get('low')),requestedHigh=Number(sharedParams.get('high'));
-    if(sharedParams.has('low')&&sharedParams.has('high')&&Number.isFinite(requestedLow)&&Number.isFinite(requestedHigh)&&requestedLow>=0&&requestedHigh<=digitalFilterMaximum&&requestedHigh-requestedLow>=100){low=requestedLow;high=requestedHigh;tune();}
+    if(sharedParams.has('low')&&sharedParams.has('high')&&Number.isFinite(requestedLow)&&Number.isFinite(requestedHigh)&&requestedLow>=-digitalFilterMaximum&&requestedHigh<=digitalFilterMaximum&&requestedHigh-requestedLow>=100){low=requestedLow;high=requestedHigh;}tune();
   }
 }
 function tune(){
-  const focusedDigital=Boolean(digitalMode||rttyActive),filterValid=focusedDigital?low>=0&&high<=digitalFilterMaximum:low>=-6000&&high<=6000;
-  if(!Number.isFinite(frequency)||!Number.isFinite(low)||!Number.isFinite(high)||!filterValid||high-low<100){message(focusedDigital?'Revisa los límites del filtro digital (0 a 5000 Hz).':'Revisa los límites del filtro (−6000 a 6000 Hz).');return;}
+  const focusedDigital=Boolean(digitalMode||rttyActive),filterValid=focusedDigital?low>=-digitalFilterMaximum&&high<=digitalFilterMaximum:low>=-6000&&high<=6000;
+  if(!Number.isFinite(frequency)||!Number.isFinite(low)||!Number.isFinite(high)||!filterValid||high-low<100){message(focusedDigital?'Revisa los límites del filtro digital (−5000 a 5000 Hz).':'Revisa los límites del filtro (−6000 a 6000 Hz).');return;}
   frequency=Math.round(Math.max(center-rate/2,Math.min(center+rate/2,frequency)));
   if(frequency<lower()||frequency>lower()+width()){viewCenter=frequency;clampView();redrawHistory();sendWaterfallView();}
   controls();if(rttyActive)sendRttyConfiguration();else updateSharedUrl();message();
@@ -844,7 +848,7 @@ $('copy-link').addEventListener('click',async()=>{
 });
 document.querySelectorAll('[data-step]').forEach(b=>b.addEventListener('click',()=>{frequency+=Number(b.dataset.step);tune();}));
 document.querySelectorAll('[data-fix]').forEach(b=>b.addEventListener('click',()=>{frequency=Math.round(frequency/1000)*1000;tune();}));
-document.querySelectorAll('[data-mode]').forEach(b=>b.addEventListener('click',()=>{mode=b.dataset.mode;narrow=!!b.dataset.narrow;if(!digitalMode&&!rttyActive)[low,high]=(narrow?narrowDefaults:defaults)[mode];tune();}));
+document.querySelectorAll('[data-mode]').forEach(b=>b.addEventListener('click',()=>{mode=b.dataset.mode;narrow=!!b.dataset.narrow;[low,high]=(digitalMode||rttyActive?(narrow?narrowDefaults:digitalDefaults):(narrow?narrowDefaults:defaults))[mode];tune();}));
 document.querySelectorAll('[data-digital-mode]').forEach(b=>b.addEventListener('click',()=>setDigitalMode(b.dataset.digitalMode)));
 document.querySelector('[data-rtty-mode]').addEventListener('click',()=>setRttyMode(true));
 $('rtty-clear').addEventListener('click',()=>{rttyText='';rttyStreams.clear();$('rtty-terminal').textContent='';renderRttyStreams();if(rttyNode)rttyNode.port.postMessage({type:'reset'});});
@@ -854,8 +858,13 @@ function updateSquelchControl(){const active=$('squelch').checked&&!digitalMode&
 for(const id of ['low','high','threshold','notch','nr'])$(id).addEventListener('change',()=>{low=Number($('low').value);high=Number($('high').value);tune();});
 $('threshold').addEventListener('input',updateSquelchControl);
 $('squelch').addEventListener('change',()=>{updateSquelchControl();tune();});
-$('filter-narrow').onclick=()=>{if(high-low>100){if(digitalMode||rttyActive)high-=100;else{low+=50;high-=50;}tune();}};
-$('filter-wide').onclick=()=>{if(digitalMode||rttyActive){if(high<digitalFilterMaximum)high=Math.min(digitalFilterMaximum,high+100);}else{low=Math.max(-6000,low-50);high=Math.min(6000,high+50);}tune();};
+function resizeFocusedFilter(delta){
+  if(mode==='USB')high=Math.max(100,Math.min(digitalFilterMaximum,high+delta));
+  else if(mode==='LSB')low=Math.max(-digitalFilterMaximum,Math.min(-100,low-delta));
+  else{const half=delta/2;low=Math.max(-digitalFilterMaximum,low-half);high=Math.min(digitalFilterMaximum,high+half);}
+}
+$('filter-narrow').onclick=()=>{if(high-low>100){if(digitalMode||rttyActive)resizeFocusedFilter(-100);else{low+=50;high-=50;}tune();}};
+$('filter-wide').onclick=()=>{if(digitalMode||rttyActive)resizeFocusedFilter(100);else{low=Math.max(-6000,low-50);high=Math.min(6000,high+50);}tune();};
 $('zoom-in').addEventListener('click',()=>changeZoom(zoom*2));$('zoom-out').addEventListener('click',()=>changeZoom(zoom/2));$('full-band').addEventListener('click',()=>changeZoom(1));
 $('max-zoom').onclick=()=>changeZoom(64);
 document.querySelectorAll('[name=view]').forEach(r=>r.addEventListener('change',()=>{$('panorama').hidden=r.value==='none';}));
@@ -926,7 +935,7 @@ scale.addEventListener('pointerdown',e=>{
 });
 scale.addEventListener('pointermove',e=>{
   if(!drag)return;const rect=scale.getBoundingClientRect();const f=lower()+(e.clientX-rect.left)/rect.width*width();
-  if(drag==='low')low=Math.round(Math.max((digitalMode||rttyActive)?0:-6000,Math.min(high-100,f-frequency+beat())));
+  if(drag==='low')low=Math.round(Math.max((digitalMode||rttyActive)?-digitalFilterMaximum:-6000,Math.min(high-100,f-frequency+beat())));
   else if(drag==='high')high=Math.round(Math.min((digitalMode||rttyActive)?digitalFilterMaximum:6000,Math.max(low+100,f-frequency+beat())));
   else frequency=f;tune();
 });
