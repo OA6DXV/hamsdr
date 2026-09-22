@@ -62,7 +62,16 @@ async def main():
                 await page.goto(url)
             waterfall_options=await page.locator('#waterfall-quality option').evaluate_all('(options)=>options.map(option=>[option.value,option.textContent])')
             assert waterfall_options==[['auto','automático'],['slow','conexión lenta'],['low','baja definición'],['balanced','balanceado'],['high','alta definición']]
-            await expect(page.locator('#stream-warning')).to_be_hidden()
+            assert await page.locator('#stream-warning').count()==0
+            await expect(page.locator('.waterfall-title')).to_have_text('Cascada')
+            assert await page.locator('.waterfall-title').evaluate("e=>getComputedStyle(e).textAlign==='center'")
+            await expect(page.locator('#brightness')).to_be_visible()
+            await expect(page.locator('#pause')).to_have_attribute('aria-pressed','false')
+            await expect(page.locator('#pause')).to_have_css('background-color','rgb(255, 255, 255)')
+            await page.locator('#pause').click()
+            await expect(page.locator('#pause')).to_have_attribute('aria-pressed','true')
+            await expect(page.locator('#pause')).to_have_css('background-color','rgb(196, 0, 0)')
+            await page.locator('#pause').click()
             await expect(page.locator('#threshold')).to_be_visible()
             await expect(page.locator('#threshold')).to_be_disabled()
             await expect(page.locator('#squelch-threshold')).to_have_attribute('data-active','false')
@@ -74,15 +83,6 @@ async def main():
             await page.locator('#squelch').uncheck()
             await expect(page.locator('#threshold')).to_be_disabled()
             await page.evaluate("window.reportStreamInterruption('test')")
-            await expect(page.locator('#stream-warning')).to_be_hidden()
-            await expect(page.locator('#stream-warning')).to_have_attribute('data-samples','1')
-            await page.evaluate("window.reportStreamInterruption('test')")
-            await expect(page.locator('#stream-warning')).to_be_hidden()
-            await page.evaluate("window.reportStreamInterruption('test')")
-            await expect(page.locator('#stream-warning')).to_be_visible()
-            await expect(page.locator('#stream-warning')).to_contain_text('Cascada: conexión lenta')
-            assert await page.locator('#stream-warning').evaluate("e=>getComputedStyle(e).color==='rgb(196, 0, 0)'")
-            await page.locator('#stream-warning').evaluate("e=>e.hidden=true")
             assert await page.locator('#wfspeed option').all_text_contents()==['alta','normal','lento','muy lento']
             assert await page.locator('#speed-high').evaluate('option=>option.disabled&&option.hidden')
             await expect(page.locator('#send-chat')).to_be_enabled()
@@ -147,10 +147,12 @@ async def main():
                 await page.locator('#high').press('Tab')
                 await page.locator('#digital-mute').click()
                 await expect(page.locator('#digital-mute')).to_have_attribute('aria-pressed','true')
+                await expect(page.locator('#digital-mute')).to_have_text('Silenciado')
                 await expect(page.locator('#mute')).to_be_checked()
                 assert 'mute=1' in page.url
                 await page.locator('#mute').uncheck()
                 await expect(page.locator('#digital-mute')).to_have_attribute('aria-pressed','false')
+                await expect(page.locator('#digital-mute')).to_have_text('Silenciar')
                 assert 'mute=1' not in page.url
                 for control in ('#squelch','#notch','#nr'):
                     await expect(page.locator(control)).to_be_disabled()
@@ -292,7 +294,6 @@ async def main():
             await page.wait_for_timeout(600)
             packets_after_controls=int(await page.locator('#audio-status').get_attribute('data-packets'))
             assert packets_after_controls>packets_before_controls,'audio stopped after zoom/filter adjustment'
-            await expect(page.locator('#stream-warning')).to_be_hidden()
             await page.locator('[data-mode="USB"]:not([data-narrow])').click()
             await page.locator('[data-step="1000"]').click()
             await expect(page.locator('#frequency')).to_have_attribute('data-confirmed','7101000')

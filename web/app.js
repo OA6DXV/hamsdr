@@ -20,7 +20,7 @@ let spectrumHistory=[],waterfallNavigationHistory=[];
 let waterfallPreference='balanced',waterfallProfile='balanced',waterfallSpeed=1,drawAverage=0,lastProfileRequest=0,profileTimer,pendingRow,waterfallFrame;
 let waterfallViewRevision=0,waterfallViewTimer;
 let trafficBytes=0,trafficAt=performance.now();
-let lastWaterfallSequence=null,lastWaterfallAt=0,streamWarningTimer,socketOpenedAt=0,interruptionSamples=[];
+let lastWaterfallSequence=null,lastWaterfallAt=0,socketOpenedAt=0;
 let memories=[];
 try {
   const saved=JSON.parse(localStorage.getItem('hamsdr-memories')||'[]');
@@ -54,18 +54,7 @@ function applyResourcePolicy(policy){
   const notice=$('resource-policy');notice.hidden=!policy?.restricted;
   notice.textContent=policy?.restricted?`${policy.message} Máximo: cascada ${waterfallMax}, audio ${audioMax}.`:'';
 }
-function reportStreamInterruption(reason){
-  if(document.visibilityState==='hidden')return;
-  const now=performance.now();
-  interruptionSamples=interruptionSamples.filter(sample=>now-sample.time<=30000);
-  interruptionSamples.push({time:now,reason});
-  const warning=$('stream-warning');
-  warning.dataset.samples=String(interruptionSamples.length);
-  if(interruptionSamples.length<3)return;
-  interruptionSamples=[];
-  warning.hidden=false;warning.dataset.reason=reason;clearTimeout(streamWarningTimer);
-  streamWarningTimer=setTimeout(()=>{warning.hidden=true;delete warning.dataset.reason;delete warning.dataset.samples;},45000);
-}
+function reportStreamInterruption(){}
 window.reportStreamInterruption=reportStreamInterruption;
 function observeWaterfall(sequence){
   const now=performance.now(),expected=waterfallSourceGap(),delta=lastWaterfallSequence===null?expected:(sequence-lastWaterfallSequence)>>>0;
@@ -528,7 +517,7 @@ window.addEventListener('radio-event',({detail})=>{if(detail.type==='presence'){
 function drawRow(frame,replay=false){
   const drawStarted=performance.now(),data=frame.data||frame,rowLower=frame.lower??center-rate/2,rowSpan=frame.span??rate;
   lastRow=frame;if(!replay){++spectrumFrames;canvas.dataset.frames=String(spectrumFrames);}
-  if($('pause').checked&&!replay)return;
+  if($('pause').getAttribute('aria-pressed')==='true'&&!replay)return;
   lastDraw=performance.now();
   if(!replay){spectrumHistory.push({data:data.slice(),lower:rowLower,span:rowSpan,sequence:frame.sequence});if(spectrumHistory.length>600)spectrumHistory.shift();canvas.dataset.history=String(spectrumHistory.length);}
   if(!replay&&touchPan?.active){redrawHistory(waterfallNavigationHistory.length?waterfallNavigationHistory:spectrumHistory);return;}
@@ -710,7 +699,7 @@ async function pauseAudio(){
 function setMuted(value){
   muted=!!value;
   $('mute').checked=muted;$('mute').setAttribute('aria-pressed',String(muted));
-  $('digital-mute').setAttribute('aria-pressed',String(muted));$('digital-mute').textContent=muted?'Quitar mute':'Mute';
+  $('digital-mute').setAttribute('aria-pressed',String(muted));$('digital-mute').textContent=muted?'Silenciado':'Silenciar';
   if(gain)gain.gain.value=muted?0:10**(Number($('volume').value)/20);
   updateSharedUrl();
 }
@@ -744,7 +733,8 @@ document.querySelectorAll('[name=view]').forEach(r=>r.addEventListener('change',
 $('wfmode').onchange=()=>{view=$('wfmode').value;if(view==='spectrum-dynamic'){dynamicSpectrumBottom=null;dynamicSpectrumTop=null;}renderSpectrumAxis();redrawHistory();};
 $('wfsize').onchange=()=>{canvas.height=Number($('wfsize').value);canvas.style.height=`${canvas.height}px`;renderSpectrumAxis();redrawHistory();sendWaterfallView();};
 $('wfspeed').onchange=sendWaterfallSpeed;
-$('brightness').addEventListener('input',()=>{if(isSpectrum()){renderSpectrumAxis();redrawHistory();}});
+$('brightness').addEventListener('input',()=>{if(isSpectrum())renderSpectrumAxis();redrawHistory();});
+$('pause').addEventListener('click',()=>{$('pause').setAttribute('aria-pressed',String($('pause').getAttribute('aria-pressed')!=='true'));});
 $('labels').onchange=drawMarkers;
 $('waterfall-quality').value=waterfallPreference;
 $('waterfall-quality').addEventListener('change',()=>{waterfallPreference=$('waterfall-quality').value;if(digitalMode)digitalWaterfallManuallyChanged=true;try{localStorage.setItem('hamsdr-waterfall',waterfallPreference);}catch{}sendWaterfallPreference();});

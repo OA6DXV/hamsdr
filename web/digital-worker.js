@@ -139,10 +139,10 @@ function finishSlot(){
     const decoded=wasmDecoder.decode_slot(mode,slotBuffer,timestampUs)||[];
     for(const result of decoded)postMessage({type:'decoded',result:enrichCountry(result)});
     postMessage({type:'progress',value:100});
-    postMessage({type:'status',message:`${mode} · ${decoded.length} mensaje(s) decodificado(s)`,decodedCount:decoded.length});
+    postMessage({type:'status',message:`(${decoded.length}) Mensajes`,decodedCount:decoded.length});
   }else if(wasmDecoder){
     postMessage({type:'progress',value:0});
-    postMessage({type:'status',message:`${mode} sincronizando…`});
+    postMessage({type:'status',message:'Sincronizando…'});
   }
   lastProgress=performance.now();
   slotIndex=null;
