@@ -2,18 +2,19 @@
 import {findRttyCandidates,RttyDecoder} from './rtty-core.mjs';
 
 class RttyMultiDetector{
-  constructor(post){this.post=post;this.enabled=false;this.streams=[];this.pending=[];this.nextId=1;this.scanNumber=0;this.average=null;this.configure({});}
+  constructor(post,rate){this.post=post;this.sampleRate=rate;this.enabled=false;this.streams=[];this.pending=[];this.nextId=1;this.scanNumber=0;this.average=null;this.configure({});}
   configure(options){
     const wasEnabled=this.enabled;
+    this.sampleRate=Number(options.sampleRate??this.sampleRate);
     this.enabled=Boolean(options.multi??this.enabled);this.low=Number(options.low??this.low??0);this.high=Number(options.high??this.high??3000);
     this.reverse=Boolean(options.reverse??this.reverse??false);
     if(!this.enabled){if(wasEnabled)this.clear();return;}
-    for(const stream of this.streams)stream.decoder.configure({centerFrequency:stream.centerFrequency,reverse:this.reverse,afc:true});
+    for(const stream of this.streams)stream.decoder.configure({sampleRate:this.sampleRate,centerFrequency:stream.centerFrequency,reverse:this.reverse,afc:true});
   }
   clear(){this.streams=[];this.pending=[];this.average=null;this.post({type:'multi-streams',streams:[]});}
   createStream(candidate){
     const stream={id:this.nextId++,centerFrequency:candidate.centerFrequency,score:candidate.score,lastSeen:this.scanNumber,text:''};
-    stream.decoder=new RttyDecoder({sampleRate,baud:45.45,shift:170,centerFrequency:stream.centerFrequency,reverse:this.reverse,afc:true,afcRange:45,filterBandwidth:270,
+    stream.decoder=new RttyDecoder({sampleRate:this.sampleRate,baud:45.45,shift:170,centerFrequency:stream.centerFrequency,reverse:this.reverse,afc:true,afcRange:45,filterBandwidth:270,
       onCharacter:value=>this.post({type:'multi-character',id:stream.id,centerFrequency:stream.centerFrequency,value})});
     this.streams.push(stream);
   }
@@ -40,15 +41,16 @@ class RttyMultiDetector{
 }
 
 class RttySpectrum{
-  constructor(post){
-    this.post=post;this.size=2048;this.real=new Float64Array(this.size);this.imag=new Float64Array(this.size);
+  constructor(post,rate){
+    this.post=post;this.sampleRate=rate;this.size=2048;this.real=new Float64Array(this.size);this.imag=new Float64Array(this.size);
     this.buffer=new Float32Array(this.size);this.count=0;this.skip=0;
   }
+  setSampleRate(rate){if(rate===this.sampleRate)return;this.sampleRate=rate;this.count=0;this.skip=0;}
   push(input){
     for(let index=0;index<input.length;index++){
       if(this.skip){this.skip--;continue;}
       this.buffer[this.count++]=input[index];
-      if(this.count===this.size){this.emit();this.count=0;this.skip=Math.max(0,Math.round(sampleRate/6)-this.size);}
+      if(this.count===this.size){this.emit();this.count=0;this.skip=Math.max(0,Math.round(this.sampleRate/6)-this.size);}
     }
   }
   emit(){
@@ -71,30 +73,37 @@ class RttySpectrum{
     }
     const levels=new Float32Array(size/2+1);
     for(let bin=0;bin<levels.length;bin++)levels[bin]=20*Math.log10(Math.hypot(this.real[bin],this.imag[bin])/(size*.5)+1e-8);
-    this.post({type:'spectrum',sampleRate,fftSize:size,levels},[levels.buffer]);
+    this.post({type:'spectrum',sampleRate:this.sampleRate,fftSize:size,levels},[levels.buffer]);
   }
 }
 
 class RttyProcessor extends AudioWorkletProcessor{
   constructor(options){
-    super();this.enabled=false;
-    this.decoder=new RttyDecoder({sampleRate,
+    super();this.enabled=false;this.inputRate=Number(options.processorOptions?.sampleRate||sampleRate);this.externalPcm=Boolean(options.processorOptions?.externalPcm);
+    this.decoder=new RttyDecoder({sampleRate:this.inputRate,
       ...(options.processorOptions||{}),
       onCharacter:value=>this.port.postMessage({type:'character',value}),
       onStatus:status=>this.port.postMessage({type:'status',...status})});
-    this.multi=new RttyMultiDetector(message=>this.port.postMessage(message));
-    this.spectrum=new RttySpectrum((message,transfer)=>{this.multi.updateSpectrum(message);this.port.postMessage(message,transfer);});
+    this.multi=new RttyMultiDetector(message=>this.port.postMessage(message),this.inputRate);
+    this.spectrum=new RttySpectrum((message,transfer)=>{this.multi.updateSpectrum(message);this.port.postMessage(message,transfer);},this.inputRate);
     this.decoder.setEnabled(false);
     this.port.onmessage=({data})=>{
-      if(data.type==='config'){this.decoder.configure(data);this.multi.configure(data);}
+      if(data.type==='config'){
+        this.inputRate=Number(data.sampleRate??this.inputRate);this.externalPcm=Boolean(data.externalPcm??this.externalPcm);
+        this.decoder.configure({...data,sampleRate:this.inputRate});this.multi.configure({...data,sampleRate:this.inputRate});this.spectrum.setSampleRate(this.inputRate);
+      }
       if(data.type==='enabled'){this.enabled=Boolean(data.enabled);this.decoder.setEnabled(this.enabled);}
       if(data.type==='reset'){this.decoder.reset();this.multi.clear();}
+      if(data.type==='samples'&&this.enabled&&data.payload){
+        const pcm=new Int16Array(data.payload),samples=new Float32Array(pcm.length);for(let index=0;index<pcm.length;index++)samples[index]=pcm[index]/32768;this.processSamples(samples);
+      }
     };
   }
+  processSamples(input){this.decoder.process(input);this.multi.process(input);this.spectrum.push(input);}
   process(inputs,outputs){
     const input=inputs[0]?.[0],output=outputs[0]?.[0];
     if(output)output.fill(0);
-    if(this.enabled&&input){this.decoder.process(input);this.multi.process(input);this.spectrum.push(input);}
+    if(this.enabled&&input&&!this.externalPcm)this.processSamples(input);
     return true;
   }
 }

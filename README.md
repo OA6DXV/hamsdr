@@ -12,6 +12,8 @@ reserved for stable releases.
 
 - Optional client-side RTTY multidetection scans the visible passband for up to
   eight simultaneous 45.45 baud/170 Hz signals and decodes each independently.
+- RTTY uses the lossless 12 kHz `digiraw` PCM transport for playback, its
+  focused waterfall and all decoders; Opus artifacts never enter the DSP path.
 - RTTY now includes a focused, responsive 0--5 kHz waterfall generated inside
   its AudioWorklet and following the receiver filter without network overhead.
 - Client-side RTTY reception uses a lightweight AudioWorklet detector and an

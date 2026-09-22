@@ -678,7 +678,7 @@ class Gateway:
         client = self.clients.get(ident)
         if not client:
             return
-        if mode not in (None, "FT8", "FT4"):
+        if mode not in (None, "FT8", "FT4", "RTTY"):
             raise ValueError("Modo digital desconocido")
         if mode and not getattr(self.args, "digimodes", False):
             raise ValueError("Digimodos no están habilitados en este receptor")
@@ -706,7 +706,7 @@ class Gateway:
     def publish_digital_audio(self, ident, data):
         client = self.clients.get(ident)
         if (not client or not client["audio_enabled"] or client["audio_profile"] != "digiraw" or
-                client["digital_mode"] not in ("FT8", "FT4")):
+                client["digital_mode"] not in ("FT8", "FT4", "RTTY")):
             return
         pending = client["digital_tail"]
         pending.extend(data)
@@ -732,7 +732,7 @@ class Gateway:
             return
         sequence = client["digital_sequence"]
         client["digital_sequence"] = (sequence + 1) & 0xffffffff
-        mode_code = 1 if client["digital_mode"] == "FT8" else 2
+        mode_code = {"FT8": 1, "FT4": 2, "RTTY": 3}[client["digital_mode"]]
         timestamp_us = time.time_ns() // 1000
         sample_count = len(out) // 2
         header = struct.pack("<BIQH", mode_code, sequence, timestamp_us, sample_count)
@@ -828,7 +828,7 @@ class Gateway:
     def settings_command(self, ident, settings):
         effective = settings
         client = self.clients.get(ident)
-        if client and client.get("digital_mode") in ("FT8", "FT4"):
+        if client and client.get("digital_mode") in ("FT8", "FT4", "RTTY"):
             # Digital mode keeps the selected 0-5 kHz passband, but bypasses
             # squelch, autonotch and noise reduction so decoding remains intact.
             effective = {**settings, "squelch": -150, "notch": False, "nr": 0}
@@ -1191,7 +1191,7 @@ class Gateway:
                         profile = update.get("profile")
                         if profile not in ("raw", "balanced", "mobile", "digiraw"):
                             raise ValueError("Perfil de audio desconocido")
-                        if profile == "digiraw" and client["digital_mode"] not in ("FT8", "FT4"):
+                        if profile == "digiraw" and client["digital_mode"] not in ("FT8", "FT4", "RTTY"):
                             raise ValueError("El perfil digiraw requiere un modo digital activo")
                         audio_max = self.address_profile_limits(address)[1]
                         levels = ("mobile", "balanced", "digiraw", "raw")

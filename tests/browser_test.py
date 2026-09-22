@@ -207,6 +207,8 @@ async def main():
                     await expect(page.locator('#digital-panel')).to_be_hidden()
                 await page.locator('[data-rtty-mode]').click()
                 await expect(page.locator('#rtty-panel')).to_be_visible()
+                await expect(page.locator('#audio-quality')).to_have_value('digiraw')
+                await expect(page.locator('#audio-profile-status')).to_contain_text('PCM16 · 12 kHz')
                 await expect(page.locator('#mode-display')).to_have_text('USB')
                 await expect(page.locator('#low')).to_have_value('0')
                 await expect(page.locator('#high')).to_have_value('3000')
@@ -238,6 +240,7 @@ async def main():
                 await expect(page.locator('#rtty-multi-panel')).to_be_hidden()
                 await page.locator('[data-rtty-mode]').click()
                 await expect(page.locator('#rtty-panel')).to_be_hidden()
+                await expect(page.locator('#audio-quality')).to_have_value('balanced')
                 await page.locator('#listen').click()
                 await expect(page.locator('#listen')).to_have_text('Iniciar audio')
             assert await page.locator('footer a',has_text='Estado del receptor').count()==0

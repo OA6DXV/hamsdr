@@ -411,6 +411,27 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
             except asyncio.TimeoutError:continue
             self.assertFalse(message.type==WSMsgType.BINARY and message.data[0]==12)
 
+    async def test_rtty_uses_digital_pcm_stream(self):
+        self.app[GATEWAY].args.digimodes=True
+        ws=await self.connect()
+        await ws.send_json({'type':'digital-mode','mode':'RTTY'})
+        reply=await self.event(ws,'digital-mode')
+        self.assertEqual((reply['mode'],reply['rate']),('RTTY',12000))
+        gateway=self.app[GATEWAY];ident=next(iter(gateway.clients));client=gateway.clients[ident]
+        self.assertEqual(client['audio_profile'],'digiraw')
+        await ws.send_json({'type':'audio','enabled':True});await self.event(ws,'audio-state')
+        async with asyncio.timeout(4):
+            while True:
+                message=await ws.receive()
+                if message.type!=WSMsgType.BINARY:continue
+                self.assertNotIn(message.data[0],(2,10,11))
+                if message.data[0]!=12:continue
+                mode_code,sequence,timestamp_us,count=struct.unpack('<BIQH',message.data[1:16])
+                self.assertEqual(mode_code,3);self.assertGreater(timestamp_us,0);self.assertEqual(count*2,len(message.data)-16)
+                if count:break
+        await ws.send_json({'type':'digital-mode','mode':None})
+        disabled=await self.event(ws,'digital-mode');self.assertIsNone(disabled['mode'])
+
     async def test_receiverbook_status_and_confirmation_tag(self):
         gateway = self.app[GATEWAY]
         token = "a" * 64

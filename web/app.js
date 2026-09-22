@@ -20,6 +20,7 @@ let digimodesAvailable=!!siteConfig.digimodes,digitalMode=null,digitalWorker=nul
 let rttyActive=false,rttyNode=null,rttySink=null,rttyModuleLoaded=false,rttyText='';
 let rttyNoiseFloor=null,rttyColorCeiling=null,rttySpectrumFrames=0;
 let rttyStreams=new Map();
+let rttyPreviousAudioProfile=null,rttyProfilePending=false;
 let spectrumHistory=[],waterfallNavigationHistory=[];
 let waterfallPreference='balanced',waterfallProfile='balanced',waterfallSpeed=1,drawAverage=0,lastProfileRequest=0,profileTimer,pendingRow,waterfallFrame;
 let waterfallViewRevision=0,waterfallViewTimer;
@@ -121,7 +122,7 @@ function sendWaterfallView(){
 }
 function sendWaterfallSpeed(){if(socket?.readyState===WebSocket.OPEN){const value=$('wfspeed').value;socket.send(JSON.stringify({type:'waterfall-speed',divisor:value==='high'?'high':Number(value)}));}}
 function sendAudioProfile(){if(socket?.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type:'audio-profile',profile:audioProfile}));}
-function sendDigitalMode(selected=digitalMode){if(socket?.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type:'digital-mode',mode:selected}));}
+function sendDigitalMode(selected=digitalMode||(rttyActive?'RTTY':null)){if(socket?.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type:'digital-mode',mode:selected}));}
 function setDigitalControlsVisible(visible){
   document.querySelectorAll('[data-digital-mode],[data-rtty-mode],[data-digital-menu]').forEach(button=>button.hidden=!visible);
   if(!visible&&digitalMode)setDigitalMode(null);if(!visible&&rttyActive)setRttyMode(false);
@@ -357,7 +358,7 @@ function setDigitalMode(next,{autoStartAudio=true}={}){
   showDigitalAudioStarter();
   updateSharedUrl();
 }
-function rttyConfiguration(){const shift=Number($('rtty-shift').value);return{type:'config',baud:Number($('rtty-baud').value),shift,centerFrequency:Number($('rtty-center').value),reverse:$('rtty-reverse').checked,afc:$('rtty-afc').checked,afcRange:50,filterBandwidth:Math.max(250,shift+100),stopBits:1.5,multi:$('rtty-multi').checked,low,high};}
+function rttyConfiguration(){const shift=Number($('rtty-shift').value);return{type:'config',sampleRate:12000,externalPcm:true,baud:Number($('rtty-baud').value),shift,centerFrequency:Number($('rtty-center').value),reverse:$('rtty-reverse').checked,afc:$('rtty-afc').checked,afcRange:50,filterBandwidth:Math.max(250,shift+100),stopBits:1.5,multi:$('rtty-multi').checked,low,high};}
 function sendRttyConfiguration(){if(rttyNode)rttyNode.port.postMessage(rttyConfiguration());updateSharedUrl();}
 function renderRttyStreams(){
   const body=$('rtty-multi-table').tBodies[0],markers=$('rtty-markers');body.replaceChildren();markers.replaceChildren();
@@ -406,23 +407,35 @@ function setRttyMode(enabled,{autoStartAudio=true}={}){
   if(selected){
     if(!digimodesAvailable){message('Digimodos no están habilitados en este receptor.');return;}
     if(digitalMode)setDigitalMode(null);
+    rttyPreviousAudioProfile=audioProfile;
     rttyActive=true;mode='USB';narrow=false;[low,high]=[0,3000];setDigitalDspState(true);updateRttySpectrumRange(true);tune();
+    $('audio-quality').querySelector('option[value="digiraw"]').hidden=false;audioProfile='digiraw';rttyProfilePending=true;resetAudio();showAudioProfile();sendDigitalMode('RTTY');sendAudioProfile();
     $('rtty-panel').hidden=false;$('digital-separator').hidden=false;$('rtty-multi-panel').hidden=!$('rtty-multi').checked;$('rtty-waterfall').dataset.multi=String($('rtty-multi').checked);
     document.querySelector('[data-rtty-mode]').setAttribute('aria-pressed','true');updateRttyTitle();
     if(audioEnabled)void ensureRttyNode();else if(autoStartAudio)void listen();
   }else{
     rttyActive=false;$('rtty-panel').hidden=true;$('digital-separator').hidden=!digitalMode;if(!digitalMode)setDigitalDspState(false);
     document.querySelector('[data-rtty-mode]').setAttribute('aria-pressed','false');if(rttyNode)rttyNode.port.postMessage({type:'enabled',enabled:false});
+    sendDigitalMode(null);if(rttyPreviousAudioProfile){audioProfile=rttyPreviousAudioProfile;resetAudio();showAudioProfile();sendAudioProfile();}rttyPreviousAudioProfile=null;rttyProfilePending=false;$('audio-quality').querySelector('option[value="digiraw"]').hidden=true;
   }
   updateSharedUrl();
 }
 function handleDigitalPacket(bytes){
-  if(!digitalMode||!digitalAudioCompatible||!audioEnabled||bytes.byteLength<16)return;
+  const selectedMode=digitalMode||(rttyActive?'RTTY':null);
+  if(!selectedMode||!audioEnabled||bytes.byteLength<16||(digitalMode&&!digitalAudioCompatible))return;
   const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength),modeCode=view.getUint8(0);
-  const packetMode=modeCode===1?'FT8':modeCode===2?'FT4':'';
-  if(packetMode!==digitalMode)return;
+  const packetMode=modeCode===1?'FT8':modeCode===2?'FT4':modeCode===3?'RTTY':'';
+  if(packetMode!==selectedMode)return;
   const sequence=view.getUint32(1,true),timestampUs=Number(view.getBigUint64(5,true)),sampleCount=view.getUint16(13,true);
   const payload=bytes.slice(15),samples=new Int16Array(payload.buffer,payload.byteOffset,Math.floor(payload.byteLength/2));
+  if(packetMode==='RTTY'){
+    audioPackets++;$('audio-status').dataset.packets=String(audioPackets);
+    const decoderPayload=payload.buffer.slice(0),playbackPayload=payload.buffer.slice(0);
+    if(recording)recordPCM(payload.buffer.slice(0));
+    if(rttyNode)rttyNode.port.postMessage({type:'samples',rate:12000,payload:decoderPayload},[decoderPayload]);
+    if(node&&context?.state==='running')node.port.postMessage({codec:'pcm16',rate:12000,payload:playbackPayload,record:false},[playbackPayload]);
+    return;
+  }
   drawDigitalSamples(samples);
   if(audioProfile==='digiraw'){
     audioPackets++;$('audio-status').dataset.packets=String(audioPackets);
@@ -719,11 +732,15 @@ function connect(){
         if(digitalMode&&digitalProfilePending&&msg.profile!=='digiraw'){
           audioProfile='digiraw';resetAudio();showAudioProfile();sendAudioProfile();return;
         }
+        if(rttyActive&&rttyProfilePending&&msg.profile!=='digiraw'){
+          audioProfile='digiraw';resetAudio();showAudioProfile();sendAudioProfile();return;
+        }
         if(digitalMode&&msg.profile==='digiraw')digitalProfilePending=false;
+        if(rttyActive&&msg.profile==='digiraw')rttyProfilePending=false;
         audioProfile=msg.profile;resetAudio();showAudioProfile();
         if(digitalMode&&audioProfile!=='digiraw'&&digitalAudioCompatible)setDigitalCompatibility(false);
       }else if(msg.type==='digital-mode'){
-        if(msg.mode!==digitalMode&&msg.mode!==null)digitalMode=msg.mode;
+        if(msg.mode!=='RTTY'&&msg.mode!==digitalMode&&msg.mode!==null)digitalMode=msg.mode;
         if(digitalMode)$('digital-state').textContent=audioEnabled?'Esperando muestras de 12 kHz…':'Inicia audio para decodificar.';
       }else if(msg.type==='resource-policy')applyResourcePolicy(msg);
       else if(msg.type==='resource-limit')message(msg.message);
@@ -783,7 +800,7 @@ async function listen(){
     await resumed;
     if(['balanced','mobile'].includes(audioProfile)&&!await browserSupportsOpus())fallbackFromOpus('Este navegador no ofrece decodificación Opus mediante WebCodecs.');
     gain.gain.value=muted?0:10**(Number($('volume').value)/20);
-    audioEnabled=true;audioEverStarted=true;window.radioSend({type:'audio',enabled:true});if(rttyActive)await ensureRttyNode();showAudioState();message();
+    audioEnabled=true;audioEverStarted=true;if(rttyActive)await ensureRttyNode();window.radioSend({type:'audio',enabled:true});showAudioState();message();
     if(digitalMode)ensureDigitalWorker().postMessage({type:'start',mode:digitalMode,rate:12000,frequency,demodulation:mode});
   }catch(error){message(error.message);$('audio-status').textContent='No se pudo iniciar el audio. Pulsa Escuchar para reintentar.';}
   finally{audioStarting=false;showDigitalAudioStarter();}
@@ -827,7 +844,7 @@ $('copy-link').addEventListener('click',async()=>{
 });
 document.querySelectorAll('[data-step]').forEach(b=>b.addEventListener('click',()=>{frequency+=Number(b.dataset.step);tune();}));
 document.querySelectorAll('[data-fix]').forEach(b=>b.addEventListener('click',()=>{frequency=Math.round(frequency/1000)*1000;tune();}));
-document.querySelectorAll('[data-mode]').forEach(b=>b.addEventListener('click',()=>{mode=b.dataset.mode;narrow=!!b.dataset.narrow;if(!digitalMode)[low,high]=(narrow?narrowDefaults:defaults)[mode];tune();}));
+document.querySelectorAll('[data-mode]').forEach(b=>b.addEventListener('click',()=>{mode=b.dataset.mode;narrow=!!b.dataset.narrow;if(!digitalMode&&!rttyActive)[low,high]=(narrow?narrowDefaults:defaults)[mode];tune();}));
 document.querySelectorAll('[data-digital-mode]').forEach(b=>b.addEventListener('click',()=>setDigitalMode(b.dataset.digitalMode)));
 document.querySelector('[data-rtty-mode]').addEventListener('click',()=>setRttyMode(true));
 $('rtty-clear').addEventListener('click',()=>{rttyText='';rttyStreams.clear();$('rtty-terminal').textContent='';renderRttyStreams();if(rttyNode)rttyNode.port.postMessage({type:'reset'});});
@@ -851,7 +868,7 @@ $('labels').onchange=drawMarkers;
 $('waterfall-quality').value=waterfallPreference;
 $('waterfall-quality').addEventListener('change',()=>{waterfallPreference=$('waterfall-quality').value;if(digitalMode)digitalWaterfallManuallyChanged=true;try{localStorage.setItem('hamsdr-waterfall',waterfallPreference);}catch{}sendWaterfallPreference();});
 $('audio-quality').value=audioProfile;
-$('audio-quality').addEventListener('change',async()=>{if(recording)stopRecording();audioProfile=$('audio-quality').value;if(digitalMode&&audioProfile!=='digiraw')setDigitalCompatibility(false);if(['balanced','mobile'].includes(audioProfile)&&!await browserSupportsOpus()){fallbackFromOpus('Este navegador no ofrece decodificación Opus mediante WebCodecs.');return;}if(audioProfile!=='digiraw'){try{localStorage.setItem('hamsdr-audio-profile',audioProfile);}catch{}}resetAudio();showAudioProfile();sendAudioProfile();});
+$('audio-quality').addEventListener('change',async()=>{if(recording)stopRecording();const requested=$('audio-quality').value;if(rttyActive&&requested!=='digiraw'){audioProfile='digiraw';showAudioProfile();message('RTTY utiliza el perfil interno digiraw PCM16 a 12 kHz.');return;}audioProfile=requested;if(digitalMode&&audioProfile!=='digiraw')setDigitalCompatibility(false);if(['balanced','mobile'].includes(audioProfile)&&!await browserSupportsOpus()){fallbackFromOpus('Este navegador no ofrece decodificación Opus mediante WebCodecs.');return;}if(audioProfile!=='digiraw'){try{localStorage.setItem('hamsdr-audio-profile',audioProfile);}catch{}}resetAudio();showAudioProfile();sendAudioProfile();});
 $('digital-clear').addEventListener('click',()=>{digitalRows=[];renderDigitalRows();resetDigitalSpectrum();});
 $('digital-download').addEventListener('click',()=>{
   const lines=[`HamSDR ${digitalMode||'digital'} decode export`, `Frequency: ${(frequency/1000).toFixed(3)} kHz`, `Demodulation: ${mode}`, `Exported: ${new Date().toISOString()}`, '', 'UTC\tSNR\tDT\tHz\tMessage\tCountries'];
