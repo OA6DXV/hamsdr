@@ -130,11 +130,19 @@ function setDigitalControlsVisible(visible){
 const digitalFftSize=2048,digitalSampleRate=12000,digitalMaxFrequency=3000;
 const digitalSpectrumBuffer=new Float32Array(digitalFftSize),digitalReal=new Float64Array(digitalFftSize),digitalImag=new Float64Array(digitalFftSize);
 const digitalWindow=Float64Array.from({length:digitalFftSize},(_,index)=>.5-.5*Math.cos(2*Math.PI*index/(digitalFftSize-1)));
-let digitalSpectrumCount=0;
+let digitalSpectrumCount=0,digitalNoiseFloor=null,digitalColorCeiling=null;
 function resetDigitalSpectrum(clear=true){
-  digitalSpectrumCount=0;
-  if(clear){const canvas=$('digital-waterfall');canvas.getContext('2d').clearRect(0,0,canvas.width,canvas.height);}
+  digitalSpectrumCount=0;digitalNoiseFloor=null;digitalColorCeiling=null;
+  if(clear){const canvas=$('digital-waterfall');canvas.getContext('2d').clearRect(0,0,canvas.width,canvas.height);delete canvas.dataset.noiseFloor;delete canvas.dataset.colorCeiling;}
 }
+function digitalPercentile(values,fraction){
+  const minimum=-140,maximum=20,bins=160,histogram=new Uint16Array(bins);
+  for(const value of values){const index=Math.max(0,Math.min(bins-1,Math.floor(value-minimum)));histogram[index]++;}
+  const target=Math.max(0,Math.ceil(values.length*fraction)-1);let count=0;
+  for(let index=0;index<bins;index++){count+=histogram[index];if(count>target)return minimum+index+.5;}
+  return maximum;
+}
+function smoothDigitalScale(current,target){return current===null?target:current+(target-current)*.12;}
 function digitalSpectrumRow(){
   const size=digitalFftSize;
   for(let i=0;i<size;i++){digitalReal[i]=digitalSpectrumBuffer[i]*digitalWindow[i]/32768;digitalImag[i]=0;}
@@ -160,15 +168,23 @@ function digitalSpectrumRow(){
   const canvas=$('digital-waterfall'),g=canvas.getContext('2d'),w=canvas.width,h=canvas.height;
   if(!w||!h)return;
   g.drawImage(canvas,0,1,w,h-1,0,0,w,h-1);
-  const row=g.createImageData(w,1),maxBin=Math.floor(digitalMaxFrequency*size/digitalSampleRate);
+  const row=g.createImageData(w,1),maxBin=Math.floor(digitalMaxFrequency*size/digitalSampleRate),levels=new Float32Array(w);
   for(let x=0;x<w;x++){
     const first=Math.floor(x*maxBin/w),last=Math.max(first+1,Math.ceil((x+1)*maxBin/w));
     let magnitude=0;
     for(let bin=first;bin<last;bin++)magnitude=Math.max(magnitude,Math.hypot(digitalReal[bin],digitalImag[bin])/(size*.5));
-    const db=20*Math.log10(magnitude+1e-8),level=Math.max(0,Math.min(1,(db+105)/90)),strong=Math.max(0,(level-.7)/.3);
-    row.data[x*4]=Math.round(12+135*level+108*strong);
-    row.data[x*4+1]=Math.round(2+18*level+215*strong);
-    row.data[x*4+2]=Math.round(24+205*level-190*strong);
+    levels[x]=20*Math.log10(magnitude+1e-8);
+  }
+  const floorTarget=digitalPercentile(levels,.20)-3,ceilingTarget=floorTarget+42;
+  digitalNoiseFloor=smoothDigitalScale(digitalNoiseFloor,floorTarget);
+  digitalColorCeiling=smoothDigitalScale(digitalColorCeiling,ceilingTarget);
+  canvas.dataset.colorMode='adaptive';canvas.dataset.noiseFloor=digitalNoiseFloor.toFixed(1);canvas.dataset.colorCeiling=digitalColorCeiling.toFixed(1);
+  for(let x=0;x<w;x++){
+    const level=Math.max(0,Math.min(1,(levels[x]-digitalNoiseFloor)/(digitalColorCeiling-digitalNoiseFloor)));
+    const color=window.radioPalette[Math.round(level*255)];
+    row.data[x*4]=color[0];
+    row.data[x*4+1]=color[1];
+    row.data[x*4+2]=color[2];
     row.data[x*4+3]=255;
   }
   g.putImageData(row,0,h-1);

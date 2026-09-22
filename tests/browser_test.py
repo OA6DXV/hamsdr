@@ -142,6 +142,9 @@ async def main():
                 assert abs(digital_layout['log']['w']-digital_layout['body']['w'])<=2
                 assert digital_layout['canvas']['h']>=140
                 await page.wait_for_timeout(300)
+                await expect(page.locator('#digital-waterfall')).to_have_attribute('data-color-mode','adaptive')
+                await expect(page.locator('#digital-waterfall')).to_have_attribute('data-noise-floor',re.compile(r'^-?[0-9]+\.[0-9]$'))
+                await expect(page.locator('#digital-waterfall')).to_have_attribute('data-color-ceiling',re.compile(r'^-?[0-9]+\.[0-9]$'))
                 assert await page.locator('#digital-log').get_by_text('Decoder MFSK/WASM no instalado',exact=False).count()==0
                 await page.locator('[data-mode="AM"]:not([data-narrow])').click()
                 await expect(page.locator('#mode-display')).to_have_text('AM')
