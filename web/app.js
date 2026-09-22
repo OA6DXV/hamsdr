@@ -477,6 +477,7 @@ function changeZoom(next,anchor=frequency,fraction=.5){
 }
 function drawScale(){
   const w=scale.width; dial.fillStyle='#050505';dial.fillRect(0,0,w,44);dial.font='10px monospace';
+  scale.dataset.frequency=String(Math.round(frequency));scale.dataset.viewCenter=String(Math.round(viewCenter));
   const x=f=>(f-lower())/width()*w;
   const tickTarget=width()/Math.max(3,Math.floor(w/48)), base=10**Math.floor(Math.log10(tickTarget));
   const step=[1,2,5,10].map(v=>v*base).find(v=>v>=tickTarget);
@@ -722,10 +723,42 @@ $('digital-download').addEventListener('click',()=>{
 let suppressWaterfallClick=false;
 canvas.addEventListener('click',e=>{if(suppressWaterfallClick){suppressWaterfallClick=false;return;}const rect=canvas.getBoundingClientRect();frequency=lower()+(e.clientX-rect.left)/rect.width*width();tune();});
 canvas.addEventListener('wheel',e=>{e.preventDefault();changeZoom(e.deltaY<0?zoom*2:zoom/2);},{passive:false});
-const waterfallTouches=new Map();let pinch=null;
-canvas.addEventListener('pointerdown',e=>{if(e.pointerType!=='touch')return;waterfallTouches.set(e.pointerId,{x:e.clientX,y:e.clientY});try{canvas.setPointerCapture(e.pointerId);}catch{}if(waterfallTouches.size===2){const p=[...waterfallTouches.values()],rect=canvas.getBoundingClientRect(),mid=(p[0].x+p[1].x)/2;pinch={distance:Math.max(1,Math.hypot(p[0].x-p[1].x,p[0].y-p[1].y)),zoom,anchor:lower()+(mid-rect.left)/rect.width*width(),fraction:(mid-rect.left)/rect.width};suppressWaterfallClick=true;}});
-canvas.addEventListener('pointermove',e=>{if(!waterfallTouches.has(e.pointerId))return;waterfallTouches.set(e.pointerId,{x:e.clientX,y:e.clientY});if(pinch&&waterfallTouches.size===2){e.preventDefault();const p=[...waterfallTouches.values()],distance=Math.hypot(p[0].x-p[1].x,p[0].y-p[1].y);pinch.next=Math.max(1,Math.min(64,pinch.zoom*distance/pinch.distance));canvas.style.transformOrigin=`${pinch.fraction*100}% 50%`;canvas.style.transform=`scaleX(${pinch.next/pinch.zoom})`;$('zoom-label').value=`${pinch.next.toFixed(pinch.next<10?1:0).replace('.0','')}×`;}});
-function endWaterfallTouch(e){const finished=pinch&&waterfallTouches.size===2?pinch:null;waterfallTouches.delete(e.pointerId);if(waterfallTouches.size<2){pinch=null;canvas.style.transform='';canvas.style.transformOrigin='';if(finished?.next)changeZoom(finished.next,finished.anchor,finished.fraction);}}
+const waterfallTouches=new Map();let pinch=null,touchPan=null;
+function setTouchPanPosition(pan,clientX){
+  const rect=canvas.getBoundingClientRect(),span=rate/pan.zoom,requested=-(clientX-pan.startX)/rect.width*span;
+  const centerMinimum=center-rate/2+span/2,centerMaximum=center+rate/2-span/2;
+  const minimum=Math.max(centerMinimum-pan.startCenter,center-rate/2-pan.startFrequency);
+  const maximum=Math.min(centerMaximum-pan.startCenter,center+rate/2-pan.startFrequency);
+  const delta=Math.max(minimum,Math.min(maximum,requested));
+  viewCenter=pan.startCenter+delta;frequency=pan.startFrequency+delta;
+  canvas.style.transform=`translateX(${-delta/span*rect.width}px)`;drawScale();
+}
+canvas.addEventListener('pointerdown',e=>{
+  if(e.pointerType!=='touch')return;
+  waterfallTouches.set(e.pointerId,{x:e.clientX,y:e.clientY});try{canvas.setPointerCapture(e.pointerId);}catch{}
+  if(waterfallTouches.size===1&&zoom>1)touchPan={id:e.pointerId,startX:e.clientX,startY:e.clientY,startCenter:viewCenter,startFrequency:frequency,zoom,active:false};
+  if(waterfallTouches.size===2){
+    if(touchPan?.active){const oldWidth=rate/touchPan.zoom,oldLower=touchPan.startCenter-oldWidth/2;reprojectWaterfall(oldLower,oldWidth);tune();sendWaterfallView();}
+    touchPan=null;canvas.style.transform='';
+    const p=[...waterfallTouches.values()],rect=canvas.getBoundingClientRect(),mid=(p[0].x+p[1].x)/2;
+    pinch={distance:Math.max(1,Math.hypot(p[0].x-p[1].x,p[0].y-p[1].y)),zoom,anchor:lower()+(mid-rect.left)/rect.width*width(),fraction:(mid-rect.left)/rect.width};suppressWaterfallClick=true;
+  }
+});
+canvas.addEventListener('pointermove',e=>{
+  if(!waterfallTouches.has(e.pointerId))return;waterfallTouches.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(pinch&&waterfallTouches.size===2){e.preventDefault();const p=[...waterfallTouches.values()],distance=Math.hypot(p[0].x-p[1].x,p[0].y-p[1].y);pinch.next=Math.max(1,Math.min(64,pinch.zoom*distance/pinch.distance));canvas.style.transformOrigin=`${pinch.fraction*100}% 50%`;canvas.style.transform=`scaleX(${pinch.next/pinch.zoom})`;$('zoom-label').value=`${pinch.next.toFixed(pinch.next<10?1:0).replace('.0','')}×`;return;}
+  if(touchPan?.id===e.pointerId){
+    const dx=e.clientX-touchPan.startX,dy=e.clientY-touchPan.startY;
+    if(!touchPan.active&&Math.abs(dx)>8&&Math.abs(dx)>Math.abs(dy)){touchPan.active=true;suppressWaterfallClick=true;}
+    if(touchPan.active){e.preventDefault();setTouchPanPosition(touchPan,e.clientX);}
+  }
+});
+function endWaterfallTouch(e){
+  const finishedPinch=pinch&&waterfallTouches.size===2?pinch:null,finishedPan=touchPan?.id===e.pointerId?touchPan:null;
+  waterfallTouches.delete(e.pointerId);
+  if(finishedPan){touchPan=null;canvas.style.transform='';if(finishedPan.active){const oldWidth=rate/finishedPan.zoom,oldLower=finishedPan.startCenter-oldWidth/2;reprojectWaterfall(oldLower,oldWidth);tune();sendWaterfallView();}}
+  if(waterfallTouches.size<2){pinch=null;canvas.style.transform='';canvas.style.transformOrigin='';if(finishedPinch?.next)changeZoom(finishedPinch.next,finishedPinch.anchor,finishedPinch.fraction);}
+}
 canvas.addEventListener('pointerup',endWaterfallTouch);canvas.addEventListener('pointercancel',endWaterfallTouch);
 let drag=null;
 scale.addEventListener('pointerdown',e=>{

@@ -258,6 +258,17 @@ async def main():
             history_after=int(await page.locator('#waterfall').get_attribute('data-history'))
             assert history_after>=history_before,'zoom discarded waterfall history'
             if viewport['width']==390:
+                before_pan=await page.locator('#scale').evaluate("e=>({frequency:Number(e.dataset.frequency),center:Number(e.dataset.viewCenter)})")
+                await page.locator('#waterfall').dispatch_event('pointerdown',{'pointerId':10,'pointerType':'touch','clientX':160,'clientY':100})
+                await page.locator('#waterfall').dispatch_event('pointermove',{'pointerId':10,'pointerType':'touch','clientX':220,'clientY':102})
+                await page.locator('#waterfall').dispatch_event('pointerup',{'pointerId':10,'pointerType':'touch','clientX':220,'clientY':102})
+                after_pan=await page.locator('#scale').evaluate("e=>({frequency:Number(e.dataset.frequency),center:Number(e.dataset.viewCenter)})")
+                assert after_pan['frequency']<before_pan['frequency'],'right swipe did not move to a lower frequency'
+                assert abs((after_pan['frequency']-before_pan['frequency'])-(after_pan['center']-before_pan['center']))<=2,'tuning marker moved relative to the waterfall view'
+                await expect(page.locator('#waterfall')).to_have_css('transform','none')
+                await page.locator('#frequency').fill('7100.00')
+                await page.locator('#frequency').press('Tab')
+                await expect(page.locator('#frequency')).to_have_attribute('data-confirmed','7100000')
                 await page.locator('#waterfall').dispatch_event('pointerdown',{'pointerId':11,'pointerType':'touch','clientX':120,'clientY':100})
                 await page.locator('#waterfall').dispatch_event('pointerdown',{'pointerId':12,'pointerType':'touch','clientX':220,'clientY':100})
                 await page.locator('#waterfall').dispatch_event('pointermove',{'pointerId':12,'pointerType':'touch','clientX':300,'clientY':100})
