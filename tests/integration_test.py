@@ -294,6 +294,36 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(len(received[4]),40)
         self.assertGreater(len(received[4]),len(received[0])*1.3)
 
+    async def test_waterfall_view_returns_atomic_history_snapshot(self):
+        ws=await self.connect()
+        gateway=self.app[GATEWAY]
+        gateway.waterfall_history.clear()
+        for sequence in range(8):
+            row=bytearray([30+sequence])*4096
+            row[2048]=255
+            gateway.waterfall_history.append((sequence,bytes(row)))
+        await ws.send_json({'type':'waterfall-view','zoom':4,'center':gateway.center_frequency,
+                            'revision':77,'rows':4})
+        async with asyncio.timeout(3):
+            while True:
+                message=await ws.receive()
+                if message.type==WSMsgType.BINARY and message.data[0]==13:
+                    packet=message.data;break
+        revision,count=struct.unpack_from('<IH',packet,1)
+        self.assertEqual((revision,count),(77,4))
+        offset=7;rows=[]
+        for _ in range(count):
+            length=struct.unpack_from('<I',packet,offset)[0];offset+=4
+            rows.append(decode(packet[offset:offset+length]));offset+=length
+        self.assertEqual(offset,len(packet))
+        self.assertTrue(all(row[2]==gateway.center_frequency-gateway.sample_rate//8 for row in rows))
+        self.assertTrue(all(row[3]==gateway.sample_rate//4 for row in rows))
+        self.assertTrue(all(max(row[4])==255 for row in rows))
+        await ws.send_json({'type':'waterfall-view','zoom':4,'center':gateway.center_frequency,
+                            'revision':78,'rows':601})
+        error=await self.event(ws,'error')
+        self.assertIn('historial',error['message'])
+
     async def test_origins_controls_and_assets(self):
         for origin in ['null','https://untrusted.example']:
             with self.assertRaises(WSServerHandshakeError) as caught:

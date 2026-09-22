@@ -44,6 +44,16 @@ def _pack_fixed(values, bits):
     if used: output.append(accumulator & 0xff)
     return bytes(output)
 
+def project(row: bytes, bins: int, start: int = 0, end: int | None = None) -> bytes:
+    """Peak-project a frequency window into a bounded number of bins."""
+    end = len(row) if end is None else end
+    if not row or not 0 <= start < end <= len(row) or bins < 1:
+        raise ValueError("invalid waterfall projection")
+    output_bins = min(bins, end-start)
+    return bytes(max(row[start+output*(end-start)//output_bins:
+                         start+(output+1)*(end-start)//output_bins])
+                 for output in range(output_bins))
+
 def encode(row: bytes, profile: str, sequence: int, start: int = 0, end: int | None = None,
            lower_hz: int = 0, span_hz: int = 0) -> bytes:
     """Project one frequency window to a bounded, directly drawable row."""
@@ -53,13 +63,9 @@ def encode(row: bytes, profile: str, sequence: int, start: int = 0, end: int | N
     if not 0 <= start < end <= len(row) or not -(2**31) <= lower_hz < 2**31 or not 0 < span_hz < 2**32:
         raise ValueError("invalid waterfall window")
     spec = PROFILES[profile]
-    source_bins = end-start
-    bins = min(spec["bins"], source_bins)
-    values = []
-    for output in range(bins):
-        first = start + output*source_bins//bins
-        last = start + (output+1)*source_bins//bins
-        values.append(max(row[first:max(first+1,last)]) >> (8-spec["bits"]))
+    values = project(row, spec["bins"], start, end)
+    bins = len(values)
+    values = [value >> (8-spec["bits"]) for value in values]
     payload = _pack_differential(values) if spec["bits"] == 8 else _pack_fixed(values,spec["bits"])
     return HEADER.pack(VERSION, spec["code"], bins, spec["bits"], sequence, lower_hz, span_hz) + payload
 

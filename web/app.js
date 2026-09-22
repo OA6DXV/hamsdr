@@ -18,6 +18,7 @@ let context, node, gain, audioStarting=false, audioEnabled=false, audioEverStart
 let digimodesAvailable=!!siteConfig.digimodes,digitalMode=null,digitalWorker=null,digitalRows=[],digitalDownloadUrl=null,digitalDecoderNotice=false,digitalAudioCompatible=true,digitalPreviousAudioProfile=null,digitalPreviousWaterfallPreference=null,digitalWaterfallManuallyChanged=false,digitalProfilePending=false,digitalLogSized=false;
 let spectrumHistory=[];
 let waterfallPreference='balanced',waterfallProfile='balanced',waterfallSpeed=1,drawAverage=0,lastProfileRequest=0,profileTimer,pendingRow,waterfallFrame;
+let waterfallViewRevision=0,waterfallViewTimer;
 let trafficBytes=0,trafficAt=performance.now();
 let lastWaterfallSequence=null,lastWaterfallAt=0,streamWarningTimer,socketOpenedAt=0,interruptionSamples=[];
 let memories=[];
@@ -33,7 +34,7 @@ try {
   const migratedAudio={original:'raw','opus-high':'balanced','opus-low':'mobile'}[savedAudio]||savedAudio;
   if(['raw','balanced','mobile'].includes(migratedAudio))audioProfile=migratedAudio;
 } catch {}
-const canvas=$('waterfall'), ctx=canvas.getContext('2d'), scale=$('scale'), dial=scale.getContext('2d'), projectionCanvas=document.createElement('canvas');
+const canvas=$('waterfall'), ctx=canvas.getContext('2d'), scale=$('scale'), dial=scale.getContext('2d');
 const lower=()=>viewCenter-rate/(2*zoom), width=()=>rate/zoom;
 const beat=()=>mode==='CW'?700:0;
 function waterfallFps(){if(waterfallSpeed==='high')return 11.71875;return(waterfallProfile==='slow'?5:7.8125)/waterfallSpeed;}
@@ -119,7 +120,12 @@ function sendWaterfallPreference(forced){
   const profile=forced||(waterfallPreference==='auto'?recommendedWaterfallProfile():waterfallPreference);
   if(socket?.readyState===WebSocket.OPEN){socket.send(JSON.stringify({type:'waterfall',preference:waterfallPreference,profile}));lastProfileRequest=performance.now();}
 }
-function sendWaterfallView(){if(socket?.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type:'waterfall-view',zoom,center:Math.round(viewCenter)}));}
+function sendWaterfallView(){
+  const revision=waterfallViewRevision=(waterfallViewRevision+1)>>>0;
+  clearTimeout(waterfallViewTimer);waterfallViewTimer=setTimeout(()=>{
+    if(socket?.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type:'waterfall-view',zoom,center:Math.round(viewCenter),revision,rows:canvas.height}));
+  },75);
+}
 function sendWaterfallSpeed(){if(socket?.readyState===WebSocket.OPEN){const value=$('wfspeed').value;socket.send(JSON.stringify({type:'waterfall-speed',divisor:value==='high'?'high':Number(value)}));}}
 function sendAudioProfile(){if(socket?.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type:'audio-profile',profile:audioProfile}));}
 function sendDigitalMode(selected=digitalMode){if(socket?.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type:'digital-mode',mode:selected}));}
@@ -449,7 +455,7 @@ function tune(){
   const filterValid=digitalMode?low>=0&&high<=digitalFilterMaximum:low>=-6000&&high<=6000;
   if(!Number.isFinite(frequency)||!Number.isFinite(low)||!Number.isFinite(high)||!filterValid||high-low<100){message(digitalMode?'Revisa los límites del filtro digital (0 a 5000 Hz).':'Revisa los límites del filtro (−6000 a 6000 Hz).');return;}
   frequency=Math.round(Math.max(center-rate/2,Math.min(center+rate/2,frequency)));
-  if(frequency<lower()||frequency>lower()+width()){const oldLower=lower(),oldWidth=width();viewCenter=frequency;clampView();reprojectWaterfall(oldLower,oldWidth);sendWaterfallView();}
+  if(frequency<lower()||frequency>lower()+width()){viewCenter=frequency;clampView();redrawHistory();sendWaterfallView();}
   controls();updateSharedUrl();message();
   clearTimeout(tuneTimer);
   tuneTimer=setTimeout(()=>{
@@ -458,22 +464,29 @@ function tune(){
 }
 function clampView(){viewCenter=Math.max(center-rate/2+width()/2,Math.min(center+rate/2-width()/2,viewCenter));}
 function clearWaterfall(){ctx.fillStyle='#000';ctx.fillRect(0,0,canvas.width,canvas.height);}
-function redrawHistory(){clearWaterfall();lastDraw=0;const rows=spectrumHistory.slice(-canvas.height);if(isSpectrum()){if(rows.length)drawRow(rows.at(-1),true);}else for(const row of rows)drawRow(row,true);}
-function reprojectWaterfall(oldLower,oldWidth){
-  if(isSpectrum()){if(lastRow)drawRow(lastRow,true);return;}
-  const w=canvas.width,h=canvas.height,newLower=lower(),newWidth=width();
-  const start=Math.max(oldLower,newLower),end=Math.min(oldLower+oldWidth,newLower+newWidth);
-  if(projectionCanvas.width!==w)projectionCanvas.width=w;if(projectionCanvas.height!==h)projectionCanvas.height=h;
-  projectionCanvas.getContext('2d').drawImage(canvas,0,0);
-  clearWaterfall();if(end<=start)return;
-  const sx=(start-oldLower)/oldWidth*w,sw=(end-start)/oldWidth*w;
-  const dx=(start-newLower)/newWidth*w,dw=(end-start)/newWidth*w;
-  ctx.imageSmoothingEnabled=false;ctx.drawImage(projectionCanvas,sx,0,sw,h,dx,0,dw,h);
+function redrawHistory(){
+  clearWaterfall();lastDraw=0;const rows=spectrumHistory.slice(-canvas.height);
+  if(isSpectrum()){if(rows.length)drawRow(rows.at(-1),true);return;}
+  const w=canvas.width,h=canvas.height,image=ctx.createImageData(w,h),pixels=image.data;
+  for(let pixel=3;pixel<pixels.length;pixel+=4)pixels[pixel]=255;
+  const brightness=Number($('brightness').value),contrast=$('wfmode').value==='weak'?12:$('wfmode').value==='strong'?-12:0;
+  rows.forEach((frame,rowIndex)=>{
+    const data=frame.data||frame,rowLower=frame.lower??center-rate/2,rowSpan=frame.span??rate,y=h-rows.length+rowIndex;
+    for(let x=0;x<w;x++){
+      const rf=lower()+x/w*width(),relative=(rf-rowLower)/rowSpan;
+      if(relative<0||relative>=1)continue;
+      const bin=Math.max(0,Math.min(data.length-1,Math.floor(relative*data.length)));
+      const binEnd=Math.min(data.length,Math.max(bin+1,Math.ceil((relative+width()/w/rowSpan)*data.length)));
+      let peak=data[bin];for(let next=bin+1;next<binEnd;next++)peak=Math.max(peak,data[next]);
+      const db=peak/255*120-120,value=Math.max(0,Math.min(1,(db+74+brightness+contrast)/34)),color=window.radioPalette[Math.round(value*255)],offset=(y*w+x)*4;
+      pixels[offset]=color[0];pixels[offset+1]=color[1];pixels[offset+2]=color[2];
+    }
+  });
+  ctx.putImageData(image,0,0);
 }
 function changeZoom(next,anchor=frequency,fraction=.5){
-  const oldLower=lower(),oldWidth=width();
   zoom=Math.max(1,Math.min(64,next));viewCenter=anchor+(.5-fraction)*width();clampView();
-  $('zoom-label').value=`${zoom.toFixed(zoom<10?1:0).replace('.0','')}×`;reprojectWaterfall(oldLower,oldWidth);drawScale();sendWaterfallView();updateSharedUrl();
+  $('zoom-label').value=`${zoom.toFixed(zoom<10?1:0).replace('.0','')}×`;redrawHistory();drawScale();sendWaterfallView();updateSharedUrl();
 }
 function drawScale(){
   const w=scale.width; dial.fillStyle='#050505';dial.fillRect(0,0,w,44);dial.font='10px monospace';
@@ -517,7 +530,7 @@ function drawRow(frame,replay=false){
   lastRow=frame;if(!replay){++spectrumFrames;canvas.dataset.frames=String(spectrumFrames);}
   if($('pause').checked&&!replay)return;
   lastDraw=performance.now();
-  if(!replay){spectrumHistory.push({data:data.slice(),lower:rowLower,span:rowSpan});if(spectrumHistory.length>600)spectrumHistory.shift();canvas.dataset.history=String(spectrumHistory.length);}
+  if(!replay){spectrumHistory.push({data:data.slice(),lower:rowLower,span:rowSpan,sequence:frame.sequence});if(spectrumHistory.length>600)spectrumHistory.shift();canvas.dataset.history=String(spectrumHistory.length);}
   const w=canvas.width,h=canvas.height;
   if(!isSpectrum())ctx.drawImage(canvas,0,1,w,h-1,0,0,w,h-1);else clearWaterfall();
   const row=ctx.createImageData(w,1),brightness=Number($('brightness').value);
@@ -543,6 +556,28 @@ function drawRow(frame,replay=false){
 }
 function enqueueRow(frame){
   pendingRow=frame;if(waterfallFrame)return;waterfallFrame=requestAnimationFrame(()=>{waterfallFrame=undefined;if(!pendingRow)return;const latest=pendingRow;pendingRow=undefined;drawRow(latest);});
+}
+function applyWaterfallSnapshot(bytes){
+  if(bytes.byteLength<7)return;
+  const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength),revision=view.getUint32(1,true),count=view.getUint16(5,true);
+  if(revision!==waterfallViewRevision)return;
+  let offset=7;const frames=[];
+  for(let index=0;index<count;index++){
+    if(offset+4>bytes.byteLength)return;
+    const length=view.getUint32(offset,true);offset+=4;
+    if(length<1||offset+length>bytes.byteLength)return;
+    const decoded=window.decodeWaterfallRow(bytes.subarray(offset,offset+length));offset+=length;
+    if(!decoded)return;frames.push(decoded);
+  }
+  if(offset!==bytes.byteLength)return;
+  const newest=frames.at(-1)?.sequence;
+  if(Number.isInteger(newest)){
+    const existing=new Set(frames.map(frame=>frame.sequence));
+    for(const frame of spectrumHistory){const distance=(frame.sequence-newest)>>>0;if(Number.isInteger(frame.sequence)&&distance>0&&distance<0x80000000&&!existing.has(frame.sequence))frames.push(frame);}
+  }
+  spectrumHistory=frames.slice(-600);canvas.dataset.history=String(spectrumHistory.length);canvas.dataset.historyRevision=String(revision);
+  if(frames.length){canvas.dataset.historyLower=String(frames[0].lower);canvas.dataset.historySpan=String(frames[0].span);}
+  redrawHistory();
 }
 function connect(){
   clearTimeout(timer);
@@ -578,9 +613,9 @@ function connect(){
         if(msg.opus_available===false&&['balanced','mobile'].includes(audioProfile))fallbackFromOpus('Opus no está instalado en el servidor.');
         if(!['streaming','demo'].includes(msg.source))resetAudio();
       }else if(msg.type==='waterfall-profile'){
-        waterfallProfile=msg.profile;if(msg.preference){waterfallPreference=msg.preference;$('waterfall-quality').value=waterfallPreference;}lastWaterfallSequence=null;lastWaterfallAt=0;showWaterfallProfile();
+        waterfallProfile=msg.profile;if(msg.preference){waterfallPreference=msg.preference;$('waterfall-quality').value=waterfallPreference;}lastWaterfallSequence=null;lastWaterfallAt=0;showWaterfallProfile();sendWaterfallView();
       }else if(msg.type==='waterfall-speed'){
-        waterfallSpeed=msg.divisor;lastWaterfallSequence=null;lastWaterfallAt=0;$('wfspeed').value=String(msg.divisor);$('waterfall').dataset.speed=String(msg.divisor);showWaterfallProfile();
+        waterfallSpeed=msg.divisor;lastWaterfallSequence=null;lastWaterfallAt=0;$('wfspeed').value=String(msg.divisor);$('waterfall').dataset.speed=String(msg.divisor);showWaterfallProfile();sendWaterfallView();
       }else if(msg.type==='stream-stats'){
         $('client-traffic').dataset.serverKbps=String(msg.kbps);
       }else if(msg.type==='audio-state'){
@@ -605,6 +640,7 @@ function connect(){
     const bytes=new Uint8Array(data),kind=bytes[0];
     if(kind===1)enqueueRow({data:bytes.subarray(1),lower:center-rate/2,span:rate});
     if(kind===7){const decoded=window.decodeWaterfallRow(bytes.subarray(1));if(!decoded){message('Fila de cascada inválida; reconectando…');socket.close(1002,'Invalid waterfall row');return;}observeWaterfall(decoded.sequence);canvas.dataset.sequence=String(decoded.sequence);canvas.dataset.lower=String(decoded.lower);canvas.dataset.span=String(decoded.span);enqueueRow(decoded);}
+    if(kind===13)applyWaterfallSnapshot(bytes);
     if(kind===2&&audioEnabled){
       audioPackets++;$('audio-status').dataset.packets=String(audioPackets);
       const payload=data.slice(1),rate=16000;
@@ -704,7 +740,7 @@ $('zoom-in').addEventListener('click',()=>changeZoom(zoom*2));$('zoom-out').addE
 $('max-zoom').onclick=()=>changeZoom(64);
 document.querySelectorAll('[name=view]').forEach(r=>r.addEventListener('change',()=>{$('panorama').hidden=r.value==='none';}));
 $('wfmode').onchange=()=>{view=$('wfmode').value;if(view==='spectrum-dynamic'){dynamicSpectrumBottom=null;dynamicSpectrumTop=null;}renderSpectrumAxis();redrawHistory();};
-$('wfsize').onchange=()=>{canvas.height=Number($('wfsize').value);canvas.style.height=`${canvas.height}px`;renderSpectrumAxis();redrawHistory();};
+$('wfsize').onchange=()=>{canvas.height=Number($('wfsize').value);canvas.style.height=`${canvas.height}px`;renderSpectrumAxis();redrawHistory();sendWaterfallView();};
 $('wfspeed').onchange=sendWaterfallSpeed;
 $('brightness').addEventListener('input',()=>{if(isSpectrum()){renderSpectrumAxis();redrawHistory();}});
 $('labels').onchange=drawMarkers;
@@ -738,7 +774,7 @@ canvas.addEventListener('pointerdown',e=>{
   waterfallTouches.set(e.pointerId,{x:e.clientX,y:e.clientY});try{canvas.setPointerCapture(e.pointerId);}catch{}
   if(waterfallTouches.size===1&&zoom>1)touchPan={id:e.pointerId,startX:e.clientX,startY:e.clientY,startCenter:viewCenter,startFrequency:frequency,zoom,active:false};
   if(waterfallTouches.size===2){
-    if(touchPan?.active){const oldWidth=rate/touchPan.zoom,oldLower=touchPan.startCenter-oldWidth/2;reprojectWaterfall(oldLower,oldWidth);tune();sendWaterfallView();}
+    if(touchPan?.active){redrawHistory();tune();sendWaterfallView();}
     touchPan=null;canvas.style.transform='';
     const p=[...waterfallTouches.values()],rect=canvas.getBoundingClientRect(),mid=(p[0].x+p[1].x)/2;
     pinch={distance:Math.max(1,Math.hypot(p[0].x-p[1].x,p[0].y-p[1].y)),zoom,anchor:lower()+(mid-rect.left)/rect.width*width(),fraction:(mid-rect.left)/rect.width};suppressWaterfallClick=true;
@@ -756,7 +792,7 @@ canvas.addEventListener('pointermove',e=>{
 function endWaterfallTouch(e){
   const finishedPinch=pinch&&waterfallTouches.size===2?pinch:null,finishedPan=touchPan?.id===e.pointerId?touchPan:null;
   waterfallTouches.delete(e.pointerId);
-  if(finishedPan){touchPan=null;canvas.style.transform='';if(finishedPan.active){const oldWidth=rate/finishedPan.zoom,oldLower=finishedPan.startCenter-oldWidth/2;reprojectWaterfall(oldLower,oldWidth);tune();sendWaterfallView();}}
+  if(finishedPan){touchPan=null;canvas.style.transform='';if(finishedPan.active){redrawHistory();tune();sendWaterfallView();}}
   if(waterfallTouches.size<2){pinch=null;canvas.style.transform='';canvas.style.transformOrigin='';if(finishedPinch?.next)changeZoom(finishedPinch.next,finishedPinch.anchor,finishedPinch.fraction);}
 }
 canvas.addEventListener('pointerup',endWaterfallTouch);canvas.addEventListener('pointercancel',endWaterfallTouch);

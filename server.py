@@ -2,7 +2,7 @@
 """Small HTTP/WebSocket gateway. DSP stays in one shared C++ subprocess."""
 import argparse
 import asyncio
-from collections import OrderedDict
+from collections import OrderedDict, deque
 import contextlib
 import ipaddress
 import json
@@ -21,10 +21,10 @@ from urllib.parse import urlsplit
 from aiohttp import web, WSMsgType
 from community import History, plain_text
 from opus_codec import OPUS_AVAILABLE, OpusEncoder
-from waterfall_codec import VERSION as WATERFALL_PROTOCOL_VERSION, encode as encode_waterfall
+from waterfall_codec import VERSION as WATERFALL_PROTOCOL_VERSION, encode as encode_waterfall, project as project_waterfall
 
 ROOT = Path(__file__).resolve().parent
-VERSION = "0.5.3-dev"
+VERSION = "0.5.4-dev"
 PROTOCOL_VERSION = 1
 MODES = {"USB": (300, 2700), "LSB": (-2700, -300), "AM": (-4000, 4000),
          "CW": (450, 950), "NFM": (-5000, 5000)}
@@ -419,6 +419,7 @@ class Gateway:
         self.stats_task = None
         self.stopping = False
         self.waterfall_sequence = 0
+        self.waterfall_history = deque(maxlen=600)
         self.connection_attempts = OrderedDict()
         self.address_limit_stage = {}
         self.address_bandwidth_samples = {}
@@ -764,6 +765,7 @@ class Gateway:
     def publish_spectrum(self, data):
         sequence = self.waterfall_sequence
         self.waterfall_sequence = (sequence+1) & 0xffffffff
+        self.waterfall_history.append((sequence, project_waterfall(data, 4096)))
         compressed = {}
         for ident, client in tuple(self.clients.items()):
             profile = client["waterfall_profile"]
@@ -788,6 +790,39 @@ class Gateway:
             if key not in compressed:
                 compressed[key] = bytes([7])+encode_waterfall(data, profile, sequence, start, end, lower, span)
             self.publish(compressed[key], ident)
+
+    def publish_waterfall_history(self, ident, revision, requested_rows):
+        """Send one atomic, view-specific snapshot from the shared full-band ring."""
+        client = self.clients.get(ident)
+        if not client or not self.waterfall_history:
+            return
+        profile, speed = client["waterfall_profile"], client["waterfall_speed"]
+        fps = (11.71875 if speed == "high" else
+               (5 if profile == "slow" else 7.8125) / speed)
+        gap = 15.625 / fps
+        history = list(self.waterfall_history)
+        selected = []
+        offset = 0.0
+        while len(selected) < requested_rows:
+            index = len(history)-1-round(offset)
+            if index < 0:
+                break
+            selected.append(history[index])
+            offset += gap
+        selected.reverse()
+        zoom, view_center = client["waterfall_zoom"], client["waterfall_center"]
+        span = round(self.sample_rate/zoom)
+        lower = round(view_center-span/2)
+        start = max(0, min(4095, round((lower-self.band_lower)/self.sample_rate*4096)))
+        end = max(start+1, min(4096, round((lower+span-self.band_lower)/self.sample_rate*4096)))
+        encoded = [encode_waterfall(row, profile, sequence, start, end, lower, span)
+                   for sequence, row in selected]
+        packet = bytearray([13])
+        packet.extend(struct.pack("<IH", revision, len(encoded)))
+        for row in encoded:
+            packet.extend(struct.pack("<I", len(row)))
+            packet.extend(row)
+        self.publish(bytes(packet), ident)
 
     def status(self):
         self.publish(json.dumps(self.info()))
@@ -1126,6 +1161,10 @@ class Gateway:
                         if not self.band_lower+span/2 <= view_center <= self.band_upper-span/2:
                             raise ValueError("Ventana de cascada fuera de banda")
                         client["waterfall_zoom"], client["waterfall_center"] = float(zoom), round(view_center)
+                        revision, rows = update.get("revision", 0), update.get("rows", 100)
+                        if type(revision) is not int or not 0 <= revision <= 0xffffffff or type(rows) is not int or not 1 <= rows <= 600:
+                            raise ValueError("Solicitud de historial de cascada inválida")
+                        self.publish_waterfall_history(ident, revision, rows)
                         continue
                     if update.get("type") == "waterfall-speed":
                         speed = update.get("divisor")

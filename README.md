@@ -8,8 +8,11 @@ responsive browser interface and server-side DSP.
 The current `dev` branch is a development preview. The `main` branch is
 reserved for stable releases.
 
-## 0.5.3-dev
+## 0.5.4-dev
 
+- Zoom and horizontal navigation now rebuild the waterfall from a shared
+  600-row full-band history instead of starting with an empty view. Snapshots
+  are requested only when the view changes and are painted atomically.
 - Decoded FT8/FT4 messages now resolve transmitter and recipient callsigns
   locally to their DXCC entities using the bundled, compressed Big CTY prefix
   database; no callsigns are sent to an external lookup service.
@@ -22,14 +25,13 @@ reserved for stable releases.
 - Client-side FT8/FT4 decoding with the bundled `mfsk-core` WebAssembly module.
 - Decoder capture windows are aligned to the 15-second FT8 or 7.5-second FT4
   UTC slot boundaries carried by the digital transport timestamps.
-- The digital panel renders a responsive 0–3 kHz FFT waterfall at about 5.9
-  rows per second, with the decoded-message table placed below it.
+- The digital panel renders a responsive, adjustable 0–5 kHz FFT waterfall at
+  about 5.9 rows per second, with 0–3 kHz selected by default.
 - Digital operation is gated by `server.digimodes`. Entering FT8 or FT4 selects
   USB, the exclusive 12 kHz PCM `digiraw` profile and the connection-slow
   waterfall preset. Demodulation and waterfall quality remain user-selectable.
-- While a digital mode is active, its receiver path always supplies the full
-  0–3 kHz baseband and bypasses the user audio filter, squelch, autonotch and
-  noise reduction. The saved controls are restored when digital mode stops.
+- While a digital mode is active, its receiver path uses the selected 0–5 kHz
+  passband and bypasses squelch, autonotch and noise reduction.
 - Selecting another audio profile stops the decoder until the digital mode is
   toggled off and on again.
 - While the first FT8/FT4 receive slot is collected, the browser downloads the

@@ -255,8 +255,9 @@ async def main():
             assert zoom_block_ms<100,f'zoom blocked the browser main thread for {zoom_block_ms:.1f} ms'
             await expect(page.locator('#zoom-label')).to_have_text('2×')
             await expect(page.locator('#waterfall')).to_have_attribute('data-span','512000')
+            await expect(page.locator('#waterfall')).to_have_attribute('data-history-span','512000')
             history_after=int(await page.locator('#waterfall').get_attribute('data-history'))
-            assert history_after>=history_before,'zoom discarded waterfall history'
+            assert history_before>0 and history_after>0,'zoom failed to restore waterfall history'
             if viewport['width']==390:
                 before_pan=await page.locator('#scale').evaluate("e=>({frequency:Number(e.dataset.frequency),center:Number(e.dataset.viewCenter)})")
                 await page.locator('#waterfall').dispatch_event('pointerdown',{'pointerId':10,'pointerType':'touch','clientX':160,'clientY':100})

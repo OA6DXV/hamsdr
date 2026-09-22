@@ -4,9 +4,16 @@ import sys
 from pathlib import Path
 import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from waterfall_codec import decode, encode
+from waterfall_codec import decode, encode, project
 
 class WaterfallCodecTests(unittest.TestCase):
+    def test_full_band_history_projection_preserves_peaks(self):
+        row=bytearray(65536);row[1234]=255;row[64000]=201
+        reduced=project(row,4096)
+        self.assertEqual(len(reduced),4096)
+        self.assertEqual(reduced[1234*4096//65536],255)
+        self.assertEqual(reduced[64000*4096//65536],201)
+
     def test_profiles_are_lossless_and_preserve_peaks(self):
         row=bytearray(random.Random(7100).randrange(256) for _ in range(65536))
         row[32000:32064]=bytes([255])*64
