@@ -95,7 +95,7 @@ async function loadDecoder(){
   wasmLoadStarted=true;
   try{
     const module=await import('./mfsk-decoder.js');
-    if(typeof module.default==='function')await module.default(new URL('./mfsk-decoder_bg.wasm',import.meta.url));
+    if(typeof module.default==='function')await module.default({module_or_path:new URL('./mfsk-decoder_bg.wasm',import.meta.url)});
     if(typeof module.decode_slot==='function')wasmDecoder=module;
   }catch(error){
     if(!warned){
