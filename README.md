@@ -18,6 +18,9 @@ reserved for stable releases.
 - Digital operation is gated by `server.digimodes`. Entering FT8 or FT4 selects
   USB, the exclusive 12 kHz PCM `digiraw` profile and the connection-slow
   waterfall preset. Demodulation and waterfall quality remain user-selectable.
+- While a digital mode is active, its receiver path always supplies the full
+  0–3 kHz baseband and bypasses the user audio filter, squelch, autonotch and
+  noise reduction. The saved controls are restored when digital mode stops.
 - Selecting another audio profile stops the decoder until the digital mode is
   toggled off and on again.
 

@@ -115,6 +115,9 @@ async def main():
                 await expect(page.locator('#waterfall-quality')).to_have_value('slow')
                 await expect(page.locator('#digital-panel')).to_be_visible()
                 await expect(page.locator('#digital-waterfall-message')).to_be_hidden()
+                await expect(page.locator('#digital-filter-note')).to_be_visible()
+                for control in ('#low','#high','#filter-narrow','#filter-wide','#squelch','#notch','#nr'):
+                    await expect(page.locator(control)).to_be_disabled()
                 digital_layout=await page.evaluate("""()=>{const box=id=>{const r=document.querySelector(id).getBoundingClientRect();return{w:r.width,h:r.height}};return{body:box('.digital-body'),canvas:box('#digital-waterfall'),log:box('.digital-log-wrap')}}""")
                 assert abs(digital_layout['canvas']['w']-digital_layout['body']['w'])<=2
                 assert abs(digital_layout['log']['w']-digital_layout['body']['w'])<=2
@@ -128,6 +131,8 @@ async def main():
                 await expect(page.locator('#digital-waterfall-message')).to_be_visible()
                 await page.locator('[data-digital-mode="FT8"]').click()
                 await expect(page.locator('#digital-panel')).to_be_hidden()
+                await expect(page.locator('#digital-filter-note')).to_be_hidden()
+                await expect(page.locator('#filter-narrow')).to_be_enabled()
                 await page.locator('[data-digital-mode="FT8"]').click()
                 await expect(page.locator('#digital-waterfall-message')).to_be_hidden()
                 await expect(page.locator('#audio-quality')).to_have_value('digiraw')

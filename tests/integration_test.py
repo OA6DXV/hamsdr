@@ -330,12 +330,19 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
         error=await self.event(ws,'error')
         self.assertIn('Digimodos',error['message'])
         self.app[GATEWAY].args.digimodes=True
+        await ws.send_json({'type':'tune','mode':'USB','frequency':7100000,
+                            'low':2000,'high':2700,'squelch':0,'notch':True,'nr':4})
+        await self.event(ws,'tuned')
         await ws.send_json({'type':'digital-mode','mode':'FT8'})
         reply=await self.event(ws,'digital-mode')
         self.assertEqual((reply['mode'],reply['rate']),('FT8',12000))
-        self.assertEqual(self.app[GATEWAY].clients[next(iter(self.app[GATEWAY].clients))]['audio_profile'],'digiraw')
-        await self.tune(ws,'USB',7100000)
+        gateway=self.app[GATEWAY];ident=next(iter(gateway.clients));client=gateway.clients[ident]
+        self.assertEqual(client['audio_profile'],'digiraw')
+        effective=gateway.settings_command(ident,client['settings']).split()
+        self.assertEqual((effective[3],*map(float,effective[4:7]),*map(int,effective[7:9])),
+                         ('USB',0.0,3000.0,-150.0,0,0))
         await ws.send_json({'type':'audio','enabled':True});await self.event(ws,'audio-state')
+        first_digital=True
         async with asyncio.timeout(4):
             while True:
                 msg=await ws.receive()
@@ -344,16 +351,21 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
                 if msg.type==WSMsgType.BINARY and msg.data[0]==12:
                     mode_code,sequence,timestamp_us,count=struct.unpack('<BIQH',msg.data[1:16])
                     self.assertEqual(mode_code,1)
-                    self.assertEqual(sequence,0)
+                    if first_digital:self.assertEqual(sequence,0)
+                    first_digital=False
                     self.assertGreater(timestamp_us,0)
                     self.assertEqual(count*2,len(msg.data)-16)
                     self.assertEqual(count,192)
-                    break
+                    samples=struct.unpack('<'+'h'*count,msg.data[16:])
+                    if max(samples)-min(samples)>100:break
         await ws.send_json({'type':'audio-profile','profile':'balanced'})
         disabled=await self.event(ws,'digital-mode')
         self.assertIsNone(disabled['mode'])
         changed=await self.event(ws,'audio-profile')
         self.assertEqual(changed['profile'],'balanced')
+        restored=gateway.settings_command(ident,client['settings']).split()
+        self.assertEqual((restored[3],*map(float,restored[4:7]),*map(int,restored[7:9])),
+                         ('USB',2000.0,2700.0,0.0,1,4))
         await ws.send_json({'type':'audio','enabled':False});await self.event(ws,'audio-state')
         deadline=asyncio.get_running_loop().time()+1
         while asyncio.get_running_loop().time()<deadline:

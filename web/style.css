@@ -21,4 +21,5 @@
 #digital-log th,#digital-log td{border-bottom:1px solid #d0d0d0;padding:2px 5px;text-align:left;vertical-align:top}
 #digital-log th{position:sticky;top:0;background:#fff}
 .digital-placeholder{color:#666;text-align:center}
+#digital-filter-note{margin:6px 0;color:#6f0092;font-size:12px;font-weight:bold}
 @media(max-width:850px){.digital-header label{margin-left:0}#digital-waterfall{height:clamp(140px,38vw,230px)}.digital-frequency-axis{font-size:9px}}

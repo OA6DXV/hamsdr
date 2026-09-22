@@ -793,9 +793,21 @@ class Gateway:
         self.publish(json.dumps(self.info()))
 
     def settings_command(self, ident, settings):
+        effective = settings
+        client = self.clients.get(ident)
+        if client and client.get("digital_mode") in ("FT8", "FT4"):
+            # Digital decoders need the complete 0-3 kHz baseband. Preserve the
+            # user's controls for later, but bypass their audio filter, squelch,
+            # autonotch and noise reduction in the active receiver path.
+            mode = settings["mode"]
+            low, high = ((-3000, 0) if mode == "LSB" else
+                         (-3000, 3000) if mode in ("AM", "NFM") else
+                         (0, 3000))
+            effective = {**settings, "low": low, "high": high, "squelch": -150,
+                         "notch": False, "nr": 0}
         # CW's displayed frequency is the RF carrier, with a 700 Hz beat note.
-        offset = settings['frequency']-self.center_frequency-(700 if settings['mode']=='CW' else 0)
-        return f"set {ident} {offset} {settings['mode']} {settings['low']} {settings['high']} {settings['squelch']} {int(settings.get('notch', False))} {settings.get('nr', 0)}"
+        offset = effective['frequency']-self.center_frequency-(700 if effective['mode']=='CW' else 0)
+        return f"set {ident} {offset} {effective['mode']} {effective['low']} {effective['high']} {effective['squelch']} {int(effective.get('notch', False))} {effective.get('nr', 0)}"
 
     def presence(self):
         colors = ["#ff4040", "#ffa000", "#c0c000", "#80ff00", "#00ff00", "#00bbbb", "#559fff", "#ff40ff"]
@@ -1156,6 +1168,7 @@ class Gateway:
                             raise ValueError(f"Esta red permite audio hasta {audio_max}")
                         if client["digital_mode"] and profile != "digiraw":
                             self.digital_mode(ident, None)
+                            await self.command(self.settings_command(ident, client["settings"]))
                         self.audio_profile(ident, profile)
                         continue
                     if update.get("type") == "digital-mode":
@@ -1163,6 +1176,7 @@ class Gateway:
                         if mode == "":
                             mode = None
                         self.digital_mode(ident, mode)
+                        await self.command(self.settings_command(ident, client["settings"]))
                         continue
                     if update.get("type") != "tune":
                         raise ValueError("Control desconocido")

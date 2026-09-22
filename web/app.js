@@ -222,6 +222,11 @@ function setDigitalCompatibility(compatible){
     sendDigitalMode(null);
   }
 }
+function setDigitalDspState(active){
+  for(const id of ['low','high','filter-narrow','filter-wide','squelch','notch','nr'])$(id).disabled=active;
+  $('digital-filter-note').hidden=!active;
+  updateSquelchControl();
+}
 function setDigitalMode(next){
   if(next&&!digimodesAvailable){message('Digimodos no están habilitados en este receptor.');return;}
   const selected=digitalMode===next?null:next;
@@ -232,6 +237,7 @@ function setDigitalMode(next){
     }
     digitalMode=selected;
     setDigitalCompatibility(true);
+    setDigitalDspState(true);
     resetDigitalSpectrum();
     mode='USB';narrow=false;[low,high]=defaults.USB;tune();
     $('audio-quality').querySelector('option[value="digiraw"]').hidden=false;
@@ -240,6 +246,7 @@ function setDigitalMode(next){
   }else{
     digitalMode=null;
     setDigitalCompatibility(true);
+    setDigitalDspState(false);
   }
   document.querySelectorAll('[data-digital-mode]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.digitalMode===digitalMode)));
   $('digital-panel').hidden=!digitalMode;$('digital-separator').hidden=!digitalMode;
@@ -599,7 +606,7 @@ document.querySelectorAll('[data-step]').forEach(b=>b.addEventListener('click',(
 document.querySelectorAll('[data-fix]').forEach(b=>b.addEventListener('click',()=>{frequency=Math.round(frequency/1000)*1000;tune();}));
 document.querySelectorAll('[data-mode]').forEach(b=>b.addEventListener('click',()=>{mode=b.dataset.mode;narrow=!!b.dataset.narrow;[low,high]=(narrow?narrowDefaults:defaults)[mode];tune();}));
 document.querySelectorAll('[data-digital-mode]').forEach(b=>b.addEventListener('click',()=>setDigitalMode(b.dataset.digitalMode)));
-function updateSquelchControl(){const active=$('squelch').checked;$('threshold').disabled=!active;$('squelch-threshold').dataset.active=String(active);$('threshold-value').value=`${String($('threshold').value).replace('-', '−')} dBFS`;}
+function updateSquelchControl(){const active=$('squelch').checked&&!digitalMode;$('threshold').disabled=!active;$('squelch-threshold').dataset.active=String(active);$('threshold-value').value=`${String($('threshold').value).replace('-', '−')} dBFS`;}
 for(const id of ['low','high','threshold','notch','nr'])$(id).addEventListener('change',()=>{low=Number($('low').value);high=Number($('high').value);tune();});
 $('threshold').addEventListener('input',updateSquelchControl);
 $('squelch').addEventListener('change',()=>{updateSquelchControl();tune();});

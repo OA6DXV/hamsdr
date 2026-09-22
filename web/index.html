@@ -47,6 +47,7 @@
 <div class="dsp-control"><b>DSP reducción de ruido:</b> <select id="nr" aria-label="Nivel de reducción de ruido"><option value="0">Apagado</option><option value="1">Bajo</option><option value="2">Medio</option><option value="3">Alto</option><option value="4">Muy Alto</option></select></div></section>
 <section class="ctl filter-panel" aria-label="Filtro y grabación">
 Filter: <b><output id="bandwidth">2.40</output> kHz</b> <button id="filter-narrow">-</button> <button id="filter-wide">+</button>
+<p id="digital-filter-note" hidden>Digimodo: entrada completa de 0–3000 Hz; filtro de audio, squelch, autonotch y reducción de ruido omitidos.</p>
 <details><summary>Límites del filtro</summary><label>Inferior <input id="low" type="number" min="-6000" max="5900" step="50" value="-2700"> Hz</label><label>Superior <input id="high" type="number" min="-5900" max="6000" step="50" value="-300"> Hz</label></details><hr>
 <label><input id="squelch" type="checkbox"> squelch</label> <label><input id="notch" type="checkbox"> autonotch</label>
 <label id="squelch-threshold">Umbral squelch <input id="threshold" type="range" min="-110" max="-10" value="-70" aria-label="Umbral squelch" disabled> <output id="threshold-value">−70 dBFS</output></label><hr>
