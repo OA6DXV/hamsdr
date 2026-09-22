@@ -8,8 +8,10 @@ responsive browser interface and server-side DSP.
 The current `dev` branch is a development preview. The `main` branch is
 reserved for stable releases.
 
-## 0.5.5-dev
+## 0.5.6-dev
 
+- RTTY now includes a focused, responsive 0--5 kHz waterfall generated inside
+  its AudioWorklet and following the receiver filter without network overhead.
 - Client-side RTTY reception uses a lightweight AudioWorklet detector and an
   internal ITA2 decoder without microphone access or server-side DSP.
 
