@@ -411,7 +411,7 @@ function setRttyMode(enabled,{autoStartAudio=true}={}){
     if(!digimodesAvailable){message('Digimodos no están habilitados en este receptor.');return;}
     if(digitalMode)setDigitalMode(null);
     rttyPreviousAudioProfile=audioProfile;
-    rttyActive=true;mode='USB';narrow=false;[low,high]=[0,3000];setDigitalDspState(true);updateRttySpectrumRange(true);tune();
+    rttyActive=true;mode='LSB';narrow=false;[low,high]=digitalDefaults.LSB;$('rtty-reverse').checked=false;setDigitalDspState(true);updateRttySpectrumRange(true);tune();
     $('audio-quality').querySelector('option[value="digiraw"]').hidden=false;audioProfile='digiraw';rttyProfilePending=true;resetAudio();showAudioProfile();sendDigitalMode('RTTY');sendAudioProfile();
     $('rtty-panel').hidden=false;$('digital-separator').hidden=false;$('rtty-multi-panel').hidden=!$('rtty-multi').checked;$('rtty-waterfall').dataset.multi=String($('rtty-multi').checked);
     document.querySelector('[data-rtty-mode]').setAttribute('aria-pressed','true');updateRttyTitle();
@@ -525,7 +525,7 @@ function sharedUrl(){
   url.searchParams.set('mode',mode);
   if(low!==base[0]||high!==base[1]){url.searchParams.set('low',String(low));url.searchParams.set('high',String(high));}
   if(Math.abs(zoom-1)>.001)url.searchParams.set('zoom',String(Number(zoom.toFixed(2))));
-  if(digitalMode)url.searchParams.set('digital',digitalMode);else if(rttyActive){url.searchParams.set('digital','RTTY');const baud=Number($('rtty-baud').value),shift=Number($('rtty-shift').value),rttyCenter=Number($('rtty-center').value);if(baud!==45.45)url.searchParams.set('baud',String(baud));if(shift!==170)url.searchParams.set('shift',String(shift));if(rttyCenter!==1000)url.searchParams.set('center',String(rttyCenter));if($('rtty-reverse').checked)url.searchParams.set('reverse','1');if(!$('rtty-afc').checked)url.searchParams.set('afc','0');if($('rtty-multi').checked)url.searchParams.set('multi','1');}
+  if(digitalMode)url.searchParams.set('digital',digitalMode);else if(rttyActive){url.searchParams.set('digital','RTTY');const baud=Number($('rtty-baud').value),shift=Number($('rtty-shift').value),rttyCenter=Number($('rtty-center').value);if(baud!==45.45)url.searchParams.set('baud',String(baud));if(shift!==170)url.searchParams.set('shift',String(shift));if(rttyCenter!==1000)url.searchParams.set('center',String(rttyCenter));url.searchParams.set('reverse',$('rtty-reverse').checked?'1':'0');if(!$('rtty-afc').checked)url.searchParams.set('afc','0');if($('rtty-multi').checked)url.searchParams.set('multi','1');}
   if(muted)url.searchParams.set('mute','1');
   return url;
 }
@@ -554,8 +554,9 @@ function applySharedDigitalState(){
     if(sharedParams.has('low')&&sharedParams.has('high')&&Number.isFinite(requestedLow)&&Number.isFinite(requestedHigh)&&requestedLow>=-digitalFilterMaximum&&requestedHigh<=digitalFilterMaximum&&requestedHigh-requestedLow>=100){low=requestedLow;high=requestedHigh;tune();}
   }else if(sharedRtty&&digimodesAvailable){
     for(const [id,key,minimum,maximum] of [['rtty-baud','baud',30,300],['rtty-shift','shift',50,1000],['rtty-center','center',100,5000]]){const value=Number(sharedParams.get(key));if(sharedParams.has(key)&&Number.isFinite(value)&&value>=minimum&&value<=maximum){const control=$(id);if(control.tagName==='SELECT'&&!Array.from(control.options).some(option=>Number(option.value)===value))control.add(new Option(String(value),String(value)));control.value=String(value);}}
-    $('rtty-reverse').checked=sharedParams.get('reverse')==='1';$('rtty-afc').checked=sharedParams.get('afc')!=='0';$('rtty-multi').checked=sharedParams.get('multi')==='1';$('rtty-multi-panel').hidden=!$('rtty-multi').checked;setRttyMode(true,{autoStartAudio:false});
+    $('rtty-afc').checked=sharedParams.get('afc')!=='0';$('rtty-multi').checked=sharedParams.get('multi')==='1';$('rtty-multi-panel').hidden=!$('rtty-multi').checked;setRttyMode(true,{autoStartAudio:false});
     const requestedMode=(sharedParams.get('mode')||'').toUpperCase();if(digitalDefaults[requestedMode]){mode=requestedMode;narrow=false;[low,high]=digitalDefaults[mode];}
+    $('rtty-reverse').checked=sharedParams.has('reverse')?sharedParams.get('reverse')==='1':mode==='USB';
     const requestedLow=Number(sharedParams.get('low')),requestedHigh=Number(sharedParams.get('high'));
     if(sharedParams.has('low')&&sharedParams.has('high')&&Number.isFinite(requestedLow)&&Number.isFinite(requestedHigh)&&requestedLow>=-digitalFilterMaximum&&requestedHigh<=digitalFilterMaximum&&requestedHigh-requestedLow>=100){low=requestedLow;high=requestedHigh;}tune();
   }
@@ -848,7 +849,7 @@ $('copy-link').addEventListener('click',async()=>{
 });
 document.querySelectorAll('[data-step]').forEach(b=>b.addEventListener('click',()=>{frequency+=Number(b.dataset.step);tune();}));
 document.querySelectorAll('[data-fix]').forEach(b=>b.addEventListener('click',()=>{frequency=Math.round(frequency/1000)*1000;tune();}));
-document.querySelectorAll('[data-mode]').forEach(b=>b.addEventListener('click',()=>{mode=b.dataset.mode;narrow=!!b.dataset.narrow;[low,high]=(digitalMode||rttyActive?(narrow?narrowDefaults:digitalDefaults):(narrow?narrowDefaults:defaults))[mode];tune();}));
+document.querySelectorAll('[data-mode]').forEach(b=>b.addEventListener('click',()=>{mode=b.dataset.mode;narrow=!!b.dataset.narrow;[low,high]=(digitalMode||rttyActive?(narrow?narrowDefaults:digitalDefaults):(narrow?narrowDefaults:defaults))[mode];if(rttyActive&&mode==='USB')$('rtty-reverse').checked=true;else if(rttyActive&&mode==='LSB')$('rtty-reverse').checked=false;tune();}));
 document.querySelectorAll('[data-digital-mode]').forEach(b=>b.addEventListener('click',()=>setDigitalMode(b.dataset.digitalMode)));
 document.querySelector('[data-rtty-mode]').addEventListener('click',()=>setRttyMode(true));
 $('rtty-clear').addEventListener('click',()=>{rttyText='';rttyStreams.clear();$('rtty-terminal').textContent='';renderRttyStreams();if(rttyNode)rttyNode.port.postMessage({type:'reset'});});

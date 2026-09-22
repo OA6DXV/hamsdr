@@ -16,6 +16,8 @@ reserved for stable releases.
   focused waterfall and all decoders; Opus artifacts never enter the DSP path.
 - Digital demodulation uses natural passbands per mode: USB 0--3000 Hz, LSB
   -3000--0 Hz, AM +/-4 kHz, NFM +/-5 kHz and CW 450--950 Hz by default.
+- RTTY starts in conventional LSB with normal MARK/SPACE polarity; selecting
+  USB enables Reverse automatically while still allowing a manual override.
 - RTTY now includes a focused, responsive 0--5 kHz waterfall generated inside
   its AudioWorklet and following the receiver filter without network overhead.
 - Client-side RTTY reception uses a lightweight AudioWorklet detector and an
