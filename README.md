@@ -76,10 +76,13 @@ recording follows the decoded audio sample rate.
 The current tuning state is reflected in a shareable URL. `freq` is expressed
 in kHz; `mode` accepts `LSB`, `USB`, `AM`, `CW` or `NFM`; optional `low` and
 `high` values describe the audio filter in Hz, and `zoom` accepts 1 through 64.
-For example: `/?freq=7100&mode=LSB&zoom=4`. Values outside the configured band
-or control ranges are ignored. The Copy link button writes the canonical
-current URL to the clipboard. Audio remains user-initiated to comply with
-browser autoplay policies.
+For example: `/?freq=7100&mode=LSB&zoom=4`. Digital links add
+`digital=FT8` or `digital=FT4`; `mute=1` preserves a local mute state.
+Values outside the configured band or control ranges are ignored. The Copy
+link button writes the canonical current URL to the clipboard. Audio remains
+user-initiated to comply with browser autoplay policies, so a loaded digital
+link shows the decoder ready but does not start playback until the listener
+presses the audio button.
 
 The client observes actual audio buffer underruns, missing or late waterfall
 sequence numbers and unexpected WebSocket reconnects. It displays a temporary

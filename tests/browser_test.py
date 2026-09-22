@@ -117,6 +117,7 @@ async def main():
                 await expect(page.locator('#audio-quality')).to_have_value('digiraw')
                 await expect(page.locator('#audio-profile-status')).to_contain_text('PCM16 · 12 kHz')
                 await expect(page.locator('#waterfall-quality')).to_have_value('slow')
+                assert 'digital=FT8' in page.url
                 await expect(page.locator('#digital-panel')).to_be_visible()
                 await expect(page.locator('#digital-waterfall-message')).to_be_hidden()
                 await expect(page.locator('#digital-progress')).to_have_attribute('max','100')
@@ -128,8 +129,10 @@ async def main():
                 await page.locator('#digital-mute').click()
                 await expect(page.locator('#digital-mute')).to_have_attribute('aria-pressed','true')
                 await expect(page.locator('#mute')).to_be_checked()
+                assert 'mute=1' in page.url
                 await page.locator('#mute').uncheck()
                 await expect(page.locator('#digital-mute')).to_have_attribute('aria-pressed','false')
+                assert 'mute=1' not in page.url
                 for control in ('#low','#high','#filter-narrow','#filter-wide','#squelch','#notch','#nr'):
                     await expect(page.locator(control)).to_be_disabled()
                 assert await page.locator('.digital-log-wrap').evaluate("element=>getComputedStyle(element).resize==='vertical'")
@@ -155,6 +158,16 @@ async def main():
                 await expect(page.locator('#digital-panel')).to_be_hidden()
                 await page.locator('#listen').click()
                 await expect(page.locator('#listen')).to_have_text('Iniciar audio')
+                if viewport['width']==768:
+                    await page.goto(url+'?digital=FT8&mute=1')
+                    await expect(page.locator('#digital-panel')).to_be_visible()
+                    await expect(page.locator('#mode-display')).to_have_text('USB')
+                    await expect(page.locator('#mute')).to_be_checked()
+                    await expect(page.locator('#listen')).to_have_text('Iniciar audio')
+                    assert 'digital=FT8' in page.url and 'mute=1' in page.url
+                    await page.locator('#mute').uncheck()
+                    await page.locator('[data-digital-mode="FT8"]').click()
+                    await expect(page.locator('#digital-panel')).to_be_hidden()
             assert await page.locator('footer a',has_text='Estado del receptor').count()==0
             assert await page.locator('#nr').evaluate("e=>e.closest('.signal-panel')!==null")
             layout=await page.evaluate("""()=>{const rect=s=>{const r=document.querySelector(s).getBoundingClientRect();return{x:r.x,y:r.y,w:r.width,right:r.right}};return{panorama:rect('#panorama'),controls:rect('.controls'),frequency:rect('.frequency-panel'),waterfall:rect('.waterfall-panel'),signal:rect('.signal-panel'),filter:rect('.filter-panel'),chat:rect('[aria-label=\"Chat en vivo\"]'),log:rect('[aria-label=\"Logbook\"]'),main:rect('main')}}""")

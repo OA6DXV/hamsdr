@@ -4,12 +4,14 @@ const $ = id => document.getElementById(id);
 const utf8Encoder=new TextEncoder();
 const protocolVersion=1,waterfallProtocolVersion=2;
 const sharedParams=new URLSearchParams(location.search);
+const sharedDigitalMode=(()=>{const value=(sharedParams.get('digital')||'').toUpperCase();return ['FT8','FT4'].includes(value)?value:(sharedParams.get('ft8')==='1'?'FT8':null);})();
+const sharedMuted=sharedParams.get('mute')==='1';
 const siteConfig=window.hamSdrSiteConfig||{};
 const defaults = {LSB:[-2700,-300],USB:[300,2700],AM:[-4000,4000],CW:[450,950],NFM:[-5000,5000]};
 const narrowDefaults={LSB:[-2200,-500],USB:[500,2200],AM:[-2500,2500],CW:[600,800],NFM:[-3000,3000]};
 let narrow=false, peakPower=-120, lastPeak=0, lastGraph=0, lastDraw=0, occupants=[];
 let frequency=7100000, mode='LSB', low=-2700, high=-300, center=7100500, rate=1024000;
-let bandConfigured=false,sharedTuningApplied=false,protocolReady=false,opusAvailable=true,currentResourcePolicy=null;
+let bandConfigured=false,sharedTuningApplied=false,sharedDigitalApplied=false,protocolReady=false,opusAvailable=true,currentResourcePolicy=null;
 let zoom=1, viewCenter=center, socket, retry=500, timer, tuneTimer, lastRow, view='waterfall', muted=false;
 let dynamicSpectrumBottom=null,dynamicSpectrumTop=null;
 let context, node, gain, audioStarting=false, audioEnabled=false, audioEverStarted=false, audioProfile='balanced', opusDecoder=null, opusSupportPromise=null, lastOpusSequence=null, spectrumFrames=0, audioPackets=0;
@@ -242,7 +244,7 @@ function setDigitalDspState(active){
   for(const id of ['low','high','filter-narrow','filter-wide','squelch','notch','nr'])$(id).disabled=active;
   updateSquelchControl();
 }
-function setDigitalMode(next){
+function setDigitalMode(next,{autoStartAudio=true}={}){
   if(next&&!digimodesAvailable){message('Digimodos no están habilitados en este receptor.');return;}
   const selected=digitalMode===next?null:next;
   if(selected){
@@ -279,13 +281,14 @@ function setDigitalMode(next){
   sendDigitalMode();
   if(digitalMode){
     sendAudioProfile();sendWaterfallPreference();
-    if(!audioEnabled)void listen();
+    if(!audioEnabled&&autoStartAudio)void listen();
   }else{
     if(digitalPreviousAudioProfile){audioProfile=digitalPreviousAudioProfile;resetAudio();showAudioProfile();sendAudioProfile();}
     if(digitalPreviousWaterfallPreference&&!digitalWaterfallManuallyChanged){waterfallPreference=digitalPreviousWaterfallPreference;$('waterfall-quality').value=waterfallPreference;sendWaterfallPreference();}
     digitalPreviousAudioProfile=null;digitalPreviousWaterfallPreference=null;digitalWaterfallManuallyChanged=false;
     $('audio-quality').querySelector('option[value="digiraw"]').hidden=true;
   }
+  updateSharedUrl();
 }
 function handleDigitalPacket(bytes){
   if(!digitalMode||!digitalAudioCompatible||!audioEnabled||bytes.byteLength<16)return;
@@ -376,6 +379,8 @@ function sharedUrl(){
   url.searchParams.set('mode',mode);
   if(low!==base[0]||high!==base[1]){url.searchParams.set('low',String(low));url.searchParams.set('high',String(high));}
   if(Math.abs(zoom-1)>.001)url.searchParams.set('zoom',String(Number(zoom.toFixed(2))));
+  if(digitalMode)url.searchParams.set('digital',digitalMode);
+  if(muted)url.searchParams.set('mute','1');
   return url;
 }
 function updateSharedUrl(){if(bandConfigured&&sharedTuningApplied)history.replaceState(null,'',sharedUrl());}
@@ -392,6 +397,12 @@ function applySharedTuning(){
   if(sharedParams.has('zoom')&&Number.isFinite(requestedZoom)&&requestedZoom>=1&&requestedZoom<=64)zoom=requestedZoom;
   viewCenter=frequency;clampView();sharedTuningApplied=true;
   $('zoom-label').value=`${zoom.toFixed(zoom<10?1:0).replace('.0','')}×`;
+}
+function applySharedDigitalState(){
+  if(sharedDigitalApplied||!bandConfigured)return;
+  sharedDigitalApplied=true;
+  if(sharedMuted)setMuted(true);
+  if(sharedDigitalMode&&digimodesAvailable)setDigitalMode(sharedDigitalMode,{autoStartAudio:false});
 }
 function tune(){
   if(!Number.isFinite(frequency)||!Number.isFinite(low)||!Number.isFinite(high)||low < -6000||high > 6000||high-low<100){message('Revisa los límites del filtro (−6000 a 6000 Hz).');return;}
@@ -514,7 +525,7 @@ function connect(){
           $('frequency').min=String(minimum);$('frequency').max=String(maximum);
           scale.setAttribute('aria-valuemin',String(minimum));scale.setAttribute('aria-valuemax',String(maximum));
           memories=memories.filter(memory=>memory.frequency>=center-rate/2&&memory.frequency<=center+rate/2);
-          applySharedTuning();controls();renderMemories();updateSharedUrl();if(protocolReady){sendWaterfallView();tune();}
+          applySharedTuning();applySharedDigitalState();controls();renderMemories();updateSharedUrl();if(protocolReady){sendWaterfallView();tune();}
         }
         $('demo').hidden=!msg.demo;
         const labels={streaming:'● Receptor conectado',demo:'● Receptor de prueba',connecting:'Conectando al SDR…',disconnected:'SDR desconectado · reconectando…',reconnecting:'Recuperando receptor…','connect-failed':'SDR no disponible · reintentando…','invalid-header':'Entrada IQ incompatible','stopped':'SDR detenido'};
@@ -615,6 +626,7 @@ function setMuted(value){
   $('mute').checked=muted;$('mute').setAttribute('aria-pressed',String(muted));
   $('digital-mute').setAttribute('aria-pressed',String(muted));$('digital-mute').textContent=muted?'Quitar mute':'Mute';
   if(gain)gain.gain.value=muted?0:10**(Number($('volume').value)/20);
+  updateSharedUrl();
 }
 $('listen').addEventListener('click',()=>audioEnabled?pauseAudio():listen());
 $('mute').addEventListener('change',()=>setMuted($('mute').checked));
