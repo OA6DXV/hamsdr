@@ -188,6 +188,7 @@ function ensureDigitalWorker(){
     if(data.type==='progress'&&digitalAudioCompatible)setDigitalProgress(data.value);
     if(data.type==='notice'&&!digitalDecoderNotice){digitalDecoderNotice=true;addDigitalRow({utc:new Date().toISOString().slice(11,19),snr:'',dt:'',hz:'',text:data.message,placeholder:true});}
     if(data.type==='decoded')addDigitalRow(data.result);
+    if(data.type==='country-update')updateDigitalCountry(data);
   };
   return digitalWorker;
 }
@@ -201,11 +202,17 @@ function addDigitalRow(row){
   if(autoclear&&digitalRows.length>300)digitalRows.splice(0,digitalRows.length-300);
   renderDigitalRows();
 }
+function updateDigitalCountry(update){
+  const row=digitalRows.find(item=>item.countryId===update.countryId);
+  if(!row)return;
+  row.countries=update.countries;row.countryPending=false;
+  renderDigitalRows();
+}
 function renderDigitalRows(){
   const body=$('digital-log').tBodies[0];body.replaceChildren();
   for(const row of digitalRows.slice(-500).reverse()){
     const tr=document.createElement('tr');if(row.placeholder)tr.className='digital-placeholder';
-    for(const key of ['utc','snr','dt','hz','text']){
+    for(const key of ['utc','snr','dt','hz','text','countries']){
       const cell=document.createElement('td');cell.textContent=String(row[key]??'');tr.append(cell);
     }
     body.append(tr);
@@ -646,8 +653,8 @@ $('audio-quality').value=audioProfile;
 $('audio-quality').addEventListener('change',async()=>{if(recording)stopRecording();audioProfile=$('audio-quality').value;if(digitalMode&&audioProfile!=='digiraw')setDigitalCompatibility(false);if(['balanced','mobile'].includes(audioProfile)&&!await browserSupportsOpus()){fallbackFromOpus('Este navegador no ofrece decodificación Opus mediante WebCodecs.');return;}if(audioProfile!=='digiraw'){try{localStorage.setItem('hamsdr-audio-profile',audioProfile);}catch{}}resetAudio();showAudioProfile();sendAudioProfile();});
 $('digital-clear').addEventListener('click',()=>{digitalRows=[];renderDigitalRows();resetDigitalSpectrum();});
 $('digital-download').addEventListener('click',()=>{
-  const lines=[`HamSDR ${digitalMode||'digital'} decode export`, `Frequency: ${(frequency/1000).toFixed(3)} kHz`, `Demodulation: ${mode}`, `Exported: ${new Date().toISOString()}`, '', 'UTC\tSNR\tDT\tHz\tMessage'];
-  for(const row of digitalRows)lines.push([row.utc,row.snr,row.dt,row.hz,row.text].map(value=>String(value??'')).join('\t'));
+  const lines=[`HamSDR ${digitalMode||'digital'} decode export`, `Frequency: ${(frequency/1000).toFixed(3)} kHz`, `Demodulation: ${mode}`, `Exported: ${new Date().toISOString()}`, '', 'UTC\tSNR\tDT\tHz\tMessage\tCountries'];
+  for(const row of digitalRows)lines.push([row.utc,row.snr,row.dt,row.hz,row.text,row.countries].map(value=>String(value??'')).join('\t'));
   if(digitalDownloadUrl)URL.revokeObjectURL(digitalDownloadUrl);
   digitalDownloadUrl=URL.createObjectURL(new Blob([lines.join('\n')+'\n'],{type:'text/plain'}));
   const link=document.createElement('a');link.href=digitalDownloadUrl;link.download=`hamsdr-${(digitalMode||'digital').toLowerCase()}-${new Date().toISOString().replaceAll(':','-')}.txt`;link.click();

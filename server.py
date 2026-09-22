@@ -1231,9 +1231,10 @@ async def security(request, handler):
     response = await handler(request)
     if not response.prepared:
         response.headers.update({"X-Content-Type-Options": "nosniff", "Referrer-Policy": "same-origin",
-            "Cache-Control": "no-store", "Permissions-Policy": "camera=(), geolocation=(), microphone=(), payment=(), usb=()",
+            "Permissions-Policy": "camera=(), geolocation=(), microphone=(), payment=(), usb=()",
             "Cross-Origin-Opener-Policy": "same-origin",
             "Content-Security-Policy": "default-src 'self'; base-uri 'none'; form-action 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data:; connect-src 'self'; media-src 'self' blob:; worker-src 'self'; object-src 'none'; frame-ancestors 'none'"})
+        response.headers.setdefault("Cache-Control", "no-store")
     return response
 
 GATEWAY = web.AppKey("gateway", Gateway)
@@ -1261,7 +1262,7 @@ def application(args):
     app.router.add_get("/~~orgstatus", receiverbook_status)
     async def asset(request):
         name = request.match_info.get("name", "index.html")
-        if name not in {"index.html", "style.css", "zoom.css", "site.js", "app.js", "audio-worklet.js", "classic-audio.js", "digital-worker.js", "mfsk-decoder.js", "mfsk-decoder_bg.wasm", "waterfall-codec.js", "community.js", "palette.js"}:
+        if name not in {"index.html", "style.css", "zoom.css", "site.js", "app.js", "audio-worklet.js", "classic-audio.js", "digital-worker.js", "mfsk-decoder.js", "mfsk-decoder_bg.wasm", "cty.dat", "waterfall-codec.js", "community.js", "palette.js"}:
             raise web.HTTPNotFound()
         if name in {"mfsk-decoder.js", "mfsk-decoder_bg.wasm"} and not (ROOT / "web" / name).exists():
             raise web.HTTPNotFound()
@@ -1269,6 +1270,12 @@ def application(args):
             document = (ROOT / "web/index.html").read_text(encoding="utf-8")
             document = document.replace("<head>", f"<head>\n  {gateway.receiverbook['tag']}", 1)
             return web.Response(text=document, content_type="text/html")
+        if name == "cty.dat":
+            return web.FileResponse(ROOT / "web" / "cty.dat.gz", headers={
+                "Content-Encoding": "gzip",
+                "Content-Type": "text/plain; charset=utf-8",
+                "Cache-Control": "public, max-age=604800",
+            })
         return web.FileResponse(ROOT / "web" / name)
     app.router.add_get("/", asset)
     app.router.add_get("/{name}", asset)

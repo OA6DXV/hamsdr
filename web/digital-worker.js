@@ -14,6 +14,81 @@ let slotFirstSample=0;
 let slotLastSample=0;
 let nextAbsoluteSample=null;
 let lastSequence=null;
+let countryDatabase=null;
+let countryLoadStarted=false;
+let countryRowSequence=0;
+let pendingCountryRows=[];
+
+function parseCountryDatabase(text){
+  const exact=new Map(),prefixes=[];
+  for(const record of text.split(';')){
+    const fields=record.split(':');
+    if(fields.length<8)continue;
+    const country=fields[0].trim();
+    if(!country)continue;
+    for(const alias of fields.slice(7).join(':').replaceAll(/\s+/g,'').split(',')){
+      if(!alias)continue;
+      const isExact=alias.startsWith('=');
+      const token=(isExact?alias.slice(1):alias).match(/^[A-Z0-9/]+/i)?.[0]?.toUpperCase();
+      if(!token)continue;
+      if(isExact)exact.set(token,country);else prefixes.push([token,country]);
+    }
+  }
+  prefixes.sort((left,right)=>right[0].length-left[0].length);
+  return {exact,prefixes};
+}
+
+function isCallsign(value){
+  if(!/^[A-Z0-9]+(?:\/[A-Z0-9]+)*$/.test(value)||!/[A-Z]/.test(value)||!/[0-9]/.test(value))return false;
+  return !/^[A-R]{2}\d{2}(?:[A-X]{2})?$/.test(value);
+}
+
+function callsignsFromMessage(text){
+  return String(text||'').toUpperCase().split(/\s+/).map(value=>value.replace(/^[^A-Z0-9/]+|[^A-Z0-9/]+$/g,'')).filter(isCallsign).slice(0,2);
+}
+
+function countryForCallsign(callsign){
+  if(!countryDatabase)return '';
+  if(countryDatabase.exact.has(callsign))return countryDatabase.exact.get(callsign);
+  for(const [prefix,country] of countryDatabase.prefixes)if(callsign.startsWith(prefix))return country;
+  return '';
+}
+
+function countriesForMessage(text){
+  const callsigns=callsignsFromMessage(text);
+  if(!callsigns.length)return '';
+  const source=countryForCallsign(callsigns[0])||'—';
+  if(callsigns.length<2)return source;
+  return `${source} → ${countryForCallsign(callsigns[1])||'—'}`;
+}
+
+async function loadCountryDatabase(){
+  if(countryDatabase||countryLoadStarted)return countryDatabase;
+  countryLoadStarted=true;
+  try{
+    const response=await fetch(new URL('./cty.dat',import.meta.url),{cache:'force-cache'});
+    if(!response.ok)throw new Error(`country database request failed: ${response.status}`);
+    countryDatabase=parseCountryDatabase(await response.text());
+    for(const pending of pendingCountryRows)postMessage({type:'country-update',countryId:pending.countryId,countries:countriesForMessage(pending.text)});
+    pendingCountryRows=[];
+  }catch(error){
+    countryLoadStarted=false;
+    for(const pending of pendingCountryRows)postMessage({type:'country-update',countryId:pending.countryId,countries:'No disponible'});
+    pendingCountryRows=[];
+  }
+  return countryDatabase;
+}
+
+function enrichCountry(result){
+  result.countryId=++countryRowSequence;
+  if(countryDatabase)result.countries=countriesForMessage(result.text);
+  else{
+    result.countries='Cargando…';
+    result.countryPending=true;
+    pendingCountryRows.push({countryId:result.countryId,text:result.text});
+  }
+  return result;
+}
 
 async function loadDecoder(){
   if(wasmDecoder||wasmLoadStarted)return wasmDecoder;
@@ -46,6 +121,7 @@ function start(data){
   postMessage({type:'progress',value:0});
   postMessage({type:'status',message:`${mode} activo · esperando sincronización`});
   loadDecoder();
+  void loadCountryDatabase();
 }
 
 function beginSlot(index,offset){
@@ -61,7 +137,7 @@ function finishSlot(){
   if(wasmDecoder&&slotFirstSample<=tolerance&&slotLastSample>=slotSamples-tolerance){
     const timestampUs=slotIndex*slotSamples/rate*1_000_000;
     const decoded=wasmDecoder.decode_slot(mode,slotBuffer,timestampUs)||[];
-    for(const result of decoded)postMessage({type:'decoded',result});
+    for(const result of decoded)postMessage({type:'decoded',result:enrichCountry(result)});
     postMessage({type:'progress',value:100});
     postMessage({type:'status',message:`${mode} · ${decoded.length} mensaje(s) decodificado(s)`,decodedCount:decoded.length});
   }else if(wasmDecoder){

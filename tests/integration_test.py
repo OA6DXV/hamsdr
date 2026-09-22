@@ -312,6 +312,11 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn('window.hamSdrSiteConfig=',await response.text())
         async with self.session.get(self.url+'/site-logo') as response:
             self.assertEqual(response.status,404)
+        async with self.session.get(self.url+'/cty.dat',headers={'Accept-Encoding':'gzip'}) as response:
+            self.assertEqual(response.status,200)
+            self.assertEqual(response.headers['Content-Encoding'],'gzip')
+            self.assertIn('public, max-age=',response.headers['Cache-Control'])
+            self.assertTrue((await response.read()).startswith(b'Sov Mil Order of Malta:'))
         ws=await self.connect()
         for control in [{'type':'tune','frequency':float('nan')},{'type':'tune','frequency':1},
                         {'type':'tune','mode':'bogus'},{'type':'tune','low':0,'high':1},[]]:

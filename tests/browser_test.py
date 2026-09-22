@@ -104,6 +104,10 @@ async def main():
             await expect(page.locator('#waterfall-quality')).to_have_value(expected_profile)
             await expect(page.locator('#waterfall')).to_have_attribute('data-profile',expected_profile)
             if site['digimodes']:
+                country_response=await page.request.get(url+'cty.dat')
+                assert country_response.status==200
+                assert country_response.headers.get('content-encoding')=='gzip'
+                assert (await country_response.text()).startswith('Sov Mil Order of Malta:')
                 modes=page.locator('#modes button')
                 assert await modes.nth(10).text_content()=='FT8'
                 assert await modes.nth(11).text_content()=='FT4'
@@ -117,6 +121,7 @@ async def main():
                 await expect(page.locator('#digital-waterfall-message')).to_be_hidden()
                 await expect(page.locator('#digital-progress')).to_have_attribute('max','100')
                 await expect(page.locator('#digital-download')).to_have_text('Descargar log')
+                assert await page.locator('#digital-log thead').text_content()=='UTCSNRDTHzMensajePaíses'
                 await expect(page.locator('#listen')).to_have_text('Pausar audio',timeout=10000)
                 await expect(page.locator('#bandwidth')).to_have_text('3000')
                 await expect(page.locator('#filter-unit')).to_have_text('Hz')

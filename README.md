@@ -23,6 +23,9 @@ reserved for stable releases.
   noise reduction. The saved controls are restored when digital mode stops.
 - Selecting another audio profile stops the decoder until the digital mode is
   toggled off and on again.
+- While the first FT8/FT4 receive slot is collected, the browser downloads the
+  compressed Big CTY prefix database. The decoded-message table then resolves
+  source and destination callsigns to their offline DXCC entities.
 
 ## 0.4.1-stable
 
