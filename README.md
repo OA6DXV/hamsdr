@@ -8,8 +8,11 @@ responsive browser interface and server-side DSP.
 The current `dev` branch is a development preview. The `main` branch is
 reserved for stable releases.
 
-## 0.5.0-unstable
+## 0.5.1-unstable
 
+- Decoded FT8/FT4 messages now resolve transmitter and recipient callsigns
+  locally to their DXCC entities using the bundled, compressed Big CTY prefix
+  database; no callsigns are sent to an external lookup service.
 - Client-side FT8/FT4 decoding with the bundled `mfsk-core` WebAssembly module.
 - Decoder capture windows are aligned to the 15-second FT8 or 7.5-second FT4
   UTC slot boundaries carried by the digital transport timestamps.
