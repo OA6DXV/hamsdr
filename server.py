@@ -24,7 +24,7 @@ from opus_codec import OPUS_AVAILABLE, OpusEncoder
 from waterfall_codec import VERSION as WATERFALL_PROTOCOL_VERSION, encode as encode_waterfall, project as project_waterfall
 
 ROOT = Path(__file__).resolve().parent
-VERSION = "0.5.4-dev"
+VERSION = "0.5.5-dev"
 PROTOCOL_VERSION = 1
 MODES = {"USB": (300, 2700), "LSB": (-2700, -300), "AM": (-4000, 4000),
          "CW": (450, 950), "NFM": (-5000, 5000)}
@@ -1295,7 +1295,7 @@ def application(args):
     app.router.add_get("/~~orgstatus", receiverbook_status)
     async def asset(request):
         name = request.match_info.get("name", "index.html")
-        if name not in {"index.html", "style.css", "zoom.css", "site.js", "app.js", "audio-worklet.js", "classic-audio.js", "digital-worker.js", "mfsk-decoder.js", "mfsk-decoder_bg.wasm", "cty.dat", "waterfall-codec.js", "community.js", "palette.js"}:
+        if name not in {"index.html", "style.css", "zoom.css", "site.js", "app.js", "audio-worklet.js", "classic-audio.js", "digital-worker.js", "rtty-core.mjs", "rtty-worklet.js", "mfsk-decoder.js", "mfsk-decoder_bg.wasm", "cty.dat", "waterfall-codec.js", "community.js", "palette.js"}:
             raise web.HTTPNotFound()
         if name in {"mfsk-decoder.js", "mfsk-decoder_bg.wasm"} and not (ROOT / "web" / name).exists():
             raise web.HTTPNotFound()

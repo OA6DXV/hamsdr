@@ -111,7 +111,8 @@ async def main():
                 modes=page.locator('#modes button')
                 assert await modes.nth(10).text_content()=='FT8'
                 assert await modes.nth(11).text_content()=='FT4'
-                assert await modes.nth(12).text_content()=='Digimodos'
+                assert await modes.nth(12).text_content()=='RTTY'
+                assert await modes.nth(13).text_content()=='Digimodos'
                 await page.locator('[data-digital-mode="FT8"]').click()
                 await expect(page.locator('#mode-display')).to_have_text('USB')
                 await expect(page.locator('#audio-quality')).to_have_value('digiraw')
@@ -204,6 +205,28 @@ async def main():
                     await page.locator('#mute').uncheck()
                     await page.locator('[data-digital-mode="FT8"]').click()
                     await expect(page.locator('#digital-panel')).to_be_hidden()
+                await page.locator('[data-rtty-mode]').click()
+                await expect(page.locator('#rtty-panel')).to_be_visible()
+                await expect(page.locator('#mode-display')).to_have_text('USB')
+                await expect(page.locator('#low')).to_have_value('0')
+                await expect(page.locator('#high')).to_have_value('3000')
+                await expect(page.locator('#listen')).to_have_text('Pausar audio',timeout=10000)
+                await expect(page.locator('html')).to_have_attribute('data-rtty-engine','worklet')
+                await expect(page.locator('#rtty-title')).to_contain_text('RTTY · USB')
+                await expect(page.locator('#rtty-mark')).to_contain_text('Hz')
+                await page.locator('#rtty-center').fill('1200')
+                await page.locator('#rtty-center').press('Tab')
+                await page.locator('#rtty-reverse').check()
+                assert 'digital=RTTY' in page.url and 'center=1200' in page.url and 'reverse=1' in page.url
+                await page.locator('#rtty-mute').click()
+                await expect(page.locator('#rtty-mute')).to_have_text('Silenciado')
+                await expect(page.locator('#mute')).to_be_checked()
+                await page.locator('#rtty-mute').click()
+                await expect(page.locator('#rtty-mute')).to_have_text('Silenciar')
+                await page.locator('[data-rtty-mode]').click()
+                await expect(page.locator('#rtty-panel')).to_be_hidden()
+                await page.locator('#listen').click()
+                await expect(page.locator('#listen')).to_have_text('Iniciar audio')
             assert await page.locator('footer a',has_text='Estado del receptor').count()==0
             assert await page.locator('#nr').evaluate("e=>e.closest('.signal-panel')!==null")
             layout=await page.evaluate("""()=>{const rect=s=>{const r=document.querySelector(s).getBoundingClientRect();return{x:r.x,y:r.y,w:r.width,right:r.right}};return{panorama:rect('#panorama'),controls:rect('.controls'),frequency:rect('.frequency-panel'),waterfall:rect('.waterfall-panel'),signal:rect('.signal-panel'),filter:rect('.filter-panel'),chat:rect('[aria-label=\"Chat en vivo\"]'),log:rect('[aria-label=\"Logbook\"]'),main:rect('main')}}""")

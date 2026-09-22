@@ -8,7 +8,10 @@ responsive browser interface and server-side DSP.
 The current `dev` branch is a development preview. The `main` branch is
 reserved for stable releases.
 
-## 0.5.4-dev
+## 0.5.5-dev
+
+- Client-side RTTY reception uses a lightweight AudioWorklet detector and an
+  internal ITA2 decoder without microphone access or server-side DSP.
 
 - Zoom and horizontal navigation now rebuild the waterfall from a shared
   600-row full-band history instead of starting with an empty view. Snapshots

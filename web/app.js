@@ -5,6 +5,7 @@ const utf8Encoder=new TextEncoder();
 const protocolVersion=1,waterfallProtocolVersion=2;
 const sharedParams=new URLSearchParams(location.search);
 const sharedDigitalMode=(()=>{const value=(sharedParams.get('digital')||'').toUpperCase();return ['FT8','FT4'].includes(value)?value:(sharedParams.get('ft8')==='1'?'FT8':null);})();
+const sharedRtty=(sharedParams.get('digital')||'').toUpperCase()==='RTTY';
 const sharedMuted=sharedParams.get('mute')==='1';
 const siteConfig=window.hamSdrSiteConfig||{};
 const defaults = {LSB:[-2700,-300],USB:[300,2700],AM:[-4000,4000],CW:[450,950],NFM:[-5000,5000]};
@@ -16,6 +17,7 @@ let zoom=1, viewCenter=center, socket, retry=500, timer, tuneTimer, lastRow, vie
 let dynamicSpectrumBottom=null,dynamicSpectrumTop=null;
 let context, node, gain, audioStarting=false, audioEnabled=false, audioEverStarted=false, audioProfile='balanced', opusDecoder=null, opusSupportPromise=null, lastOpusSequence=null, spectrumFrames=0, audioPackets=0;
 let digimodesAvailable=!!siteConfig.digimodes,digitalMode=null,digitalWorker=null,digitalRows=[],digitalDownloadUrl=null,digitalDecoderNotice=false,digitalAudioCompatible=true,digitalPreviousAudioProfile=null,digitalPreviousWaterfallPreference=null,digitalWaterfallManuallyChanged=false,digitalProfilePending=false,digitalLogSized=false;
+let rttyActive=false,rttyNode=null,rttySink=null,rttyModuleLoaded=false,rttyText='';
 let spectrumHistory=[],waterfallNavigationHistory=[];
 let waterfallPreference='balanced',waterfallProfile='balanced',waterfallSpeed=1,drawAverage=0,lastProfileRequest=0,profileTimer,pendingRow,waterfallFrame;
 let waterfallViewRevision=0,waterfallViewTimer;
@@ -119,8 +121,8 @@ function sendWaterfallSpeed(){if(socket?.readyState===WebSocket.OPEN){const valu
 function sendAudioProfile(){if(socket?.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type:'audio-profile',profile:audioProfile}));}
 function sendDigitalMode(selected=digitalMode){if(socket?.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type:'digital-mode',mode:selected}));}
 function setDigitalControlsVisible(visible){
-  document.querySelectorAll('[data-digital-mode],[data-digital-menu]').forEach(button=>button.hidden=!visible);
-  if(!visible&&digitalMode)setDigitalMode(null);
+  document.querySelectorAll('[data-digital-mode],[data-rtty-mode],[data-digital-menu]').forEach(button=>button.hidden=!visible);
+  if(!visible&&digitalMode)setDigitalMode(null);if(!visible&&rttyActive)setRttyMode(false);
 }
 const digitalFftSize=2048,digitalSampleRate=12000,digitalFilterMaximum=5000;
 const digitalSpectrumBuffer=new Float32Array(digitalFftSize),digitalReal=new Float64Array(digitalFftSize),digitalImag=new Float64Array(digitalFftSize);
@@ -277,6 +279,7 @@ function setDigitalMode(next,{autoStartAudio=true}={}){
   if(next&&!digimodesAvailable){message('Digimodos no están habilitados en este receptor.');return;}
   const selected=digitalMode===next?null:next;
   if(selected){
+    if(rttyActive)setRttyMode(false);
     if(!digitalMode){
       digitalPreviousAudioProfile=audioProfile;
       digitalPreviousWaterfallPreference=waterfallPreference;
@@ -298,7 +301,7 @@ function setDigitalMode(next,{autoStartAudio=true}={}){
     controls();
   }
   document.querySelectorAll('[data-digital-mode]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.digitalMode===digitalMode)));
-  $('digital-panel').hidden=!digitalMode;$('digital-separator').hidden=!digitalMode;
+  $('digital-panel').hidden=!digitalMode;$('digital-separator').hidden=!(digitalMode||rttyActive);
   if(digitalMode){
     $('digital-title').textContent=`${digitalMode} · ${mode} · ${(frequency/1000).toFixed(3)} kHz`;
     $('digital-state').textContent=audioEnabled?'Esperando muestras de 12 kHz…':'Inicia audio para decodificar.';
@@ -319,6 +322,47 @@ function setDigitalMode(next,{autoStartAudio=true}={}){
     $('audio-quality').querySelector('option[value="digiraw"]').hidden=true;
   }
   showDigitalAudioStarter();
+  updateSharedUrl();
+}
+function rttyConfiguration(){const shift=Number($('rtty-shift').value);return{type:'config',baud:Number($('rtty-baud').value),shift,centerFrequency:Number($('rtty-center').value),reverse:$('rtty-reverse').checked,afc:$('rtty-afc').checked,afcRange:50,filterBandwidth:Math.max(250,shift+100),stopBits:1.5};}
+function sendRttyConfiguration(){if(rttyNode)rttyNode.port.postMessage(rttyConfiguration());updateSharedUrl();}
+function updateRttyTitle(){
+  $('rtty-title').textContent=`RTTY · ${mode} · ${(frequency/1000).toFixed(3)} kHz`;
+  $('rtty-audio-start').hidden=audioEnabled;$('rtty-state').textContent=audioEnabled?'Buscando señal…':'Inicia audio para decodificar.';
+}
+async function ensureRttyNode(){
+  if(!rttyActive||!context||!node)return;
+  if(!window.isSecureContext||!context.audioWorklet){$('rtty-state').textContent='RTTY requiere HTTPS y AudioWorklet.';return;}
+  if(!rttyModuleLoaded){await context.audioWorklet.addModule(new URL('./rtty-worklet.js',location.href));rttyModuleLoaded=true;}
+  if(!rttyNode){
+    rttyNode=new AudioWorkletNode(context,'rtty-decoder',{numberOfInputs:1,numberOfOutputs:1,outputChannelCount:[1],processorOptions:rttyConfiguration()});
+    document.documentElement.dataset.rttyEngine='worklet';
+    rttySink=context.createGain();rttySink.gain.value=0;node.connect(rttyNode);rttyNode.connect(rttySink).connect(context.destination);
+    rttyNode.port.onmessage=({data})=>{
+      if(data.type==='character'){
+        rttyText=(rttyText+data.value).slice(-20000);$('rtty-terminal').textContent=rttyText;$('rtty-terminal').scrollTop=$('rtty-terminal').scrollHeight;
+      }else if(data.type==='status'){
+        $('rtty-mark').value=`${data.markFrequency.toFixed(1)} Hz`;$('rtty-space').value=`${data.spaceFrequency.toFixed(1)} Hz`;
+        $('rtty-afc-offset').value=`${data.afcOffset>=0?'+':''}${data.afcOffset.toFixed(1)} Hz`;$('rtty-confidence').value=data.confidence;
+        $('rtty-state').textContent=`Recibiendo · ${(data.confidence*100).toFixed(0)}%`;
+      }
+    };
+  }
+  sendRttyConfiguration();rttyNode.port.postMessage({type:'enabled',enabled:audioEnabled&&rttyActive});
+}
+function setRttyMode(enabled,{autoStartAudio=true}={}){
+  const selected=Boolean(enabled)&&!rttyActive;
+  if(selected){
+    if(!digimodesAvailable){message('Digimodos no están habilitados en este receptor.');return;}
+    if(digitalMode)setDigitalMode(null);
+    rttyActive=true;mode='USB';narrow=false;[low,high]=[0,3000];tune();
+    $('rtty-panel').hidden=false;$('digital-separator').hidden=false;
+    document.querySelector('[data-rtty-mode]').setAttribute('aria-pressed','true');updateRttyTitle();
+    if(audioEnabled)void ensureRttyNode();else if(autoStartAudio)void listen();
+  }else{
+    rttyActive=false;$('rtty-panel').hidden=true;$('digital-separator').hidden=!digitalMode;
+    document.querySelector('[data-rtty-mode]').setAttribute('aria-pressed','false');if(rttyNode)rttyNode.port.postMessage({type:'enabled',enabled:false});
+  }
   updateSharedUrl();
 }
 function handleDigitalPacket(bytes){
@@ -397,6 +441,7 @@ function controls(){
   $('frequency').value=(frequency/1000).toFixed(2);
   $('mode-display').textContent=mode==='NFM'?'FM':mode;
   if(digitalMode&&!$('digital-panel').hidden)$('digital-title').textContent=`${digitalMode} · ${mode} · ${(frequency/1000).toFixed(3)} kHz`;
+  if(rttyActive)updateRttyTitle();
   $('low').value=low; $('high').value=high;
   $('bandwidth').value=digitalMode?String(Math.round((high-low)*100)/100):((high-low)/1000).toFixed(2);$('filter-unit').textContent=digitalMode?'Hz':'kHz';
   if(digitalMode)updateDigitalSpectrumRange();
@@ -411,7 +456,7 @@ function sharedUrl(){
   url.searchParams.set('mode',mode);
   if(low!==base[0]||high!==base[1]){url.searchParams.set('low',String(low));url.searchParams.set('high',String(high));}
   if(Math.abs(zoom-1)>.001)url.searchParams.set('zoom',String(Number(zoom.toFixed(2))));
-  if(digitalMode)url.searchParams.set('digital',digitalMode);
+  if(digitalMode)url.searchParams.set('digital',digitalMode);else if(rttyActive){url.searchParams.set('digital','RTTY');const baud=Number($('rtty-baud').value),shift=Number($('rtty-shift').value),rttyCenter=Number($('rtty-center').value);if(baud!==45.45)url.searchParams.set('baud',String(baud));if(shift!==170)url.searchParams.set('shift',String(shift));if(rttyCenter!==1000)url.searchParams.set('center',String(rttyCenter));if($('rtty-reverse').checked)url.searchParams.set('reverse','1');if(!$('rtty-afc').checked)url.searchParams.set('afc','0');}
   if(muted)url.searchParams.set('mute','1');
   return url;
 }
@@ -438,6 +483,9 @@ function applySharedDigitalState(){
     setDigitalMode(sharedDigitalMode,{autoStartAudio:false});
     const requestedLow=Number(sharedParams.get('low')),requestedHigh=Number(sharedParams.get('high'));
     if(sharedParams.has('low')&&sharedParams.has('high')&&Number.isFinite(requestedLow)&&Number.isFinite(requestedHigh)&&requestedLow>=0&&requestedHigh<=digitalFilterMaximum&&requestedHigh-requestedLow>=100){low=requestedLow;high=requestedHigh;tune();}
+  }else if(sharedRtty&&digimodesAvailable){
+    for(const [id,key,minimum,maximum] of [['rtty-baud','baud',30,300],['rtty-shift','shift',50,1000],['rtty-center','center',100,5000]]){const value=Number(sharedParams.get(key));if(sharedParams.has(key)&&Number.isFinite(value)&&value>=minimum&&value<=maximum){const control=$(id);if(control.tagName==='SELECT'&&!Array.from(control.options).some(option=>Number(option.value)===value))control.add(new Option(String(value),String(value)));control.value=String(value);}}
+    $('rtty-reverse').checked=sharedParams.get('reverse')==='1';$('rtty-afc').checked=sharedParams.get('afc')!=='0';setRttyMode(true,{autoStartAudio:false});
   }
 }
 function tune(){
@@ -680,7 +728,7 @@ async function listen(){
     await resumed;
     if(['balanced','mobile'].includes(audioProfile)&&!await browserSupportsOpus())fallbackFromOpus('Este navegador no ofrece decodificación Opus mediante WebCodecs.');
     gain.gain.value=muted?0:10**(Number($('volume').value)/20);
-    audioEnabled=true;audioEverStarted=true;window.radioSend({type:'audio',enabled:true});showAudioState();message();
+    audioEnabled=true;audioEverStarted=true;window.radioSend({type:'audio',enabled:true});if(rttyActive)await ensureRttyNode();showAudioState();message();
     if(digitalMode)ensureDigitalWorker().postMessage({type:'start',mode:digitalMode,rate:12000,frequency,demodulation:mode});
   }catch(error){message(error.message);$('audio-status').textContent='No se pudo iniciar el audio. Pulsa Escuchar para reintentar.';}
   finally{audioStarting=false;showDigitalAudioStarter();}
@@ -691,15 +739,18 @@ function showAudioState(){
   $('audio-status-top').textContent=audioEnabled?'Audio transmitiendo':'Audio detenido';
   $('audio-status').textContent=audioEnabled?'Audio activado.':'Audio detenido; no consume ancho de banda.';
   showDigitalAudioStarter();
+  if(rttyActive)updateRttyTitle();
 }
 async function pauseAudio(){
   if(!audioEnabled)return;audioEnabled=false;window.radioSend({type:'audio',enabled:false});resetAudio();stopDigitalWorker();stopRecording();
+  if(rttyNode)rttyNode.port.postMessage({type:'enabled',enabled:false});
   if(context?.state==='running')await context.suspend();showAudioState();
 }
 function setMuted(value){
   muted=!!value;
   $('mute').checked=muted;$('mute').setAttribute('aria-pressed',String(muted));
   $('digital-mute').setAttribute('aria-pressed',String(muted));$('digital-mute').textContent=muted?'Silenciado':'Silenciar';
+  $('rtty-mute').setAttribute('aria-pressed',String(muted));$('rtty-mute').textContent=muted?'Silenciado':'Silenciar';
   if(gain)gain.gain.value=muted?0:10**(Number($('volume').value)/20);
   updateSharedUrl();
 }
@@ -707,6 +758,8 @@ $('listen').addEventListener('click',()=>audioEnabled?pauseAudio():listen());
 $('digital-audio-start').addEventListener('click',()=>void listen());
 $('mute').addEventListener('change',()=>setMuted($('mute').checked));
 $('digital-mute').addEventListener('click',()=>setMuted(!muted));
+$('rtty-mute').addEventListener('click',()=>setMuted(!muted));
+$('rtty-audio-start').addEventListener('click',()=>void listen());
 $('volume').addEventListener('input',()=>{if(gain)gain.gain.value=muted?0:10**(Number($('volume').value)/20);});
 $('frequency').addEventListener('change',()=>{frequency=Number($('frequency').value)*1000;tune();});
 $('copy-link').addEventListener('click',async()=>{
@@ -721,6 +774,9 @@ document.querySelectorAll('[data-step]').forEach(b=>b.addEventListener('click',(
 document.querySelectorAll('[data-fix]').forEach(b=>b.addEventListener('click',()=>{frequency=Math.round(frequency/1000)*1000;tune();}));
 document.querySelectorAll('[data-mode]').forEach(b=>b.addEventListener('click',()=>{mode=b.dataset.mode;narrow=!!b.dataset.narrow;if(!digitalMode)[low,high]=(narrow?narrowDefaults:defaults)[mode];tune();}));
 document.querySelectorAll('[data-digital-mode]').forEach(b=>b.addEventListener('click',()=>setDigitalMode(b.dataset.digitalMode)));
+document.querySelector('[data-rtty-mode]').addEventListener('click',()=>setRttyMode(true));
+$('rtty-clear').addEventListener('click',()=>{rttyText='';$('rtty-terminal').textContent='';if(rttyNode)rttyNode.port.postMessage({type:'reset'});});
+for(const id of ['rtty-baud','rtty-shift','rtty-center','rtty-reverse','rtty-afc'])$(id).addEventListener('change',sendRttyConfiguration);
 function updateSquelchControl(){const active=$('squelch').checked&&!digitalMode;$('threshold').disabled=!active;$('squelch-threshold').dataset.active=String(active);$('threshold-value').value=`${String($('threshold').value).replace('-', '−')} dBFS`;}
 for(const id of ['low','high','threshold','notch','nr'])$(id).addEventListener('change',()=>{low=Number($('low').value);high=Number($('high').value);tune();});
 $('threshold').addEventListener('input',updateSquelchControl);
