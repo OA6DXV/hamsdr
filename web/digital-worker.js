@@ -4,14 +4,16 @@
 let mode=null;
 let rate=12000;
 let slotSamples=180000;
-let received=0;
-let queuedBytes=0;
-let chunks=[];
-let firstTimestampUs=0;
 let warned=false;
 let wasmDecoder=null;
 let wasmLoadStarted=false;
 let lastStatus=0;
+let slotIndex=null;
+let slotBuffer=null;
+let slotFirstSample=0;
+let slotLastSample=0;
+let nextAbsoluteSample=null;
+let lastSequence=null;
 
 async function loadDecoder(){
   if(wasmDecoder||wasmLoadStarted)return wasmDecoder;
@@ -33,48 +35,74 @@ function start(data){
   mode=data.mode;
   rate=data.rate||12000;
   slotSamples=mode==='FT4'?Math.round(rate*7.5):Math.round(rate*15);
-  received=0;
-  queuedBytes=0;
-  chunks=[];
-  firstTimestampUs=0;
   warned=false;
   lastStatus=0;
+  slotIndex=null;
+  slotBuffer=null;
+  slotFirstSample=0;
+  slotLastSample=0;
+  nextAbsoluteSample=null;
+  lastSequence=null;
   postMessage({type:'status',message:`${mode} activo · esperando slot de ${slotSamples/rate} s`});
   loadDecoder();
+}
+
+function beginSlot(index,offset){
+  slotIndex=index;
+  slotBuffer=new Uint8Array(slotSamples*2);
+  slotFirstSample=offset;
+  slotLastSample=offset;
+}
+
+function finishSlot(){
+  if(slotIndex===null||!slotBuffer)return;
+  const tolerance=Math.round(rate*.1);
+  if(wasmDecoder&&slotFirstSample<=tolerance&&slotLastSample>=slotSamples-tolerance){
+    const timestampUs=slotIndex*slotSamples/rate*1_000_000;
+    const decoded=wasmDecoder.decode_slot(mode,slotBuffer,timestampUs)||[];
+    for(const result of decoded)postMessage({type:'decoded',result});
+    postMessage({type:'status',message:`${mode} · slot UTC decodificado · ${decoded.length} mensaje(s)`});
+  }else if(wasmDecoder){
+    postMessage({type:'status',message:`${mode} sincronizando con el siguiente slot UTC…`});
+  }
+  lastStatus=performance.now();
+  slotIndex=null;
+  slotBuffer=null;
 }
 
 function consume(data){
   if(!mode||data.mode!==mode)return;
   const bytes=new Uint8Array(data.payload);
-  if(!firstTimestampUs)firstTimestampUs=data.timestampUs;
-  chunks.push(bytes);
-  queuedBytes+=bytes.byteLength;
-  received+=Math.floor(bytes.byteLength/2);
-  const slotBytes=slotSamples*2;
-  while(wasmDecoder&&queuedBytes>=slotBytes){
-    const slot=new Uint8Array(slotBytes);
-    let offset=0;
-    while(offset<slotBytes&&chunks.length){
-      const first=chunks[0],take=Math.min(first.byteLength,slotBytes-offset);
-      slot.set(first.subarray(0,take),offset);
-      offset+=take;
-      queuedBytes-=take;
-      if(take===first.byteLength)chunks.shift();
-      else chunks[0]=first.subarray(take);
+  const sampleCount=Math.min(Number(data.sampleCount)||0,Math.floor(bytes.byteLength/2));
+  if(!sampleCount)return;
+  const sequence=Number(data.sequence)>>>0;
+  const continuous=lastSequence===null||((sequence-lastSequence)>>>0)===1;
+  let absoluteSample=continuous&&nextAbsoluteSample!==null
+    ?nextAbsoluteSample
+    :Math.round(Number(data.timestampUs)*rate/1_000_000)-sampleCount;
+  if(!continuous)finishSlot();
+  lastSequence=sequence;
+  let sourceSample=0;
+  while(sourceSample<sampleCount){
+    const index=Math.floor(absoluteSample/slotSamples);
+    const offset=absoluteSample-index*slotSamples;
+    if(slotIndex!==index){
+      finishSlot();
+      beginSlot(index,offset);
     }
-    const decoded=wasmDecoder.decode_slot(mode,slot,firstTimestampUs)||[];
-    firstTimestampUs=0;
-    for(const result of decoded)postMessage({type:'decoded',result});
+    const take=Math.min(sampleCount-sourceSample,slotSamples-offset);
+    slotBuffer.set(bytes.subarray(sourceSample*2,(sourceSample+take)*2),offset*2);
+    slotFirstSample=Math.min(slotFirstSample,offset);
+    slotLastSample=Math.max(slotLastSample,offset+take);
+    sourceSample+=take;
+    absoluteSample+=take;
+    if(offset+take===slotSamples)finishSlot();
   }
+  nextAbsoluteSample=absoluteSample;
   const now=performance.now();
-  if(received>=slotSamples){
-    const slots=Math.floor(received/slotSamples);
-    received-=slots*slotSamples;
-    postMessage({type:'status',message:wasmDecoder?`${mode} decodificando slot…`:`${mode} recibiendo 12 kHz · decoder pendiente`});
-    lastStatus=now;
-  }else if(now-lastStatus>500){
-    const progress=Math.floor(received/slotSamples*100);
-    postMessage({type:'status',message:`${mode} recibiendo 12 kHz · ${progress}% del slot`});
+  if(now-lastStatus>500&&slotIndex!==null){
+    const progress=Math.floor(slotLastSample/slotSamples*100);
+    postMessage({type:'status',message:`${mode} · slot UTC · ${progress}%`});
     lastStatus=now;
   }
 }
