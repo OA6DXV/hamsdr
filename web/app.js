@@ -13,7 +13,7 @@ let bandConfigured=false,sharedTuningApplied=false,protocolReady=false,opusAvail
 let zoom=1, viewCenter=center, socket, retry=500, timer, tuneTimer, lastRow, view='waterfall', muted=false;
 let dynamicSpectrumBottom=null,dynamicSpectrumTop=null;
 let context, node, gain, audioStarting=false, audioEnabled=false, audioEverStarted=false, audioProfile='balanced', opusDecoder=null, opusSupportPromise=null, lastOpusSequence=null, spectrumFrames=0, audioPackets=0;
-let digimodesAvailable=!!siteConfig.digimodes,digitalMode=null,digitalWorker=null,digitalRows=[],digitalDownloadUrl=null,digitalDecoderNotice=false;
+let digimodesAvailable=!!siteConfig.digimodes,digitalMode=null,digitalWorker=null,digitalRows=[],digitalDownloadUrl=null,digitalDecoderNotice=false,digitalAudioCompatible=true,digitalPreviousAudioProfile=null,digitalPreviousWaterfallPreference=null,digitalWaterfallManuallyChanged=false;
 let spectrumHistory=[];
 let waterfallPreference='balanced',waterfallProfile='balanced',waterfallSpeed=1,drawAverage=0,lastProfileRequest=0,profileTimer,pendingRow,waterfallFrame;
 let trafficBytes=0,trafficAt=performance.now();
@@ -40,13 +40,13 @@ function message(text=''){ $('message').textContent=text; }
 function applyResourcePolicy(policy){
   if(policy!==undefined)currentResourcePolicy=policy;
   policy=currentResourcePolicy;
-  const waterfallRanks={slow:0,low:1,balanced:2,high:3},audioRanks={mobile:0,balanced:1,raw:2};
+  const waterfallRanks={slow:0,low:1,balanced:2,high:3},audioRanks={mobile:0,balanced:1,digiraw:2,raw:3};
   const waterfallMax=policy?.waterfall_max||'high',audioMax=policy?.audio_max||'raw';
   document.querySelectorAll('#waterfall-quality option').forEach(option=>{
     option.disabled=option.value!=='auto'&&waterfallRanks[option.value]>waterfallRanks[waterfallMax];
   });
   document.querySelectorAll('#audio-quality option').forEach(option=>{
-    option.disabled=audioRanks[option.value]>audioRanks[audioMax]||(option.value!=='raw'&&!opusAvailable);
+    option.disabled=audioRanks[option.value]>audioRanks[audioMax]||(['balanced','mobile'].includes(option.value)&&!opusAvailable);
   });
   const notice=$('resource-policy');notice.hidden=!policy?.restricted;
   notice.textContent=policy?.restricted?`${policy.message} Máximo: cascada ${waterfallMax}, audio ${audioMax}.`:'';
@@ -120,7 +120,7 @@ function sendWaterfallPreference(forced){
 function sendWaterfallView(){if(socket?.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type:'waterfall-view',zoom,center:Math.round(viewCenter)}));}
 function sendWaterfallSpeed(){if(socket?.readyState===WebSocket.OPEN){const value=$('wfspeed').value;socket.send(JSON.stringify({type:'waterfall-speed',divisor:value==='high'?'high':Number(value)}));}}
 function sendAudioProfile(){if(socket?.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type:'audio-profile',profile:audioProfile}));}
-function sendDigitalMode(){if(socket?.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type:'digital-mode',mode:digitalMode}));}
+function sendDigitalMode(selected=digitalMode){if(socket?.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type:'digital-mode',mode:selected}));}
 function setDigitalControlsVisible(visible){
   document.querySelectorAll('[data-digital-mode],[data-digital-menu]').forEach(button=>button.hidden=!visible);
   if(!visible&&digitalMode)setDigitalMode(null);
@@ -141,7 +141,7 @@ function ensureDigitalWorker(){
   if(digitalWorker)return digitalWorker;
   digitalWorker=new Worker(new URL('./digital-worker.js',location.href),{type:'module'});
   digitalWorker.onmessage=({data})=>{
-    if(data.type==='status')$('digital-state').textContent=data.message;
+    if(data.type==='status'&&digitalAudioCompatible)$('digital-state').textContent=data.message;
     if(data.type==='notice'&&!digitalDecoderNotice){digitalDecoderNotice=true;addDigitalRow({utc:new Date().toISOString().slice(11,19),snr:'',dt:'',hz:'',text:data.message,placeholder:true});}
     if(data.type==='decoded')addDigitalRow(data.result);
   };
@@ -168,9 +168,35 @@ function renderDigitalRows(){
   }
   $('digital-download').disabled=!digitalRows.length;
 }
+function setDigitalCompatibility(compatible){
+  digitalAudioCompatible=compatible;
+  const warning=$('digital-waterfall-message');
+  warning.hidden=compatible;
+  warning.textContent=compatible?'':'Perfil de audio incompatible, reinicie el modo digital';
+  if(!compatible){
+    stopDigitalWorker();
+    $('digital-state').textContent='Perfil de audio incompatible, reinicie el modo digital';
+    sendDigitalMode(null);
+  }
+}
 function setDigitalMode(next){
   if(next&&!digimodesAvailable){message('Digimodos no están habilitados en este receptor.');return;}
-  digitalMode=digitalMode===next?null:next;
+  const selected=digitalMode===next?null:next;
+  if(selected){
+    if(!digitalMode){
+      digitalPreviousAudioProfile=audioProfile;
+      digitalPreviousWaterfallPreference=waterfallPreference;
+    }
+    digitalMode=selected;
+    setDigitalCompatibility(true);
+    mode='USB';narrow=false;[low,high]=defaults.USB;tune();
+    $('audio-quality').querySelector('option[value="digiraw"]').hidden=false;
+    audioProfile='digiraw';resetAudio();showAudioProfile();
+    waterfallPreference='slow';digitalWaterfallManuallyChanged=false;$('waterfall-quality').value='slow';
+  }else{
+    digitalMode=null;
+    setDigitalCompatibility(true);
+  }
   document.querySelectorAll('[data-digital-mode]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.digitalMode===digitalMode)));
   $('digital-panel').hidden=!digitalMode;$('digital-separator').hidden=!digitalMode;
   if(digitalMode){
@@ -181,15 +207,29 @@ function setDigitalMode(next){
     stopDigitalWorker();$('digital-state').textContent='Inactivo';
   }
   sendDigitalMode();
+  if(digitalMode){
+    sendAudioProfile();sendWaterfallPreference();
+  }else{
+    if(digitalPreviousAudioProfile){audioProfile=digitalPreviousAudioProfile;resetAudio();showAudioProfile();sendAudioProfile();}
+    if(digitalPreviousWaterfallPreference&&!digitalWaterfallManuallyChanged){waterfallPreference=digitalPreviousWaterfallPreference;$('waterfall-quality').value=waterfallPreference;sendWaterfallPreference();}
+    digitalPreviousAudioProfile=null;digitalPreviousWaterfallPreference=null;digitalWaterfallManuallyChanged=false;
+    $('audio-quality').querySelector('option[value="digiraw"]').hidden=true;
+  }
 }
 function handleDigitalPacket(bytes){
-  if(!digitalMode||!audioEnabled||bytes.byteLength<16)return;
+  if(!digitalMode||!digitalAudioCompatible||!audioEnabled||bytes.byteLength<16)return;
   const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength),modeCode=view.getUint8(0);
   const packetMode=modeCode===1?'FT8':modeCode===2?'FT4':'';
   if(packetMode!==digitalMode)return;
   const sequence=view.getUint32(1,true),timestampUs=Number(view.getBigUint64(5,true)),sampleCount=view.getUint16(13,true);
   const payload=bytes.slice(15),samples=new Int16Array(payload.buffer,payload.byteOffset,Math.floor(payload.byteLength/2));
   drawDigitalSamples(samples);
+  if(audioProfile==='digiraw'){
+    audioPackets++;$('audio-status').dataset.packets=String(audioPackets);
+    const audioPayload=payload.buffer.slice(0);
+    if(recording)recordPCM(audioPayload.slice(0));
+    if(node&&context?.state==='running')node.port.postMessage({codec:'pcm16',rate:12000,payload:audioPayload,record:false},[audioPayload]);
+  }
   ensureDigitalWorker().postMessage({type:'samples',mode:packetMode,sequence,timestampUs,sampleCount,payload:payload.buffer},[payload.buffer]);
 }
 function showWaterfallProfile(){
@@ -200,7 +240,7 @@ function showWaterfallProfile(){
   $('waterfall').dataset.profile=waterfallProfile;
 }
 function showAudioProfile(){
-  const names={raw:'PCM16 · 16 kHz',balanced:'Opus · 32 kb/s · 16 kHz',mobile:'Opus · 12 kb/s · 16 kHz'};
+  const names={raw:'PCM16 · 16 kHz',balanced:'Opus · 32 kb/s · 16 kHz',mobile:'Opus · 12 kb/s · 16 kHz',digiraw:'digiraw · PCM16 · 12 kHz'};
   $('audio-profile-status').textContent=names[audioProfile];
   $('audio-quality').value=audioProfile;
 }
@@ -392,7 +432,7 @@ function connect(){
       window.dispatchEvent(new CustomEvent('radio-event',{detail:msg}));
       if(msg.type==='hello'){
         if(msg.protocol!==protocolVersion||msg.waterfall!==waterfallProtocolVersion){message('El servidor usa un protocolo incompatible.');socket.close(1002,'Incompatible protocol');return;}
-        protocolReady=true;if(bandConfigured){tune();sendWaterfallView();}sendWaterfallPreference();sendWaterfallSpeed();sendAudioProfile();sendDigitalMode();window.radioSend({type:'audio',enabled:audioEnabled});window.dispatchEvent(new Event('radio-open'));
+        protocolReady=true;if(bandConfigured){tune();sendWaterfallView();}sendWaterfallPreference();sendWaterfallSpeed();sendDigitalMode();sendAudioProfile();window.radioSend({type:'audio',enabled:audioEnabled});window.dispatchEvent(new Event('radio-open'));
       }else if(msg.type==='status'){
         center=msg.center;rate=msg.sample_rate;$('listeners').textContent=msg.users;
         digimodesAvailable=msg.digimodes!==false&&!!siteConfig.digimodes;setDigitalControlsVisible(digimodesAvailable);
@@ -410,7 +450,7 @@ function connect(){
         $('connection').textContent=labels[msg.source]||msg.source;
         $('stats').textContent=`Carga: ${msg.cpu_percent??0}% de un núcleo · ${msg.users} oyente(s) · Tráfico total: ${msg.kbps??0} kb/s · Recuperaciones: ${msg.restarts}`;
         opusAvailable=msg.opus_available!==false;applyResourcePolicy();
-        if(msg.opus_available===false&&audioProfile!=='raw')fallbackFromOpus('Opus no está instalado en el servidor.');
+        if(msg.opus_available===false&&['balanced','mobile'].includes(audioProfile))fallbackFromOpus('Opus no está instalado en el servidor.');
         if(!['streaming','demo'].includes(msg.source))resetAudio();
       }else if(msg.type==='waterfall-profile'){
         waterfallProfile=msg.profile;if(msg.preference){waterfallPreference=msg.preference;$('waterfall-quality').value=waterfallPreference;}lastWaterfallSequence=null;lastWaterfallAt=0;showWaterfallProfile();
@@ -423,6 +463,7 @@ function connect(){
         if(!audioEnabled&&digitalMode){stopDigitalWorker();$('digital-state').textContent='Recepción detenida; inicia audio para decodificar.';}
       }else if(msg.type==='audio-profile'){
         audioProfile=msg.profile;resetAudio();showAudioProfile();
+        if(digitalMode&&audioProfile!=='digiraw'&&digitalAudioCompatible)setDigitalCompatibility(false);
       }else if(msg.type==='digital-mode'){
         if(msg.mode!==digitalMode&&msg.mode!==null)digitalMode=msg.mode;
         if(digitalMode)$('digital-state').textContent=audioEnabled?'Esperando muestras de 12 kHz…':'Inicia audio para decodificar.';
@@ -481,7 +522,7 @@ async function listen(){
       context.onstatechange=()=>{if(audioEnabled&&context.state!=='running')$('audio-status').textContent='Audio suspendido por el navegador. Pulsa Pausar y vuelve a iniciarlo.';};
     }
     await resumed;
-    if(audioProfile!=='raw'&&!await browserSupportsOpus())fallbackFromOpus('Este navegador no ofrece decodificación Opus mediante WebCodecs.');
+    if(['balanced','mobile'].includes(audioProfile)&&!await browserSupportsOpus())fallbackFromOpus('Este navegador no ofrece decodificación Opus mediante WebCodecs.');
     gain.gain.value=muted?0:10**(Number($('volume').value)/20);
     audioEnabled=true;audioEverStarted=true;window.radioSend({type:'audio',enabled:true});showAudioState();message();
     if(digitalMode)ensureDigitalWorker().postMessage({type:'start',mode:digitalMode,rate:12000,frequency,demodulation:mode});
@@ -529,9 +570,9 @@ $('wfspeed').onchange=sendWaterfallSpeed;
 $('brightness').addEventListener('input',()=>{if(isSpectrum()){renderSpectrumAxis();redrawHistory();}});
 $('labels').onchange=drawMarkers;
 $('waterfall-quality').value=waterfallPreference;
-$('waterfall-quality').addEventListener('change',()=>{waterfallPreference=$('waterfall-quality').value;try{localStorage.setItem('hamsdr-waterfall',waterfallPreference);}catch{}sendWaterfallPreference();});
+$('waterfall-quality').addEventListener('change',()=>{waterfallPreference=$('waterfall-quality').value;if(digitalMode)digitalWaterfallManuallyChanged=true;try{localStorage.setItem('hamsdr-waterfall',waterfallPreference);}catch{}sendWaterfallPreference();});
 $('audio-quality').value=audioProfile;
-$('audio-quality').addEventListener('change',async()=>{if(recording)stopRecording();audioProfile=$('audio-quality').value;if(audioProfile!=='raw'&&!await browserSupportsOpus()){fallbackFromOpus('Este navegador no ofrece decodificación Opus mediante WebCodecs.');return;}try{localStorage.setItem('hamsdr-audio-profile',audioProfile);}catch{}resetAudio();showAudioProfile();sendAudioProfile();});
+$('audio-quality').addEventListener('change',async()=>{if(recording)stopRecording();audioProfile=$('audio-quality').value;if(digitalMode&&audioProfile!=='digiraw')setDigitalCompatibility(false);if(['balanced','mobile'].includes(audioProfile)&&!await browserSupportsOpus()){fallbackFromOpus('Este navegador no ofrece decodificación Opus mediante WebCodecs.');return;}if(audioProfile!=='digiraw'){try{localStorage.setItem('hamsdr-audio-profile',audioProfile);}catch{}}resetAudio();showAudioProfile();sendAudioProfile();});
 $('digital-clear').addEventListener('click',()=>{digitalRows=[];renderDigitalRows();const canvas=$('digital-waterfall');canvas.getContext('2d').clearRect(0,0,canvas.width,canvas.height);});
 $('digital-download').addEventListener('click',()=>{
   const lines=[`HamSDR ${digitalMode||'digital'} decode export`, `Frequency: ${(frequency/1000).toFixed(3)} kHz`, `Demodulation: ${mode}`, `Exported: ${new Date().toISOString()}`, '', 'UTC\tSNR\tDT\tHz\tMessage'];
@@ -603,6 +644,6 @@ function stopRecording(){
 $('record').onclick=async()=>{
   if(recording){stopRecording();return;}
   await listen();if(!node||context.state!=='running')return;
-  recordChunks=[];recordBytes=0;recordingRate=audioProfile==='raw'?16000:48000;recording=true;$('record').textContent='detener';$('record-status').textContent='Grabando…';$('download').hidden=true;
+  recordChunks=[];recordBytes=0;recordingRate=audioProfile==='raw'?16000:audioProfile==='digiraw'?12000:48000;recording=true;$('record').textContent='detener';$('record-status').textContent='Grabando…';$('download').hidden=true;
   recordTimer=setTimeout(stopRecording,30*60*1000);
 };

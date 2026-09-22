@@ -44,7 +44,7 @@ async def main():
             await expect(page.locator('label').filter(has=page.locator('#waterfall-quality'))).to_contain_text('Cascada:')
             await expect(page.locator('label').filter(has=page.locator('#audio-quality'))).to_contain_text('Audio:')
             self_audio_options=await page.locator('#audio-quality option').evaluate_all('(options)=>options.map(option=>[option.value,option.textContent])')
-            assert self_audio_options==[['raw','raw'],['balanced','balanceado'],['mobile','bajo consumo']]
+            assert self_audio_options==[['raw','raw'],['balanced','balanceado'],['mobile','bajo consumo'],['digiraw','digiraw']]
             assert await page.locator('.stream-profile-control #audio-quality').count()==1
             assert await page.locator('.stream-profile-control #waterfall-quality').count()==1
             assert await page.locator('.waterfall-panel #waterfall-quality').count()==0
@@ -103,6 +103,33 @@ async def main():
                 await expect(page.locator('#audio-quality')).to_have_value('balanced')
             await expect(page.locator('#waterfall-quality')).to_have_value(expected_profile)
             await expect(page.locator('#waterfall')).to_have_attribute('data-profile',expected_profile)
+            if site['digimodes']:
+                modes=page.locator('#modes button')
+                assert await modes.nth(10).text_content()=='FT8'
+                assert await modes.nth(11).text_content()=='FT4'
+                assert await modes.nth(12).text_content()=='Digimodos'
+                await page.locator('[data-digital-mode="FT8"]').click()
+                await expect(page.locator('#mode-display')).to_have_text('USB')
+                await expect(page.locator('#audio-quality')).to_have_value('digiraw')
+                await expect(page.locator('#audio-profile-status')).to_contain_text('PCM16 · 12 kHz')
+                await expect(page.locator('#waterfall-quality')).to_have_value('slow')
+                await expect(page.locator('#digital-panel')).to_be_visible()
+                await expect(page.locator('#digital-waterfall-message')).to_be_hidden()
+                await page.wait_for_timeout(300)
+                assert await page.locator('#digital-log').get_by_text('Decoder MFSK/WASM no instalado',exact=False).count()==0
+                await page.locator('[data-mode="AM"]:not([data-narrow])').click()
+                await expect(page.locator('#mode-display')).to_have_text('AM')
+                await page.locator('#audio-quality').select_option('balanced')
+                await expect(page.locator('#digital-waterfall-message')).to_have_text('Perfil de audio incompatible, reinicie el modo digital')
+                await expect(page.locator('#digital-waterfall-message')).to_be_visible()
+                await page.locator('[data-digital-mode="FT8"]').click()
+                await expect(page.locator('#digital-panel')).to_be_hidden()
+                await page.locator('[data-digital-mode="FT8"]').click()
+                await expect(page.locator('#digital-waterfall-message')).to_be_hidden()
+                await expect(page.locator('#audio-quality')).to_have_value('digiraw')
+                await expect(page.locator('#mode-display')).to_have_text('USB')
+                await page.locator('[data-digital-mode="FT8"]').click()
+                await expect(page.locator('#digital-panel')).to_be_hidden()
             assert await page.locator('footer a',has_text='Estado del receptor').count()==0
             assert await page.locator('#nr').evaluate("e=>e.closest('.signal-panel')!==null")
             layout=await page.evaluate("""()=>{const rect=s=>{const r=document.querySelector(s).getBoundingClientRect();return{x:r.x,y:r.y,w:r.width,right:r.right}};return{panorama:rect('#panorama'),controls:rect('.controls'),frequency:rect('.frequency-panel'),waterfall:rect('.waterfall-panel'),signal:rect('.signal-panel'),filter:rect('.filter-panel'),chat:rect('[aria-label=\"Chat en vivo\"]'),log:rect('[aria-label=\"Logbook\"]'),main:rect('main')}}""")

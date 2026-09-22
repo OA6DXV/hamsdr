@@ -452,7 +452,8 @@ class Gateway:
                 "initial_frequency": self.initial_frequency, "audio_rate": 16000,
                 "digital_audio_rate": DIGITAL_AUDIO_RATE,
                 "digimodes": bool(getattr(self.args, "digimodes", False)),
-                "audio_profiles": {"raw": 16000, "balanced": 16000, "mobile": 16000},
+                "audio_profiles": {"raw": 16000, "balanced": 16000, "mobile": 16000,
+                                   "digiraw": DIGITAL_AUDIO_RATE},
                 "opus_available": OPUS_AVAILABLE,
                 "fft_size": 65536, "demo": getattr(self.args, "demo", False), "restarts": self.restarts,
                 "dropped": self.dropped, **self.metrics}
@@ -567,7 +568,7 @@ class Gateway:
         """Reduce expensive profiles without dropping an otherwise healthy session."""
         waterfall_max, audio_max, restricted = self.address_profile_limits(address)
         waterfall_levels = ["slow", "low", "balanced", "high"]
-        audio_levels = ["mobile", "balanced", "raw"]
+        audio_levels = ["mobile", "balanced", "digiraw", "raw"]
         changed = []
         for ident, client in self.address_clients(address):
             altered = False
@@ -649,11 +650,12 @@ class Gateway:
         retained = []
         while not client["queue"].empty():
             packet = client["queue"].get_nowait()
-            if not isinstance(packet, bytes) or not packet or packet[0] not in (2, 10, 11):
+            if not isinstance(packet, bytes) or not packet or packet[0] not in (2, 10, 11, DIGITAL_PACKET_KIND):
                 retained.append(packet)
         for packet in retained: client["queue"].put_nowait(packet)
         details = {"raw":("pcm16",16000,256000), "balanced":("opus",16000,32000),
-                   "mobile":("opus",16000,12000)}[profile]
+                   "mobile":("opus",16000,12000),
+                   "digiraw":("pcm16",DIGITAL_AUDIO_RATE,DIGITAL_AUDIO_RATE*16)}[profile]
         self.publish(json.dumps({"type":"audio-profile", "profile":profile,
             "codec":details[0], "rate":details[1], "bitrate":details[2]}), ident)
 
@@ -679,9 +681,16 @@ class Gateway:
             raise ValueError("Modo digital desconocido")
         if mode and not getattr(self.args, "digimodes", False):
             raise ValueError("Digimodos no están habilitados en este receptor")
+        if mode:
+            audio_max = self.address_profile_limits(client["address"])[1]
+            levels = ("mobile", "balanced", "digiraw", "raw")
+            if levels.index("digiraw") > levels.index(audio_max):
+                raise ValueError(f"Esta red permite audio hasta {audio_max}")
         if client["digital_mode"] != mode:
             self.reset_digital_audio(client)
         client["digital_mode"] = mode
+        if mode and client["audio_profile"] != "digiraw":
+            self.audio_profile(ident, "digiraw")
         if mode is None:
             retained = []
             while not client["queue"].empty():
@@ -695,7 +704,8 @@ class Gateway:
 
     def publish_digital_audio(self, ident, data):
         client = self.clients.get(ident)
-        if not client or not client["audio_enabled"] or client["digital_mode"] not in ("FT8", "FT4"):
+        if (not client or not client["audio_enabled"] or client["audio_profile"] != "digiraw" or
+                client["digital_mode"] not in ("FT8", "FT4")):
             return
         pending = client["digital_tail"]
         pending.extend(data)
@@ -733,6 +743,8 @@ class Gateway:
             return
         self.publish_digital_audio(ident, data)
         profile = client["audio_profile"]
+        if profile == "digiraw":
+            return
         if profile == "raw":
             self.publish(bytes([2])+data, ident)
             return
@@ -1125,19 +1137,25 @@ class Gateway:
                     if update.get("type") == "audio":
                         enabled = update.get("enabled")
                         if type(enabled) is not bool: raise ValueError("Estado de audio inválido")
-                        if (enabled and client["audio_profile"] == "raw" and
-                                self.address_profile_limits(address)[1] != "raw"):
-                            raise ValueError("Audio raw no está permitido para esta red compartida")
+                        if enabled:
+                            audio_max = self.address_profile_limits(address)[1]
+                            levels = ("mobile", "balanced", "digiraw", "raw")
+                            if levels.index(client["audio_profile"]) > levels.index(audio_max):
+                                raise ValueError(f"Esta red permite audio hasta {audio_max}")
                         self.audio_state(ident, enabled)
                         continue
                     if update.get("type") == "audio-profile":
                         profile = update.get("profile")
-                        if profile not in ("raw", "balanced", "mobile"):
+                        if profile not in ("raw", "balanced", "mobile", "digiraw"):
                             raise ValueError("Perfil de audio desconocido")
+                        if profile == "digiraw" and client["digital_mode"] not in ("FT8", "FT4"):
+                            raise ValueError("El perfil digiraw requiere un modo digital activo")
                         audio_max = self.address_profile_limits(address)[1]
-                        levels = ("mobile", "balanced", "raw")
+                        levels = ("mobile", "balanced", "digiraw", "raw")
                         if levels.index(profile) > levels.index(audio_max):
                             raise ValueError(f"Esta red permite audio hasta {audio_max}")
+                        if client["digital_mode"] and profile != "digiraw":
+                            self.digital_mode(ident, None)
                         self.audio_profile(ident, profile)
                         continue
                     if update.get("type") == "digital-mode":
@@ -1201,7 +1219,7 @@ async def security(request, handler):
         response.headers.update({"X-Content-Type-Options": "nosniff", "Referrer-Policy": "same-origin",
             "Cache-Control": "no-store", "Permissions-Policy": "camera=(), geolocation=(), microphone=(), payment=(), usb=()",
             "Cross-Origin-Opener-Policy": "same-origin",
-            "Content-Security-Policy": "default-src 'self'; base-uri 'none'; form-action 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; media-src 'self' blob:; worker-src 'self'; object-src 'none'; frame-ancestors 'none'"})
+            "Content-Security-Policy": "default-src 'self'; base-uri 'none'; form-action 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data:; connect-src 'self'; media-src 'self' blob:; worker-src 'self'; object-src 'none'; frame-ancestors 'none'"})
     return response
 
 GATEWAY = web.AppKey("gateway", Gateway)

@@ -303,6 +303,7 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
         async with self.session.get(self.url+'/') as response:
             self.assertEqual(response.status,200)
             self.assertIn("script-src 'self'",response.headers['Content-Security-Policy'])
+            self.assertIn("'wasm-unsafe-eval'",response.headers['Content-Security-Policy'])
             self.assertIn("base-uri 'none'",response.headers['Content-Security-Policy'])
             self.assertEqual(response.headers['Cross-Origin-Opener-Policy'],'same-origin')
             self.assertIn('microphone=()',response.headers['Permissions-Policy'])
@@ -332,11 +333,14 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
         await ws.send_json({'type':'digital-mode','mode':'FT8'})
         reply=await self.event(ws,'digital-mode')
         self.assertEqual((reply['mode'],reply['rate']),('FT8',12000))
+        self.assertEqual(self.app[GATEWAY].clients[next(iter(self.app[GATEWAY].clients))]['audio_profile'],'digiraw')
         await self.tune(ws,'USB',7100000)
         await ws.send_json({'type':'audio','enabled':True});await self.event(ws,'audio-state')
         async with asyncio.timeout(4):
             while True:
                 msg=await ws.receive()
+                if msg.type==WSMsgType.BINARY:
+                    self.assertNotIn(msg.data[0],(2,10,11),'digiraw duplicated the regular audio stream')
                 if msg.type==WSMsgType.BINARY and msg.data[0]==12:
                     mode_code,sequence,timestamp_us,count=struct.unpack('<BIQH',msg.data[1:16])
                     self.assertEqual(mode_code,1)
@@ -345,6 +349,11 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(count*2,len(msg.data)-16)
                     self.assertEqual(count,192)
                     break
+        await ws.send_json({'type':'audio-profile','profile':'balanced'})
+        disabled=await self.event(ws,'digital-mode')
+        self.assertIsNone(disabled['mode'])
+        changed=await self.event(ws,'audio-profile')
+        self.assertEqual(changed['profile'],'balanced')
         await ws.send_json({'type':'audio','enabled':False});await self.event(ws,'audio-state')
         deadline=asyncio.get_running_loop().time()+1
         while asyncio.get_running_loop().time()<deadline:

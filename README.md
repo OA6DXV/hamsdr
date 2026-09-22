@@ -10,9 +10,12 @@ reserved for stable releases.
 
 ## 0.5.0-unstable
 
-- Development line opened for optional client-side digital mode decoding.
-- Optional FT8/FT4 UI and 12 kHz PCM digital transport are gated by
-  `server.digimodes`.
+- Client-side FT8/FT4 decoding with the bundled `mfsk-core` WebAssembly module.
+- Digital operation is gated by `server.digimodes`. Entering FT8 or FT4 selects
+  USB, the exclusive 12 kHz PCM `digiraw` profile and the connection-slow
+  waterfall preset. Demodulation and waterfall quality remain user-selectable.
+- Selecting another audio profile stops the decoder until the digital mode is
+  toggled off and on again.
 
 ## 0.4.1-stable
 
@@ -88,6 +91,10 @@ python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 .venv/bin/python server.py --demo --database /tmp/hamsdr-demo.sqlite3
 ```
+
+The repository includes the browser decoder artifacts. To rebuild them after
+changing the Rust adapter, install Rust and `wasm-pack`, then run
+`tools/build_mfsk_wasm.sh`.
 
 Open <http://127.0.0.1:18093/>. The demo source provides a 1 kHz tone on USB
 7100, LSB 7090 and AM 7108 kHz.

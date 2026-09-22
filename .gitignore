@@ -10,3 +10,4 @@ __pycache__/
 *.sqlite3*
 /site.json
 /site.toml
+/wasm/mfsk-decoder/target/
