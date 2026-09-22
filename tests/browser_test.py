@@ -116,11 +116,18 @@ async def main():
                 await expect(page.locator('#digital-panel')).to_be_visible()
                 await expect(page.locator('#digital-waterfall-message')).to_be_hidden()
                 await expect(page.locator('#digital-progress')).to_have_attribute('max','100')
-                await expect(page.locator('#digital-progress')).to_have_js_property('value',0)
                 await expect(page.locator('#digital-download')).to_have_text('Descargar log')
-                await expect(page.locator('#digital-filter-note')).to_be_visible()
+                await expect(page.locator('#listen')).to_have_text('Pausar audio',timeout=10000)
+                await expect(page.locator('#bandwidth')).to_have_text('3000')
+                await expect(page.locator('#filter-unit')).to_have_text('Hz')
+                await page.locator('#digital-mute').click()
+                await expect(page.locator('#digital-mute')).to_have_attribute('aria-pressed','true')
+                await expect(page.locator('#mute')).to_be_checked()
+                await page.locator('#mute').uncheck()
+                await expect(page.locator('#digital-mute')).to_have_attribute('aria-pressed','false')
                 for control in ('#low','#high','#filter-narrow','#filter-wide','#squelch','#notch','#nr'):
                     await expect(page.locator(control)).to_be_disabled()
+                assert await page.locator('.digital-log-wrap').evaluate("element=>getComputedStyle(element).resize==='vertical'")
                 digital_layout=await page.evaluate("""()=>{const box=id=>{const r=document.querySelector(id).getBoundingClientRect();return{w:r.width,h:r.height}};return{body:box('.digital-body'),canvas:box('#digital-waterfall'),log:box('.digital-log-wrap')}}""")
                 assert abs(digital_layout['canvas']['w']-digital_layout['body']['w'])<=2
                 assert abs(digital_layout['log']['w']-digital_layout['body']['w'])<=2
@@ -134,7 +141,6 @@ async def main():
                 await expect(page.locator('#digital-waterfall-message')).to_be_visible()
                 await page.locator('[data-digital-mode="FT8"]').click()
                 await expect(page.locator('#digital-panel')).to_be_hidden()
-                await expect(page.locator('#digital-filter-note')).to_be_hidden()
                 await expect(page.locator('#filter-narrow')).to_be_enabled()
                 await page.locator('[data-digital-mode="FT8"]').click()
                 await expect(page.locator('#digital-waterfall-message')).to_be_hidden()
@@ -142,6 +148,8 @@ async def main():
                 await expect(page.locator('#mode-display')).to_have_text('USB')
                 await page.locator('[data-digital-mode="FT8"]').click()
                 await expect(page.locator('#digital-panel')).to_be_hidden()
+                await page.locator('#listen').click()
+                await expect(page.locator('#listen')).to_have_text('Iniciar audio')
             assert await page.locator('footer a',has_text='Estado del receptor').count()==0
             assert await page.locator('#nr').evaluate("e=>e.closest('.signal-panel')!==null")
             layout=await page.evaluate("""()=>{const rect=s=>{const r=document.querySelector(s).getBoundingClientRect();return{x:r.x,y:r.y,w:r.width,right:r.right}};return{panorama:rect('#panorama'),controls:rect('.controls'),frequency:rect('.frequency-panel'),waterfall:rect('.waterfall-panel'),signal:rect('.signal-panel'),filter:rect('.filter-panel'),chat:rect('[aria-label=\"Chat en vivo\"]'),log:rect('[aria-label=\"Logbook\"]'),main:rect('main')}}""")

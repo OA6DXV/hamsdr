@@ -63,7 +63,7 @@ function finishSlot(){
     const decoded=wasmDecoder.decode_slot(mode,slotBuffer,timestampUs)||[];
     for(const result of decoded)postMessage({type:'decoded',result});
     postMessage({type:'progress',value:100});
-    postMessage({type:'status',message:`${mode} · ${decoded.length} mensaje(s) decodificado(s)`});
+    postMessage({type:'status',message:`${mode} · ${decoded.length} mensaje(s) decodificado(s)`,decodedCount:decoded.length});
   }else if(wasmDecoder){
     postMessage({type:'progress',value:0});
     postMessage({type:'status',message:`${mode} sincronizando…`});
