@@ -141,6 +141,12 @@ async def main():
                 assert abs(digital_layout['canvas']['w']-digital_layout['body']['w'])<=2
                 assert abs(digital_layout['log']['w']-digital_layout['body']['w'])<=2
                 assert digital_layout['canvas']['h']>=140
+                if viewport['width']<=850:
+                    mobile_log=await page.locator('.digital-log-wrap').evaluate("""element=>{const table=element.querySelector('table');const message=table.querySelector('th:nth-child(5)');return{client:element.clientWidth,scroll:element.scrollWidth,table:table.getBoundingClientRect().width,message:message.getBoundingClientRect().width,whiteSpace:getComputedStyle(message).whiteSpace}}""")
+                    assert mobile_log['scroll']>mobile_log['client']
+                    assert mobile_log['table']>=760
+                    assert mobile_log['message']>=260
+                    assert mobile_log['whiteSpace']=='nowrap'
                 await page.wait_for_timeout(300)
                 await expect(page.locator('#digital-waterfall')).to_have_attribute('data-color-mode','adaptive')
                 await expect(page.locator('#digital-waterfall')).to_have_attribute('data-noise-floor',re.compile(r'^-?[0-9]+\.[0-9]$'))
