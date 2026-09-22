@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import assert from 'node:assert/strict';
-import {Ita2Decoder,RttyDecoder,RTTY_PRESETS} from '../web/rtty-core.mjs';
+import {findRttyCandidates,Ita2Decoder,RttyDecoder,RTTY_PRESETS} from '../web/rtty-core.mjs';
 
 const letters=['','E','\n','A',' ','S','I','U','\r','D','R','J','N','F','C','K','T','Z','L','W','H','Y','P','Q','O','B','G','','M','X','V',''];
 const letterCodes=new Map(letters.map((value,index)=>[value,index]));
@@ -42,4 +42,14 @@ for(const options of [
   {text:'THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG ',baud:45.5},
   ...[0,5,-5,15,-15,30,-30].map(frequencyOffset=>({text:'CQ CQ TEST ',frequencyOffset,noise:.03,afc:true}))
 ])assert.equal(decode(options).text,options.text,JSON.stringify(options));
+const spectrum=new Float32Array(1025).fill(-100),sampleRate=48000,fftSize=2048;
+for(const center of [900,2100])for(const tone of [center-85,center+85])spectrum[Math.round(tone*fftSize/sampleRate)]=-45;
+const candidates=findRttyCandidates(spectrum,sampleRate,fftSize,{low:0,high:3000});
+assert.equal(candidates.length,2);assert.ok(Math.abs(candidates[0].centerFrequency-900)<30);assert.ok(Math.abs(candidates[1].centerFrequency-2100)<30);
+const first=generateRtty({text:'CQ TEST ',sampleRate,centerFrequency:900}),second=generateRtty({text:'DE RADIO ',sampleRate,centerFrequency:2100});
+const mixed=new Float32Array(Math.max(first.length,second.length));for(let index=0;index<mixed.length;index++)mixed[index]=(first[index]||0)*.5+(second[index]||0)*.5;
+let firstText='',secondText='';
+new RttyDecoder({sampleRate,centerFrequency:900,afc:true,onCharacter:value=>firstText+=value}).process(mixed);
+new RttyDecoder({sampleRate,centerFrequency:2100,afc:true,onCharacter:value=>secondText+=value}).process(mixed);
+assert.equal(firstText,'CQ TEST ');assert.equal(secondText,'DE RADIO ');
 console.log('RTTY core tests passed');

@@ -63,11 +63,13 @@ Grabar audio<br><button id="record">iniciar</button> <span id="record-status" ro
 <label>Shift <select id="rtty-shift"><option value="85">85 Hz</option><option value="170" selected>170 Hz</option><option value="200">200 Hz</option><option value="425">425 Hz</option><option value="450">450 Hz</option><option value="850">850 Hz</option></select></label>
 <label>Centro <input id="rtty-center" type="number" min="100" max="5000" step="1" value="1000"> Hz</label>
 <label><input id="rtty-reverse" type="checkbox"> Reverse</label><label><input id="rtty-afc" type="checkbox" checked> AFC</label>
+<label><input id="rtty-multi" type="checkbox"> Multidetección</label>
 <button id="rtty-clear" class="small" type="button">Limpiar</button>
 </div>
-<div class="rtty-waterfall-wrap"><canvas id="rtty-waterfall" width="1024" height="180" aria-label="Cascada espectral RTTY de 0 a 3000 Hz"></canvas><div class="rtty-frequency-axis" aria-hidden="true"></div></div>
+<div class="rtty-waterfall-wrap"><div class="rtty-canvas-wrap"><canvas id="rtty-waterfall" width="1024" height="180" aria-label="Cascada espectral RTTY de 0 a 3000 Hz"></canvas><div id="rtty-markers" aria-hidden="true"></div></div><div class="rtty-frequency-axis" aria-hidden="true"></div></div>
 <div class="rtty-metrics"><span>MARK <output id="rtty-mark">915 Hz</output></span><span>SPACE <output id="rtty-space">1085 Hz</output></span><span>AFC <output id="rtty-afc-offset">0.0 Hz</output></span><label>Confianza <progress id="rtty-confidence" max="1" value="0"></progress></label></div>
 <pre id="rtty-terminal" role="log" aria-live="polite" aria-label="Texto RTTY decodificado"></pre>
+<div id="rtty-multi-panel" class="rtty-multi-panel" hidden><b>Streams detectados: <output id="rtty-multi-count">0</output></b><div class="rtty-multi-table-wrap"><table id="rtty-multi-table"><thead><tr><th>Centro</th><th>Texto decodificado</th></tr></thead><tbody><tr class="rtty-multi-empty"><td colspan="2">Buscando transmisiones RTTY 45.45/170…</td></tr></tbody></table></div></div>
 </section>
 <hr id="digital-separator" hidden>
 <div class="community-layout">

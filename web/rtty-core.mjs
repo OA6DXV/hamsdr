@@ -19,15 +19,37 @@ export class Ita2Decoder{
 }
 
 class ToneDetector{
-  constructor(sampleRate,frequency,decay){this.sampleRate=sampleRate;this.decay=decay;this.i=0;this.q=0;this.phase=0;this.setFrequency(frequency);}
-  setFrequency(frequency){this.frequency=frequency;this.step=2*Math.PI*frequency/this.sampleRate;}
-  reset(){this.i=0;this.q=0;this.phase=0;}
+  constructor(sampleRate,frequency,decay){this.sampleRate=sampleRate;this.decay=decay;this.i=0;this.q=0;this.oscI=1;this.oscQ=0;this.oscillatorSamples=0;this.setFrequency(frequency);}
+  setFrequency(frequency){this.frequency=frequency;const step=2*Math.PI*frequency/this.sampleRate;this.stepI=Math.cos(step);this.stepQ=Math.sin(step);}
+  reset(){this.i=0;this.q=0;this.oscI=1;this.oscQ=0;this.oscillatorSamples=0;}
   push(sample){
-    this.i=this.i*this.decay+sample*Math.cos(this.phase);
-    this.q=this.q*this.decay+sample*Math.sin(this.phase);
-    this.phase+=this.step;if(this.phase>Math.PI*2)this.phase-=Math.PI*2;
+    this.i=this.i*this.decay+sample*this.oscI;this.q=this.q*this.decay+sample*this.oscQ;
+    const nextI=this.oscI*this.stepI-this.oscQ*this.stepQ;
+    this.oscQ=this.oscI*this.stepQ+this.oscQ*this.stepI;this.oscI=nextI;
+    if(++this.oscillatorSamples===4096){const length=Math.hypot(this.oscI,this.oscQ)||1;this.oscI/=length;this.oscQ/=length;this.oscillatorSamples=0;}
     return this.i*this.i+this.q*this.q;
   }
+}
+
+function spectrumPeak(levels,bin){
+  let peak=-160;for(let offset=-1;offset<=1;offset++){const index=bin+offset;if(index>=0&&index<levels.length)peak=Math.max(peak,levels[index]);}return peak;
+}
+
+export function findRttyCandidates(levels,sampleRate,fftSize,{low=0,high=3000,shift=170,thresholdDb=7,maxCandidates=8}={}){
+  const minimumBin=Math.max(1,Math.ceil((low+shift/2)*fftSize/sampleRate));
+  const maximumBin=Math.min(levels.length-2,Math.floor((high-shift/2)*fftSize/sampleRate));
+  if(maximumBin<=minimumBin)return[];
+  const noiseValues=[];for(let bin=minimumBin;bin<=maximumBin;bin++)noiseValues.push(levels[bin]);
+  noiseValues.sort((a,b)=>a-b);const noiseFloor=noiseValues[Math.floor(noiseValues.length*.35)]??-160;
+  const halfShiftBins=shift/2*fftSize/sampleRate,candidates=[];
+  for(let bin=minimumBin;bin<=maximumBin;bin++){
+    const mark=spectrumPeak(levels,Math.round(bin-halfShiftBins)),space=spectrumPeak(levels,Math.round(bin+halfShiftBins));
+    const score=Math.min(mark,space)-noiseFloor;
+    if(score>=thresholdDb)candidates.push({centerFrequency:bin*sampleRate/fftSize,score,markLevel:mark,spaceLevel:space,noiseFloor});
+  }
+  candidates.sort((a,b)=>b.score-a.score);const selected=[];
+  for(const candidate of candidates){if(selected.every(current=>Math.abs(current.centerFrequency-candidate.centerFrequency)>=Math.max(55,shift*.45)))selected.push(candidate);if(selected.length>=maxCandidates)break;}
+  return selected.sort((a,b)=>a.centerFrequency-b.centerFrequency);
 }
 
 export class RttyDecoder{

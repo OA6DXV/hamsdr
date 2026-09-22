@@ -1,5 +1,43 @@
 // SPDX-License-Identifier: GPL-3.0-only
-import {RttyDecoder} from './rtty-core.mjs';
+import {findRttyCandidates,RttyDecoder} from './rtty-core.mjs';
+
+class RttyMultiDetector{
+  constructor(post){this.post=post;this.enabled=false;this.streams=[];this.pending=[];this.nextId=1;this.scanNumber=0;this.average=null;this.configure({});}
+  configure(options){
+    const wasEnabled=this.enabled;
+    this.enabled=Boolean(options.multi??this.enabled);this.low=Number(options.low??this.low??0);this.high=Number(options.high??this.high??3000);
+    this.reverse=Boolean(options.reverse??this.reverse??false);
+    if(!this.enabled){if(wasEnabled)this.clear();return;}
+    for(const stream of this.streams)stream.decoder.configure({centerFrequency:stream.centerFrequency,reverse:this.reverse,afc:true});
+  }
+  clear(){this.streams=[];this.pending=[];this.average=null;this.post({type:'multi-streams',streams:[]});}
+  createStream(candidate){
+    const stream={id:this.nextId++,centerFrequency:candidate.centerFrequency,score:candidate.score,lastSeen:this.scanNumber,text:''};
+    stream.decoder=new RttyDecoder({sampleRate,baud:45.45,shift:170,centerFrequency:stream.centerFrequency,reverse:this.reverse,afc:true,afcRange:45,filterBandwidth:270,
+      onCharacter:value=>this.post({type:'multi-character',id:stream.id,centerFrequency:stream.centerFrequency,value})});
+    this.streams.push(stream);
+  }
+  updateSpectrum(message){
+    if(!this.enabled)return;
+    const levels=message.levels;
+    if(!this.average||this.average.length!==levels.length)this.average=Float32Array.from(levels);
+    else for(let index=0;index<levels.length;index++)this.average[index]=this.average[index]*.78+levels[index]*.22;
+    if(++this.scanNumber%3)return;
+    const found=findRttyCandidates(this.average,message.sampleRate,message.fftSize,{low:this.low,high:this.high,shift:170,thresholdDb:7,maxCandidates:8});
+    for(const candidate of found){
+      const stream=this.streams.find(item=>Math.abs(item.centerFrequency-candidate.centerFrequency)<70);
+      if(stream){stream.lastSeen=this.scanNumber;stream.score=candidate.score;continue;}
+      let pending=this.pending.find(item=>Math.abs(item.centerFrequency-candidate.centerFrequency)<70);
+      if(!pending){pending={...candidate,hits:0,lastSeen:this.scanNumber};this.pending.push(pending);}
+      pending.centerFrequency=(pending.centerFrequency*pending.hits+candidate.centerFrequency)/(pending.hits+1);pending.score=candidate.score;pending.hits++;pending.lastSeen=this.scanNumber;
+      if(pending.hits>=2&&this.streams.length<8){this.createStream(pending);this.pending=this.pending.filter(item=>item!==pending);}
+    }
+    this.pending=this.pending.filter(item=>this.scanNumber-item.lastSeen<=9);
+    this.streams=this.streams.filter(stream=>this.scanNumber-stream.lastSeen<=60);
+    this.post({type:'multi-streams',streams:this.streams.map(({id,centerFrequency,score})=>({id,centerFrequency,score}))});
+  }
+  process(input){if(this.enabled)for(const stream of this.streams)stream.decoder.process(input);}
+}
 
 class RttySpectrum{
   constructor(post){
@@ -44,18 +82,19 @@ class RttyProcessor extends AudioWorkletProcessor{
       ...(options.processorOptions||{}),
       onCharacter:value=>this.port.postMessage({type:'character',value}),
       onStatus:status=>this.port.postMessage({type:'status',...status})});
-    this.spectrum=new RttySpectrum((message,transfer)=>this.port.postMessage(message,transfer));
+    this.multi=new RttyMultiDetector(message=>this.port.postMessage(message));
+    this.spectrum=new RttySpectrum((message,transfer)=>{this.multi.updateSpectrum(message);this.port.postMessage(message,transfer);});
     this.decoder.setEnabled(false);
     this.port.onmessage=({data})=>{
-      if(data.type==='config')this.decoder.configure(data);
+      if(data.type==='config'){this.decoder.configure(data);this.multi.configure(data);}
       if(data.type==='enabled'){this.enabled=Boolean(data.enabled);this.decoder.setEnabled(this.enabled);}
-      if(data.type==='reset')this.decoder.reset();
+      if(data.type==='reset'){this.decoder.reset();this.multi.clear();}
     };
   }
   process(inputs,outputs){
     const input=inputs[0]?.[0],output=outputs[0]?.[0];
     if(output)output.fill(0);
-    if(this.enabled&&input){this.decoder.process(input);this.spectrum.push(input);}
+    if(this.enabled&&input){this.decoder.process(input);this.multi.process(input);this.spectrum.push(input);}
     return true;
   }
 }
