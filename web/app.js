@@ -22,6 +22,7 @@ let rttyActive=false,rttyNode=null,rttySink=null,rttyModuleLoaded=false,rttyText
 let rttyNoiseFloor=null,rttyColorCeiling=null,rttySpectrumFrames=0;
 let rttyStreams=new Map();
 let rttyPreviousAudioProfile=null,rttyProfilePending=false;
+let rttyProfileSuggestion=null;
 let spectrumHistory=[],waterfallNavigationHistory=[];
 let waterfallPreference='balanced',waterfallProfile='balanced',waterfallSpeed=1,drawAverage=0,lastProfileRequest=0,profileTimer,pendingRow,waterfallFrame;
 let waterfallViewRevision=0,waterfallViewTimer;
@@ -362,6 +363,7 @@ function setDigitalMode(next,{autoStartAudio=true}={}){
 }
 function rttyConfiguration(){const shift=Number($('rtty-shift').value),display=digitalDisplayRange();return{type:'config',sampleRate:12000,externalPcm:true,baud:Number($('rtty-baud').value),shift,centerFrequency:Number($('rtty-center').value),reverse:$('rtty-reverse').checked,afc:$('rtty-afc').checked,afcRange:50,filterBandwidth:Math.max(250,shift+100),stopBits:1.5,multi:$('rtty-multi').checked,low:display.minimum,high:display.maximum};}
 function sendRttyConfiguration(){if(rttyNode)rttyNode.port.postMessage(rttyConfiguration());updateSharedUrl();}
+function hideRttyProfileSuggestion(){rttyProfileSuggestion=null;$('rtty-profile-alert').hidden=true;}
 function renderRttyStreams(){
   const body=$('rtty-multi-table').tBodies[0],markers=$('rtty-markers');body.replaceChildren();markers.replaceChildren();
   const display=digitalDisplayRange();
@@ -399,10 +401,11 @@ async function ensureRttyNode(){
       }else if(data.type==='status'){
         $('rtty-mark').value=`${data.markFrequency.toFixed(1)} Hz`;$('rtty-space').value=`${data.spaceFrequency.toFixed(1)} Hz`;
         $('rtty-afc-offset').value=`${data.afcOffset>=0?'+':''}${data.afcOffset.toFixed(1)} Hz`;$('rtty-confidence').value=data.confidence;
-        $('rtty-state').textContent=`Recibiendo · ${(data.confidence*100).toFixed(0)}%`;
+        const states={locked:'RTTY validado',candidate:'Candidato RTTY',idle:'Sin señal RTTY'};$('rtty-state').textContent=`${states[data.validation]||'Analizando'} · ${(data.confidence*100).toFixed(0)}%`;
       }else if(data.type==='spectrum')drawRttySpectrum(data);
       else if(data.type==='multi-streams')updateRttyStreams(data.streams);
       else if(data.type==='multi-character')addRttyStreamCharacter(data);
+      else if(data.type==='profile-detected'&&!$('rtty-multi').checked){rttyProfileSuggestion=data;$('rtty-profile-message').textContent=`Transmisión RTTY ${data.label} detectada en ${data.centerFrequency} Hz. ¿Desea sintonizarla?`;$('rtty-profile-alert').hidden=false;}
     };
   }
   sendRttyConfiguration();rttyNode.port.postMessage({type:'enabled',enabled:audioEnabled&&rttyActive});
@@ -419,7 +422,7 @@ function setRttyMode(enabled,{autoStartAudio=true}={}){
     document.querySelector('[data-rtty-mode]').setAttribute('aria-pressed','true');updateRttyTitle();
     if(audioEnabled)void ensureRttyNode();else if(autoStartAudio)void listen();
   }else{
-    rttyActive=false;$('rtty-panel').hidden=true;$('digital-separator').hidden=!digitalMode;if(!digitalMode)setDigitalDspState(false);
+    rttyActive=false;$('rtty-panel').hidden=true;$('digital-separator').hidden=!digitalMode;hideRttyProfileSuggestion();if(!digitalMode)setDigitalDspState(false);
     document.querySelector('[data-rtty-mode]').setAttribute('aria-pressed','false');if(rttyNode)rttyNode.port.postMessage({type:'enabled',enabled:false});
     sendDigitalMode(null);if(rttyPreviousAudioProfile){audioProfile=rttyPreviousAudioProfile;resetAudio();showAudioProfile();sendAudioProfile();}rttyPreviousAudioProfile=null;rttyProfilePending=false;$('audio-quality').querySelector('option[value="digiraw"]').hidden=true;
   }
@@ -855,8 +858,10 @@ document.querySelectorAll('[data-mode]').forEach(b=>b.addEventListener('click',(
 document.querySelectorAll('[data-digital-mode]').forEach(b=>b.addEventListener('click',()=>setDigitalMode(b.dataset.digitalMode)));
 document.querySelector('[data-rtty-mode]').addEventListener('click',()=>setRttyMode(true));
 $('rtty-clear').addEventListener('click',()=>{rttyText='';rttyStreams.clear();$('rtty-terminal').textContent='';renderRttyStreams();if(rttyNode)rttyNode.port.postMessage({type:'reset'});});
-for(const id of ['rtty-baud','rtty-shift','rtty-center','rtty-reverse','rtty-afc'])$(id).addEventListener('change',sendRttyConfiguration);
-$('rtty-multi').addEventListener('change',()=>{const active=$('rtty-multi').checked;$('rtty-multi-panel').hidden=!active;$('rtty-waterfall').dataset.multi=String(active);if(!active){rttyStreams.clear();renderRttyStreams();}sendRttyConfiguration();});
+for(const id of ['rtty-baud','rtty-shift','rtty-center','rtty-reverse','rtty-afc'])$(id).addEventListener('change',()=>{hideRttyProfileSuggestion();sendRttyConfiguration();});
+$('rtty-profile-tune').addEventListener('click',()=>{if(!rttyProfileSuggestion)return;$('rtty-baud').value=String(rttyProfileSuggestion.baud);$('rtty-shift').value=String(rttyProfileSuggestion.shift);$('rtty-center').value=String(rttyProfileSuggestion.centerFrequency);$('rtty-afc').checked=true;hideRttyProfileSuggestion();sendRttyConfiguration();if(rttyNode)rttyNode.port.postMessage({type:'reset'});});
+$('rtty-profile-ignore').addEventListener('click',()=>{if(rttyNode&&rttyProfileSuggestion)rttyNode.port.postMessage({type:'ignore-profile',profile:rttyProfileSuggestion.profile});hideRttyProfileSuggestion();});
+$('rtty-multi').addEventListener('change',()=>{const active=$('rtty-multi').checked;$('rtty-multi-panel').hidden=!active;$('rtty-waterfall').dataset.multi=String(active);hideRttyProfileSuggestion();if(!active){rttyStreams.clear();renderRttyStreams();}sendRttyConfiguration();});
 function updateSquelchControl(){const active=$('squelch').checked&&!digitalMode&&!rttyActive;$('threshold').disabled=!active;$('squelch-threshold').dataset.active=String(active);$('threshold-value').value=`${String($('threshold').value).replace('-', '−')} dBFS`;}
 for(const id of ['low','high','threshold','notch','nr'])$(id).addEventListener('change',()=>{low=Number($('low').value);high=Number($('high').value);tune();});
 $('threshold').addEventListener('input',updateSquelchControl);

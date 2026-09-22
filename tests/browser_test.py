@@ -229,6 +229,7 @@ async def main():
                 await expect(page.locator('#low')).to_have_value('-3000')
                 await expect(page.locator('#high')).to_have_value('0')
                 await expect(page.locator('#rtty-reverse')).not_to_be_checked()
+                await expect(page.locator('#rtty-profile-alert')).to_be_hidden()
                 await expect(page.locator('#listen')).to_have_text('Pausar audio',timeout=10000)
                 await expect(page.locator('html')).to_have_attribute('data-rtty-engine','worklet')
                 await expect(page.locator('#rtty-title')).to_contain_text('RTTY · LSB')

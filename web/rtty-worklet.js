@@ -1,11 +1,59 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import {findRttyCandidates,RttyDecoder} from './rtty-core.mjs';
 
-const MULTI_PROFILES=Object.freeze([
+export const MULTI_PROFILES=Object.freeze([
   Object.freeze({id:'45',label:'45.45/170',baud:45.45,shift:170}),
   Object.freeze({id:'50',label:'50/170',baud:50,shift:170}),
   Object.freeze({id:'75',label:'75/170',baud:75,shift:170})
 ]);
+
+export class RttyOutputGate{
+  constructor(post){this.post=post;this.configure({});this.reset();}
+  configure(options){const center=Number(options.centerFrequency??this.center??1000),shift=Number(options.shift??this.shift??170),changed=center!==this.center||shift!==this.shift;this.center=center;this.shift=shift;this.low=Number(options.low??this.low??0);this.high=Number(options.high??this.high??3000);if(changed&&this.frames)this.reset();}
+  reset(){this.present=0;this.missing=0;this.frames=[];this.buffer='';this.open=false;this.signalScore=0;}
+  updateSpectrum(message){
+    const candidates=findRttyCandidates(message.levels,message.sampleRate,message.fftSize,{low:this.low,high:this.high,shift:this.shift,thresholdDb:6,maxCandidates:8});
+    const candidate=candidates.reduce((best,item)=>Math.abs(item.centerFrequency-this.center)<Math.abs((best?.centerFrequency??Infinity)-this.center)?item:best,null);
+    if(candidate&&Math.abs(candidate.centerFrequency-this.center)<=Math.max(70,this.shift*.35)){this.present=Math.min(12,this.present+1);this.missing=0;this.signalScore=candidate.score;}
+    else{this.present=Math.max(0,this.present-1);this.missing++;if(this.missing>=8){this.open=false;this.buffer='';this.frames=[];}}
+  }
+  frame(frame){
+    this.frames.push(frame.valid);if(this.frames.length>24)this.frames.shift();
+    const valid=this.frames.filter(Boolean).length,ratio=valid/Math.max(1,this.frames.length);
+    if(frame.valid&&frame.value){
+      if(this.open)this.post({type:'character',value:frame.value});
+      else this.buffer=(this.buffer+frame.value).slice(-32);
+    }
+    if(!this.open&&this.present>=3&&this.frames.length>=6&&ratio>=.72){this.open=true;if(this.buffer)this.post({type:'character',value:this.buffer});this.buffer='';}
+    if(this.open&&this.frames.length>=12&&ratio<.42){this.open=false;this.buffer='';}
+  }
+  status(status){
+    const ratio=this.frames.filter(Boolean).length/Math.max(1,this.frames.length),spectral=Math.min(1,this.signalScore/14),confidence=this.present?Math.min(1,spectral*.45+ratio*.55):0;
+    this.post({type:'status',...status,confidence,validation:this.open?'locked':this.present?'candidate':'idle'});
+  }
+}
+
+export class RttyProfileScout{
+  constructor(post,rate){this.post=post;this.sampleRate=rate;this.configure({});this.reset();}
+  configure(options){const rate=Number(options.sampleRate??this.sampleRate),reverse=Boolean(options.reverse??this.reverse??false),selectedBaud=Number(options.baud??this.selectedBaud??45.45),selectedShift=Number(options.shift??this.selectedShift??170),rebuild=rate!==this.sampleRate||reverse!==this.reverse||selectedBaud!==this.selectedBaud||selectedShift!==this.selectedShift;this.sampleRate=rate;this.enabled=!Boolean(options.multi);this.low=Number(options.low??this.low??0);this.high=Number(options.high??this.high??3000);this.selectedBaud=selectedBaud;this.selectedShift=selectedShift;this.reverse=reverse;if(!this.enabled||(rebuild&&this.entries?.length))this.reset();}
+  reset(){this.center=null;this.lastSeen=0;this.frames=0;this.entries=[];this.notified=null;this.ignored=null;}
+  build(center){
+    this.center=center;this.frames=0;this.entries=MULTI_PROFILES.map(profile=>{const stats={valid:0,total:0,center};const decoder=new RttyDecoder({sampleRate:this.sampleRate,baud:profile.baud,shift:profile.shift,centerFrequency:center,reverse:this.reverse,afc:true,afcRange:45,onFrame:frame=>{stats.total++;if(frame.valid)stats.valid++;if(stats.total>80){stats.total=Math.ceil(stats.total/2);stats.valid=Math.ceil(stats.valid/2);}},onStatus:status=>{stats.center=(status.markFrequency+status.spaceFrequency)/2;}});return{profile,stats,decoder};});
+  }
+  updateSpectrum(message){
+    if(!this.enabled)return;
+    const candidates=findRttyCandidates(message.levels,message.sampleRate,message.fftSize,{low:this.low,high:this.high,shift:170,thresholdDb:8,maxCandidates:4});
+    const candidate=candidates.sort((a,b)=>b.score-a.score)[0];
+    if(!candidate){if(++this.lastSeen>18)this.reset();return;}this.lastSeen=0;
+    if(this.center===null||Math.abs(this.center-candidate.centerFrequency)>70)this.build(candidate.centerFrequency);
+    if(++this.frames<18)return;
+    const ranked=this.entries.map(entry=>({...entry,quality:entry.stats.total>=8?entry.stats.valid/entry.stats.total:0})).sort((a,b)=>b.quality-a.quality),winner=ranked[0],runner=ranked[1];
+    const same=Math.abs(winner.profile.baud-this.selectedBaud)<.1&&winner.profile.shift===this.selectedShift;
+    if(!same&&winner.quality>=.78&&winner.quality-(runner?.quality??0)>=.10&&this.notified!==winner.profile.id&&this.ignored!==winner.profile.id){this.notified=winner.profile.id;this.post({type:'profile-detected',profile:winner.profile.id,label:winner.profile.label,baud:winner.profile.baud,shift:winner.profile.shift,centerFrequency:Math.round(winner.stats.center),confidence:winner.quality});}
+  }
+  process(input){if(this.enabled)for(const entry of this.entries)entry.decoder.process(input);}
+  ignore(profile){this.ignored=profile;}
+}
 
 class RttyMultiDetector{
   constructor(post,rate){this.post=post;this.sampleRate=rate;this.enabled=false;this.streams=[];this.pending=[];this.nextId=1;this.scanNumber=0;this.average=null;this.configure({});}
@@ -86,26 +134,29 @@ class RttySpectrum{
 class RttyProcessor extends AudioWorkletProcessor{
   constructor(options){
     super();this.enabled=false;this.inputRate=Number(options.processorOptions?.sampleRate||sampleRate);this.externalPcm=Boolean(options.processorOptions?.externalPcm);
+    this.gate=new RttyOutputGate(message=>this.port.postMessage(message));
     this.decoder=new RttyDecoder({sampleRate:this.inputRate,
       ...(options.processorOptions||{}),
-      onCharacter:value=>this.port.postMessage({type:'character',value}),
-      onStatus:status=>this.port.postMessage({type:'status',...status})});
+      onFrame:frame=>this.gate.frame(frame),
+      onStatus:status=>this.gate.status(status)});
     this.multi=new RttyMultiDetector(message=>this.port.postMessage(message),this.inputRate);
-    this.spectrum=new RttySpectrum((message,transfer)=>{this.multi.updateSpectrum(message);this.port.postMessage(message,transfer);},this.inputRate);
+    this.scout=new RttyProfileScout(message=>this.port.postMessage(message),this.inputRate);
+    this.spectrum=new RttySpectrum((message,transfer)=>{this.gate.updateSpectrum(message);this.multi.updateSpectrum(message);this.scout.updateSpectrum(message);this.port.postMessage(message,transfer);},this.inputRate);
     this.decoder.setEnabled(false);
     this.port.onmessage=({data})=>{
       if(data.type==='config'){
         this.inputRate=Number(data.sampleRate??this.inputRate);this.externalPcm=Boolean(data.externalPcm??this.externalPcm);
-        this.decoder.configure({...data,sampleRate:this.inputRate});this.multi.configure({...data,sampleRate:this.inputRate});this.spectrum.setSampleRate(this.inputRate);
+        this.decoder.configure({...data,sampleRate:this.inputRate});this.gate.configure(data);this.multi.configure({...data,sampleRate:this.inputRate});this.scout.configure({...data,sampleRate:this.inputRate});this.spectrum.setSampleRate(this.inputRate);
       }
       if(data.type==='enabled'){this.enabled=Boolean(data.enabled);this.decoder.setEnabled(this.enabled);}
-      if(data.type==='reset'){this.decoder.reset();this.multi.clear();}
+      if(data.type==='reset'){this.decoder.reset();this.gate.reset();this.multi.clear();this.scout.reset();}
+      if(data.type==='ignore-profile')this.scout.ignore(data.profile);
       if(data.type==='samples'&&this.enabled&&data.payload){
         const pcm=new Int16Array(data.payload),samples=new Float32Array(pcm.length);for(let index=0;index<pcm.length;index++)samples[index]=pcm[index]/32768;this.processSamples(samples);
       }
     };
   }
-  processSamples(input){this.decoder.process(input);this.multi.process(input);this.spectrum.push(input);}
+  processSamples(input){this.decoder.process(input);this.multi.process(input);this.scout.process(input);this.spectrum.push(input);}
   process(inputs,outputs){
     const input=inputs[0]?.[0],output=outputs[0]?.[0];
     if(output)output.fill(0);

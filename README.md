@@ -8,7 +8,16 @@ responsive browser interface and server-side DSP.
 The current `dev` branch is a development preview. The `main` branch is
 reserved for stable releases.
 
-## 0.5.7-dev
+## 0.5.8-dev
+
+- The single-signal RTTY decoder now gates output behind persistent tone-pair
+  detection and valid framing, buffering candidates instead of printing random
+  noise immediately.
+- With multidetection disabled, a silent profile scout checks 45.45/170,
+  50/170 and 75/170 and offers to retune the manual decoder using AFC when a
+  different stable profile is detected.
+- S-meter calibration remains planned for 0.6.0 and is not part of this
+  release.
 
 - Optional client-side RTTY multidetection scans the visible passband for up to
   eight simultaneous signals and checks the 45.45/170, 50/170 and 75/170

@@ -65,6 +65,7 @@ Grabar audio<br><button id="record">iniciar</button> <span id="record-status" ro
 <label><input id="rtty-reverse" type="checkbox"> Reverse</label><label><input id="rtty-afc" type="checkbox" checked> AFC</label>
 <label><input id="rtty-multi" type="checkbox"> Multidetección</label>
 </div>
+<div id="rtty-profile-alert" class="rtty-profile-alert" role="status" hidden><span id="rtty-profile-message"></span><button id="rtty-profile-tune" class="small" type="button">Sintonizar</button><button id="rtty-profile-ignore" class="small" type="button">Ignorar</button></div>
 <div class="rtty-waterfall-wrap"><div class="rtty-canvas-wrap"><canvas id="rtty-waterfall" width="1024" height="180" aria-label="Cascada espectral RTTY de 0 a 3000 Hz"></canvas><div id="rtty-markers" aria-hidden="true"></div><button id="rtty-audio-start" class="digital-audio-start" type="button" hidden>Iniciar audio</button></div><div class="rtty-frequency-axis" aria-hidden="true"></div></div>
 <div class="rtty-metrics"><span>MARK <output id="rtty-mark">915 Hz</output></span><span>SPACE <output id="rtty-space">1085 Hz</output></span><span>AFC <output id="rtty-afc-offset">0.0 Hz</output></span><label>Confianza <progress id="rtty-confidence" max="1" value="0"></progress></label></div>
 <div class="rtty-terminal-header"><b>Texto decodificado</b><button id="rtty-clear" class="small" type="button">Limpiar</button></div><pre id="rtty-terminal" role="log" aria-live="polite" aria-label="Texto RTTY decodificado"></pre>

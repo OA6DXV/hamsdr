@@ -54,7 +54,7 @@ export function findRttyCandidates(levels,sampleRate,fftSize,{low=0,high=3000,sh
 
 export class RttyDecoder{
   constructor(options={}){
-    this.onCharacter=options.onCharacter||(()=>{});this.onStatus=options.onStatus||(()=>{});
+    this.onCharacter=options.onCharacter||(()=>{});this.onStatus=options.onStatus||(()=>{});this.onFrame=options.onFrame||(()=>{});
     this.ita2=new Ita2Decoder();this.sampleIndex=0;this.afcOffset=0;this.enabled=true;
     this.configure(options,true);
   }
@@ -118,7 +118,7 @@ export class RttyDecoder{
           this.bitIndex++;this.nextSample+=this.samplesPerBit;
           if(this.bitIndex===5)this.state='stop';
         }else{
-          if(this.symbol){const value=this.ita2.decode(this.word);if(value)this.onCharacter(value);}
+          let value='';if(this.symbol){value=this.ita2.decode(this.word);if(value)this.onCharacter(value);}this.onFrame({valid:this.symbol,word:this.word,value,baud:this.baud,shift:this.shift});
           this.state='idle';
         }
       }

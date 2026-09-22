@@ -24,7 +24,7 @@ from opus_codec import OPUS_AVAILABLE, OpusEncoder
 from waterfall_codec import VERSION as WATERFALL_PROTOCOL_VERSION, encode as encode_waterfall, project as project_waterfall
 
 ROOT = Path(__file__).resolve().parent
-VERSION = "0.5.7-dev"
+VERSION = "0.5.8-dev"
 PROTOCOL_VERSION = 1
 MODES = {"USB": (300, 2700), "LSB": (-2700, -300), "AM": (-4000, 4000),
          "CW": (450, 950), "NFM": (-5000, 5000)}
