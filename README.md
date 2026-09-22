@@ -13,6 +13,8 @@ reserved for stable releases.
 - Client-side FT8/FT4 decoding with the bundled `mfsk-core` WebAssembly module.
 - Decoder capture windows are aligned to the 15-second FT8 or 7.5-second FT4
   UTC slot boundaries carried by the digital transport timestamps.
+- The digital panel renders a responsive 0–3 kHz FFT waterfall at about 5.9
+  rows per second, with the decoded-message table placed below it.
 - Digital operation is gated by `server.digimodes`. Entering FT8 or FT4 selects
   USB, the exclusive 12 kHz PCM `digiraw` profile and the connection-slow
   waterfall preset. Demodulation and waterfall quality remain user-selectable.

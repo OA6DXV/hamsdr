@@ -115,6 +115,10 @@ async def main():
                 await expect(page.locator('#waterfall-quality')).to_have_value('slow')
                 await expect(page.locator('#digital-panel')).to_be_visible()
                 await expect(page.locator('#digital-waterfall-message')).to_be_hidden()
+                digital_layout=await page.evaluate("""()=>{const box=id=>{const r=document.querySelector(id).getBoundingClientRect();return{w:r.width,h:r.height}};return{body:box('.digital-body'),canvas:box('#digital-waterfall'),log:box('.digital-log-wrap')}}""")
+                assert abs(digital_layout['canvas']['w']-digital_layout['body']['w'])<=2
+                assert abs(digital_layout['log']['w']-digital_layout['body']['w'])<=2
+                assert digital_layout['canvas']['h']>=140
                 await page.wait_for_timeout(300)
                 assert await page.locator('#digital-log').get_by_text('Decoder MFSK/WASM no instalado',exact=False).count()==0
                 await page.locator('[data-mode="AM"]:not([data-narrow])').click()
