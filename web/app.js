@@ -366,18 +366,20 @@ function renderRttyStreams(){
   const body=$('rtty-multi-table').tBodies[0],markers=$('rtty-markers');body.replaceChildren();markers.replaceChildren();
   const display=digitalDisplayRange();
   const streams=[...rttyStreams.values()].sort((a,b)=>a.centerFrequency-b.centerFrequency);$('rtty-multi-count').value=String(streams.length);
-  if(!streams.length){const row=document.createElement('tr'),cell=document.createElement('td');row.className='rtty-multi-empty';cell.colSpan=2;cell.textContent='Buscando transmisiones RTTY 45.45/170…';row.append(cell);body.append(row);return;}
+  if(!streams.length){const row=document.createElement('tr'),cell=document.createElement('td');row.className='rtty-multi-empty';cell.colSpan=3;cell.textContent='Buscando transmisiones RTTY 45.45/170, 50/170 y 75/170…';row.append(cell);body.append(row);return;}
   for(const stream of streams){
-    const row=document.createElement('tr'),frequencyCell=document.createElement('td'),textCell=document.createElement('td'),decoded=document.createElement('pre');
-    frequencyCell.textContent=`${stream.centerFrequency.toFixed(0)} Hz`;decoded.textContent=stream.text||'…';textCell.append(decoded);row.append(frequencyCell,textCell);body.append(row);
+    for(const profile of stream.profiles||[]){
+      const row=document.createElement('tr'),frequencyCell=document.createElement('td'),profileCell=document.createElement('td'),textCell=document.createElement('td'),decoded=document.createElement('pre');
+      frequencyCell.textContent=`${stream.centerFrequency.toFixed(0)} Hz`;profileCell.textContent=profile.label;decoded.textContent=stream.texts?.[profile.id]||'…';textCell.append(decoded);row.append(frequencyCell,profileCell,textCell);body.append(row);
+    }
     if(stream.centerFrequency>=display.minimum&&stream.centerFrequency<=display.maximum){const marker=document.createElement('div'),label=document.createElement('span');marker.className='rtty-marker';marker.style.left=`${(stream.centerFrequency-display.minimum)/(display.maximum-display.minimum)*100}%`;label.textContent=`${stream.centerFrequency.toFixed(0)}`;marker.append(label);markers.append(marker);}
   }
 }
 function updateRttyStreams(streams){
-  const next=new Map();for(const stream of streams){const previous=rttyStreams.get(stream.id);next.set(stream.id,{...stream,text:previous?.text||''});}rttyStreams=next;renderRttyStreams();
+  const next=new Map();for(const stream of streams){const previous=rttyStreams.get(stream.id);next.set(stream.id,{...stream,texts:previous?.texts||{}});}rttyStreams=next;renderRttyStreams();
 }
 function addRttyStreamCharacter(data){
-  const stream=rttyStreams.get(data.id)||{id:data.id,centerFrequency:data.centerFrequency,score:0,text:''};stream.text=(stream.text+data.value).slice(-4000);rttyStreams.set(data.id,stream);renderRttyStreams();
+  const stream=rttyStreams.get(data.id)||{id:data.id,centerFrequency:data.centerFrequency,score:0,profiles:[{id:data.profile,label:data.profileLabel}],texts:{}};stream.texts??={};stream.texts[data.profile]=((stream.texts[data.profile]||'')+data.value).slice(-4000);rttyStreams.set(data.id,stream);renderRttyStreams();
 }
 function updateRttyTitle(){
   $('rtty-title').textContent=`RTTY · ${mode} · ${(frequency/1000).toFixed(3)} kHz`;

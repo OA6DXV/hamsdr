@@ -258,6 +258,8 @@ async def main():
                 await expect(page.locator('#rtty-multi-panel')).to_be_visible()
                 await expect(page.locator('#rtty-waterfall')).to_have_attribute('data-multi','true')
                 await expect(page.locator('#rtty-multi-count')).to_have_text('0')
+                await expect(page.locator('#rtty-multi-table thead')).to_contain_text('Perfil')
+                await expect(page.locator('.rtty-multi-empty')).to_contain_text('45.45/170, 50/170 y 75/170')
                 assert 'multi=1' in page.url
                 await page.locator('#filter-wide').click()
                 await expect(page.locator('#high')).to_have_value('3100')

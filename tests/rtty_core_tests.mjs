@@ -38,6 +38,9 @@ assert.equal(RTTY_PRESETS.amateur45.baud,45.45);assert.equal(RTTY_PRESETS.amateu
 for(const options of [
   {text:'CQ CQ TEST '},
   {text:'CQ CQ TEST ',reverse:true},
+  {text:'CQ CQ TEST ',baud:50,shift:450},
+  {text:'CQ CQ TEST ',baud:75,shift:850},
+  ...[45.45,50,75].map(baud=>({text:'CQ MULTI TEST ',baud,shift:170})),
   {text:'THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG ',baud:45.4},
   {text:'THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG ',baud:45.5},
   ...[0,5,-5,15,-15,30,-30].map(frequencyOffset=>({text:'CQ CQ TEST ',frequencyOffset,noise:.03,afc:true}))

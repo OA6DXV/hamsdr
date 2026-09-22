@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import {findRttyCandidates,RttyDecoder} from './rtty-core.mjs';
 
+const MULTI_PROFILES=Object.freeze([
+  Object.freeze({id:'45',label:'45.45/170',baud:45.45,shift:170}),
+  Object.freeze({id:'50',label:'50/170',baud:50,shift:170}),
+  Object.freeze({id:'75',label:'75/170',baud:75,shift:170})
+]);
+
 class RttyMultiDetector{
   constructor(post,rate){this.post=post;this.sampleRate=rate;this.enabled=false;this.streams=[];this.pending=[];this.nextId=1;this.scanNumber=0;this.average=null;this.configure({});}
   configure(options){
@@ -9,13 +15,13 @@ class RttyMultiDetector{
     this.enabled=Boolean(options.multi??this.enabled);this.low=Number(options.low??this.low??0);this.high=Number(options.high??this.high??3000);
     this.reverse=Boolean(options.reverse??this.reverse??false);
     if(!this.enabled){if(wasEnabled)this.clear();return;}
-    for(const stream of this.streams)stream.decoder.configure({sampleRate:this.sampleRate,centerFrequency:stream.centerFrequency,reverse:this.reverse,afc:true});
+    for(const stream of this.streams)for(const entry of stream.decoders)entry.decoder.configure({sampleRate:this.sampleRate,centerFrequency:stream.centerFrequency,reverse:this.reverse,afc:true});
   }
   clear(){this.streams=[];this.pending=[];this.average=null;this.post({type:'multi-streams',streams:[]});}
   createStream(candidate){
-    const stream={id:this.nextId++,centerFrequency:candidate.centerFrequency,score:candidate.score,lastSeen:this.scanNumber,text:''};
-    stream.decoder=new RttyDecoder({sampleRate:this.sampleRate,baud:45.45,shift:170,centerFrequency:stream.centerFrequency,reverse:this.reverse,afc:true,afcRange:45,filterBandwidth:270,
-      onCharacter:value=>this.post({type:'multi-character',id:stream.id,centerFrequency:stream.centerFrequency,value})});
+    const stream={id:this.nextId++,centerFrequency:candidate.centerFrequency,score:candidate.score,lastSeen:this.scanNumber,decoders:[]};
+    stream.decoders=MULTI_PROFILES.map(profile=>({profile,decoder:new RttyDecoder({sampleRate:this.sampleRate,baud:profile.baud,shift:profile.shift,centerFrequency:stream.centerFrequency,reverse:this.reverse,afc:true,afcRange:45,filterBandwidth:Math.max(250,profile.shift+100),
+      onCharacter:value=>this.post({type:'multi-character',id:stream.id,centerFrequency:stream.centerFrequency,profile:profile.id,profileLabel:profile.label,value})})}));
     this.streams.push(stream);
   }
   updateSpectrum(message){
@@ -35,9 +41,9 @@ class RttyMultiDetector{
     }
     this.pending=this.pending.filter(item=>this.scanNumber-item.lastSeen<=9);
     this.streams=this.streams.filter(stream=>this.scanNumber-stream.lastSeen<=60);
-    this.post({type:'multi-streams',streams:this.streams.map(({id,centerFrequency,score})=>({id,centerFrequency,score}))});
+    this.post({type:'multi-streams',streams:this.streams.map(({id,centerFrequency,score})=>({id,centerFrequency,score,profiles:MULTI_PROFILES.map(({id,label})=>({id,label}))}))});
   }
-  process(input){if(this.enabled)for(const stream of this.streams)stream.decoder.process(input);}
+  process(input){if(this.enabled)for(const stream of this.streams)for(const entry of stream.decoders)entry.decoder.process(input);}
 }
 
 class RttySpectrum{

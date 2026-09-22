@@ -11,7 +11,9 @@ reserved for stable releases.
 ## 0.5.7-dev
 
 - Optional client-side RTTY multidetection scans the visible passband for up to
-  eight simultaneous 45.45 baud/170 Hz signals and decodes each independently.
+  eight simultaneous signals and checks the 45.45/170, 50/170 and 75/170
+  amateur profiles independently. Manual baud and shift controls remain
+  exclusive to the single-signal decoder.
 - RTTY uses the lossless 12 kHz `digiraw` PCM transport for playback, its
   focused waterfall and all decoders; Opus artifacts never enter the DSP path.
 - Digital demodulation uses natural passbands per mode: USB 0--3000 Hz, LSB
