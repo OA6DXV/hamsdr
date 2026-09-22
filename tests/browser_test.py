@@ -127,6 +127,24 @@ async def main():
                 await expect(page.locator('#listen')).to_have_text('Pausar audio',timeout=10000)
                 await expect(page.locator('#bandwidth')).to_have_text('3000')
                 await expect(page.locator('#filter-unit')).to_have_text('Hz')
+                await expect(page.locator('#low')).to_have_value('0')
+                await expect(page.locator('#high')).to_have_value('3000')
+                for control in ('#low','#high','#filter-narrow','#filter-wide'):
+                    await expect(page.locator(control)).to_be_enabled()
+                await page.locator('#filter-wide').click()
+                await expect(page.locator('#high')).to_have_value('3100')
+                await expect(page.locator('#bandwidth')).to_have_text('3100')
+                await expect(page.locator('#digital-waterfall')).to_have_attribute('data-frequency-range','0:3100')
+                await expect(page.locator('.digital-frequency-axis span').last).to_have_text('3100 Hz')
+                await page.locator('.filter-panel details summary').click()
+                await page.locator('#high').fill('5000')
+                await page.locator('#high').press('Tab')
+                await expect(page.locator('#bandwidth')).to_have_text('5000')
+                await expect(page.locator('#digital-waterfall')).to_have_attribute('data-frequency-range','0:5000')
+                await page.locator('#filter-wide').click()
+                await expect(page.locator('#high')).to_have_value('5000')
+                await page.locator('#high').fill('3000')
+                await page.locator('#high').press('Tab')
                 await page.locator('#digital-mute').click()
                 await expect(page.locator('#digital-mute')).to_have_attribute('aria-pressed','true')
                 await expect(page.locator('#mute')).to_be_checked()
@@ -134,7 +152,7 @@ async def main():
                 await page.locator('#mute').uncheck()
                 await expect(page.locator('#digital-mute')).to_have_attribute('aria-pressed','false')
                 assert 'mute=1' not in page.url
-                for control in ('#low','#high','#filter-narrow','#filter-wide','#squelch','#notch','#nr'):
+                for control in ('#squelch','#notch','#nr'):
                     await expect(page.locator(control)).to_be_disabled()
                 assert await page.locator('.digital-log-wrap').evaluate("element=>getComputedStyle(element).resize==='vertical'")
                 digital_layout=await page.evaluate("""()=>{const box=id=>{const r=document.querySelector(id).getBoundingClientRect();return{w:r.width,h:r.height}};return{body:box('.digital-body'),canvas:box('#digital-waterfall'),log:box('.digital-log-wrap')}}""")

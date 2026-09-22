@@ -343,9 +343,12 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((reply['mode'],reply['rate']),('FT8',12000))
         gateway=self.app[GATEWAY];ident=next(iter(gateway.clients));client=gateway.clients[ident]
         self.assertEqual(client['audio_profile'],'digiraw')
+        await ws.send_json({'type':'tune','mode':'USB','frequency':7100000,
+                            'low':0,'high':5000,'squelch':0,'notch':True,'nr':4})
+        await self.event(ws,'tuned')
         effective=gateway.settings_command(ident,client['settings']).split()
         self.assertEqual((effective[3],*map(float,effective[4:7]),*map(int,effective[7:9])),
-                         ('USB',0.0,3000.0,-150.0,0,0))
+                         ('USB',0.0,5000.0,-150.0,0,0))
         await ws.send_json({'type':'audio','enabled':True});await self.event(ws,'audio-state')
         first_digital=True
         async with asyncio.timeout(4):
@@ -370,7 +373,7 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(changed['profile'],'balanced')
         restored=gateway.settings_command(ident,client['settings']).split()
         self.assertEqual((restored[3],*map(float,restored[4:7]),*map(int,restored[7:9])),
-                         ('USB',2000.0,2700.0,0.0,1,4))
+                         ('USB',0.0,5000.0,0.0,1,4))
         await ws.send_json({'type':'audio','enabled':False});await self.event(ws,'audio-state')
         deadline=asyncio.get_running_loop().time()+1
         while asyncio.get_running_loop().time()<deadline:

@@ -127,7 +127,7 @@ function setDigitalControlsVisible(visible){
   document.querySelectorAll('[data-digital-mode],[data-digital-menu]').forEach(button=>button.hidden=!visible);
   if(!visible&&digitalMode)setDigitalMode(null);
 }
-const digitalFftSize=2048,digitalSampleRate=12000,digitalMaxFrequency=3000;
+const digitalFftSize=2048,digitalSampleRate=12000,digitalFilterMaximum=5000;
 const digitalSpectrumBuffer=new Float32Array(digitalFftSize),digitalReal=new Float64Array(digitalFftSize),digitalImag=new Float64Array(digitalFftSize);
 const digitalWindow=Float64Array.from({length:digitalFftSize},(_,index)=>.5-.5*Math.cos(2*Math.PI*index/(digitalFftSize-1)));
 let digitalSpectrumCount=0,digitalNoiseFloor=null,digitalColorCeiling=null;
@@ -143,6 +143,17 @@ function digitalPercentile(values,fraction){
   return maximum;
 }
 function smoothDigitalScale(current,target){return current===null?target:current+(target-current)*.12;}
+function updateDigitalSpectrumRange(){
+  if(!digitalMode)return;
+  const canvas=$('digital-waterfall'),next=`${low}:${high}`;
+  if(canvas.dataset.frequencyRange!==next){canvas.dataset.frequencyRange=next;resetDigitalSpectrum();}
+  canvas.setAttribute('aria-label',`Cascada espectral de audio digital de ${low} a ${high} Hz`);
+  const axis=document.querySelector('.digital-frequency-axis');axis.replaceChildren();
+  for(let index=0;index<=6;index++){
+    const value=Math.round(low+(high-low)*index/6),label=document.createElement('span');
+    label.textContent=`${value}${index===6?' Hz':''}`;axis.append(label);
+  }
+}
 function digitalSpectrumRow(){
   const size=digitalFftSize;
   for(let i=0;i<size;i++){digitalReal[i]=digitalSpectrumBuffer[i]*digitalWindow[i]/32768;digitalImag[i]=0;}
@@ -168,9 +179,9 @@ function digitalSpectrumRow(){
   const canvas=$('digital-waterfall'),g=canvas.getContext('2d'),w=canvas.width,h=canvas.height;
   if(!w||!h)return;
   g.drawImage(canvas,0,1,w,h-1,0,0,w,h-1);
-  const row=g.createImageData(w,1),maxBin=Math.floor(digitalMaxFrequency*size/digitalSampleRate),levels=new Float32Array(w);
+  const row=g.createImageData(w,1),minBin=Math.floor(low*size/digitalSampleRate),maxBin=Math.ceil(high*size/digitalSampleRate),binSpan=Math.max(1,maxBin-minBin),levels=new Float32Array(w);
   for(let x=0;x<w;x++){
-    const first=Math.floor(x*maxBin/w),last=Math.max(first+1,Math.ceil((x+1)*maxBin/w));
+    const first=minBin+Math.floor(x*binSpan/w),last=Math.min(maxBin,Math.max(first+1,minBin+Math.ceil((x+1)*binSpan/w)));
     let magnitude=0;
     for(let bin=first;bin<last;bin++)magnitude=Math.max(magnitude,Math.hypot(digitalReal[bin],digitalImag[bin])/(size*.5));
     levels[x]=20*Math.log10(magnitude+1e-8);
@@ -261,7 +272,10 @@ function setDigitalCompatibility(compatible){
   showDigitalAudioStarter();
 }
 function setDigitalDspState(active){
-  for(const id of ['low','high','filter-narrow','filter-wide','squelch','notch','nr'])$(id).disabled=active;
+  for(const id of ['squelch','notch','nr'])$(id).disabled=active;
+  const lowInput=$('low'),highInput=$('high');
+  lowInput.min=active?'0':'-6000';lowInput.max=active?'4900':'5900';lowInput.step=active?'any':'50';
+  highInput.min=active?'100':'-5900';highInput.max=active?'5000':'6000';highInput.step=active?'any':'50';
   updateSquelchControl();
 }
 function setDigitalMode(next,{autoStartAudio=true}={}){
@@ -278,7 +292,7 @@ function setDigitalMode(next,{autoStartAudio=true}={}){
     digitalLogSized=false;$('digital-log').closest('.digital-log-wrap').style.height='240px';
     setDigitalDspState(true);
     resetDigitalSpectrum();
-    mode='USB';narrow=false;[low,high]=defaults.USB;tune();
+    mode='USB';narrow=false;[low,high]=[0,3000];tune();
     $('audio-quality').querySelector('option[value="digiraw"]').hidden=false;
     audioProfile='digiraw';digitalProfilePending=true;resetAudio();showAudioProfile();
     waterfallPreference='slow';digitalWaterfallManuallyChanged=false;$('waterfall-quality').value='slow';
@@ -389,7 +403,8 @@ function controls(){
   $('mode-display').textContent=mode==='NFM'?'FM':mode;
   if(digitalMode&&!$('digital-panel').hidden)$('digital-title').textContent=`${digitalMode} · ${mode} · ${(frequency/1000).toFixed(3)} kHz`;
   $('low').value=low; $('high').value=high;
-  $('bandwidth').value=digitalMode?'3000':((high-low)/1000).toFixed(2);$('filter-unit').textContent=digitalMode?'Hz':'kHz';
+  $('bandwidth').value=digitalMode?String(Math.round((high-low)*100)/100):((high-low)/1000).toFixed(2);$('filter-unit').textContent=digitalMode?'Hz':'kHz';
+  if(digitalMode)updateDigitalSpectrumRange();
   document.querySelectorAll('[data-mode]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.mode===mode&&!!b.dataset.narrow===narrow)));
   scale.setAttribute('aria-valuenow',String(frequency/1000));
   scale.setAttribute('aria-valuetext',`${(frequency/1000).toFixed(2)} kHz, ${mode}`);
@@ -424,10 +439,15 @@ function applySharedDigitalState(){
   if(sharedDigitalApplied||!bandConfigured)return;
   sharedDigitalApplied=true;
   if(sharedMuted)setMuted(true);
-  if(sharedDigitalMode&&digimodesAvailable)setDigitalMode(sharedDigitalMode,{autoStartAudio:false});
+  if(sharedDigitalMode&&digimodesAvailable){
+    setDigitalMode(sharedDigitalMode,{autoStartAudio:false});
+    const requestedLow=Number(sharedParams.get('low')),requestedHigh=Number(sharedParams.get('high'));
+    if(sharedParams.has('low')&&sharedParams.has('high')&&Number.isFinite(requestedLow)&&Number.isFinite(requestedHigh)&&requestedLow>=0&&requestedHigh<=digitalFilterMaximum&&requestedHigh-requestedLow>=100){low=requestedLow;high=requestedHigh;tune();}
+  }
 }
 function tune(){
-  if(!Number.isFinite(frequency)||!Number.isFinite(low)||!Number.isFinite(high)||low < -6000||high > 6000||high-low<100){message('Revisa los límites del filtro (−6000 a 6000 Hz).');return;}
+  const filterValid=digitalMode?low>=0&&high<=digitalFilterMaximum:low>=-6000&&high<=6000;
+  if(!Number.isFinite(frequency)||!Number.isFinite(low)||!Number.isFinite(high)||!filterValid||high-low<100){message(digitalMode?'Revisa los límites del filtro digital (0 a 5000 Hz).':'Revisa los límites del filtro (−6000 a 6000 Hz).');return;}
   frequency=Math.round(Math.max(center-rate/2,Math.min(center+rate/2,frequency)));
   if(frequency<lower()||frequency>lower()+width()){const oldLower=lower(),oldWidth=width();viewCenter=frequency;clampView();reprojectWaterfall(oldLower,oldWidth);sendWaterfallView();}
   controls();updateSharedUrl();message();
@@ -671,14 +691,14 @@ $('copy-link').addEventListener('click',async()=>{
 });
 document.querySelectorAll('[data-step]').forEach(b=>b.addEventListener('click',()=>{frequency+=Number(b.dataset.step);tune();}));
 document.querySelectorAll('[data-fix]').forEach(b=>b.addEventListener('click',()=>{frequency=Math.round(frequency/1000)*1000;tune();}));
-document.querySelectorAll('[data-mode]').forEach(b=>b.addEventListener('click',()=>{mode=b.dataset.mode;narrow=!!b.dataset.narrow;[low,high]=(narrow?narrowDefaults:defaults)[mode];tune();}));
+document.querySelectorAll('[data-mode]').forEach(b=>b.addEventListener('click',()=>{mode=b.dataset.mode;narrow=!!b.dataset.narrow;if(!digitalMode)[low,high]=(narrow?narrowDefaults:defaults)[mode];tune();}));
 document.querySelectorAll('[data-digital-mode]').forEach(b=>b.addEventListener('click',()=>setDigitalMode(b.dataset.digitalMode)));
 function updateSquelchControl(){const active=$('squelch').checked&&!digitalMode;$('threshold').disabled=!active;$('squelch-threshold').dataset.active=String(active);$('threshold-value').value=`${String($('threshold').value).replace('-', '−')} dBFS`;}
 for(const id of ['low','high','threshold','notch','nr'])$(id).addEventListener('change',()=>{low=Number($('low').value);high=Number($('high').value);tune();});
 $('threshold').addEventListener('input',updateSquelchControl);
 $('squelch').addEventListener('change',()=>{updateSquelchControl();tune();});
-$('filter-narrow').onclick=()=>{if(high-low>200){low+=50;high-=50;tune();}};
-$('filter-wide').onclick=()=>{low=Math.max(-6000,low-50);high=Math.min(6000,high+50);tune();};
+$('filter-narrow').onclick=()=>{if(high-low>100){if(digitalMode)high-=100;else{low+=50;high-=50;}tune();}};
+$('filter-wide').onclick=()=>{if(digitalMode){if(high<digitalFilterMaximum)high=Math.min(digitalFilterMaximum,high+100);}else{low=Math.max(-6000,low-50);high=Math.min(6000,high+50);}tune();};
 $('zoom-in').addEventListener('click',()=>changeZoom(zoom*2));$('zoom-out').addEventListener('click',()=>changeZoom(zoom/2));$('full-band').addEventListener('click',()=>changeZoom(1));
 $('max-zoom').onclick=()=>changeZoom(64);
 document.querySelectorAll('[name=view]').forEach(r=>r.addEventListener('change',()=>{$('panorama').hidden=r.value==='none';}));
@@ -716,8 +736,8 @@ scale.addEventListener('pointerdown',e=>{
 });
 scale.addEventListener('pointermove',e=>{
   if(!drag)return;const rect=scale.getBoundingClientRect();const f=lower()+(e.clientX-rect.left)/rect.width*width();
-  if(drag==='low')low=Math.round(Math.max(-6000,Math.min(high-100,f-frequency+beat())));
-  else if(drag==='high')high=Math.round(Math.min(6000,Math.max(low+100,f-frequency+beat())));
+  if(drag==='low')low=Math.round(Math.max(digitalMode?0:-6000,Math.min(high-100,f-frequency+beat())));
+  else if(drag==='high')high=Math.round(Math.min(digitalMode?digitalFilterMaximum:6000,Math.max(low+100,f-frequency+beat())));
   else frequency=f;tune();
 });
 scale.addEventListener('pointerup',()=>{drag=null;});scale.addEventListener('pointercancel',()=>{drag=null;});

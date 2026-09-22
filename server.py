@@ -796,15 +796,9 @@ class Gateway:
         effective = settings
         client = self.clients.get(ident)
         if client and client.get("digital_mode") in ("FT8", "FT4"):
-            # Digital decoders need the complete 0-3 kHz baseband. Preserve the
-            # user's controls for later, but bypass their audio filter, squelch,
-            # autonotch and noise reduction in the active receiver path.
-            mode = settings["mode"]
-            low, high = ((-3000, 0) if mode == "LSB" else
-                         (-3000, 3000) if mode in ("AM", "NFM") else
-                         (0, 3000))
-            effective = {**settings, "low": low, "high": high, "squelch": -150,
-                         "notch": False, "nr": 0}
+            # Digital mode keeps the selected 0-5 kHz passband, but bypasses
+            # squelch, autonotch and noise reduction so decoding remains intact.
+            effective = {**settings, "squelch": -150, "notch": False, "nr": 0}
         # CW's displayed frequency is the RF carrier, with a 700 Hz beat note.
         offset = effective['frequency']-self.center_frequency-(700 if effective['mode']=='CW' else 0)
         return f"set {ident} {offset} {effective['mode']} {effective['low']} {effective['high']} {effective['squelch']} {int(effective.get('notch', False))} {effective.get('nr', 0)}"
@@ -1193,7 +1187,9 @@ class Gateway:
                     numbers = [new[k] for k in ("frequency", "low", "high", "squelch")]
                     if not all(math.isfinite(x) for x in numbers):
                         raise ValueError("Número inválido")
-                    if not (self.band_lower <= new["frequency"] <= self.band_upper and -6000 <= new["low"] < new["high"] <= 6000
+                    filter_valid = (0 <= new["low"] < new["high"] <= 5000 if client["digital_mode"]
+                                    else -6000 <= new["low"] < new["high"] <= 6000)
+                    if not (self.band_lower <= new["frequency"] <= self.band_upper and filter_valid
                             and new["high"]-new["low"] >= 100 and -150 <= new["squelch"] <= 0):
                         raise ValueError("Control fuera de rango")
                     client["settings"] = settings = new
