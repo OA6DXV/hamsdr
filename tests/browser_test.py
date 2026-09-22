@@ -115,6 +115,9 @@ async def main():
                 await expect(page.locator('#waterfall-quality')).to_have_value('slow')
                 await expect(page.locator('#digital-panel')).to_be_visible()
                 await expect(page.locator('#digital-waterfall-message')).to_be_hidden()
+                await expect(page.locator('#digital-progress')).to_have_attribute('max','100')
+                await expect(page.locator('#digital-progress')).to_have_js_property('value',0)
+                await expect(page.locator('#digital-download')).to_have_text('Descargar log')
                 await expect(page.locator('#digital-filter-note')).to_be_visible()
                 for control in ('#low','#high','#filter-narrow','#filter-wide','#squelch','#notch','#nr'):
                     await expect(page.locator(control)).to_be_disabled()

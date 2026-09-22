@@ -7,7 +7,7 @@ let slotSamples=180000;
 let warned=false;
 let wasmDecoder=null;
 let wasmLoadStarted=false;
-let lastStatus=0;
+let lastProgress=0;
 let slotIndex=null;
 let slotBuffer=null;
 let slotFirstSample=0;
@@ -36,14 +36,15 @@ function start(data){
   rate=data.rate||12000;
   slotSamples=mode==='FT4'?Math.round(rate*7.5):Math.round(rate*15);
   warned=false;
-  lastStatus=0;
+  lastProgress=0;
   slotIndex=null;
   slotBuffer=null;
   slotFirstSample=0;
   slotLastSample=0;
   nextAbsoluteSample=null;
   lastSequence=null;
-  postMessage({type:'status',message:`${mode} activo · esperando slot de ${slotSamples/rate} s`});
+  postMessage({type:'progress',value:0});
+  postMessage({type:'status',message:`${mode} activo · esperando sincronización`});
   loadDecoder();
 }
 
@@ -61,11 +62,13 @@ function finishSlot(){
     const timestampUs=slotIndex*slotSamples/rate*1_000_000;
     const decoded=wasmDecoder.decode_slot(mode,slotBuffer,timestampUs)||[];
     for(const result of decoded)postMessage({type:'decoded',result});
-    postMessage({type:'status',message:`${mode} · slot UTC decodificado · ${decoded.length} mensaje(s)`});
+    postMessage({type:'progress',value:100});
+    postMessage({type:'status',message:`${mode} · ${decoded.length} mensaje(s) decodificado(s)`});
   }else if(wasmDecoder){
-    postMessage({type:'status',message:`${mode} sincronizando con el siguiente slot UTC…`});
+    postMessage({type:'progress',value:0});
+    postMessage({type:'status',message:`${mode} sincronizando…`});
   }
-  lastStatus=performance.now();
+  lastProgress=performance.now();
   slotIndex=null;
   slotBuffer=null;
 }
@@ -100,10 +103,9 @@ function consume(data){
   }
   nextAbsoluteSample=absoluteSample;
   const now=performance.now();
-  if(now-lastStatus>500&&slotIndex!==null){
-    const progress=Math.floor(slotLastSample/slotSamples*100);
-    postMessage({type:'status',message:`${mode} · slot UTC · ${progress}%`});
-    lastStatus=now;
+  if(now-lastProgress>100&&slotIndex!==null){
+    postMessage({type:'progress',value:Math.floor(slotLastSample/slotSamples*100)});
+    lastProgress=now;
   }
 }
 

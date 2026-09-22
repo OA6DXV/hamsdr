@@ -185,6 +185,7 @@ function ensureDigitalWorker(){
   digitalWorker=new Worker(new URL('./digital-worker.js',location.href),{type:'module'});
   digitalWorker.onmessage=({data})=>{
     if(data.type==='status'&&digitalAudioCompatible)$('digital-state').textContent=data.message;
+    if(data.type==='progress'&&digitalAudioCompatible)setDigitalProgress(data.value);
     if(data.type==='notice'&&!digitalDecoderNotice){digitalDecoderNotice=true;addDigitalRow({utc:new Date().toISOString().slice(11,19),snr:'',dt:'',hz:'',text:data.message,placeholder:true});}
     if(data.type==='decoded')addDigitalRow(data.result);
   };
@@ -211,6 +212,7 @@ function renderDigitalRows(){
   }
   $('digital-download').disabled=!digitalRows.length;
 }
+function setDigitalProgress(value=0){$('digital-progress').value=Math.max(0,Math.min(100,Number(value)||0));}
 function setDigitalCompatibility(compatible){
   digitalAudioCompatible=compatible;
   const warning=$('digital-waterfall-message');
@@ -218,6 +220,7 @@ function setDigitalCompatibility(compatible){
   warning.textContent=compatible?'':'Perfil de audio incompatible, reinicie el modo digital';
   if(!compatible){
     stopDigitalWorker();
+    setDigitalProgress();
     $('digital-state').textContent='Perfil de audio incompatible, reinicie el modo digital';
     sendDigitalMode(null);
   }
@@ -237,6 +240,7 @@ function setDigitalMode(next){
     }
     digitalMode=selected;
     setDigitalCompatibility(true);
+    setDigitalProgress();
     setDigitalDspState(true);
     resetDigitalSpectrum();
     mode='USB';narrow=false;[low,high]=defaults.USB;tune();
@@ -256,6 +260,7 @@ function setDigitalMode(next){
     ensureDigitalWorker().postMessage({type:'start',mode:digitalMode,rate:12000,frequency,demodulation:mode});
   }else{
     stopDigitalWorker();$('digital-state').textContent='Inactivo';
+    setDigitalProgress();
   }
   sendDigitalMode();
   if(digitalMode){
@@ -511,7 +516,7 @@ function connect(){
         $('client-traffic').dataset.serverKbps=String(msg.kbps);
       }else if(msg.type==='audio-state'){
         audioEnabled=msg.enabled;if(msg.profile)audioProfile=msg.profile;showAudioProfile();showAudioState();
-        if(!audioEnabled&&digitalMode){stopDigitalWorker();$('digital-state').textContent='Recepción detenida; inicia audio para decodificar.';}
+        if(!audioEnabled&&digitalMode){stopDigitalWorker();setDigitalProgress();$('digital-state').textContent='Recepción detenida; inicia audio para decodificar.';}
       }else if(msg.type==='audio-profile'){
         audioProfile=msg.profile;resetAudio();showAudioProfile();
         if(digitalMode&&audioProfile!=='digiraw'&&digitalAudioCompatible)setDigitalCompatibility(false);
