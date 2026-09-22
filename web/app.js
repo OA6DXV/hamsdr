@@ -15,7 +15,7 @@ let bandConfigured=false,sharedTuningApplied=false,sharedDigitalApplied=false,pr
 let zoom=1, viewCenter=center, socket, retry=500, timer, tuneTimer, lastRow, view='waterfall', muted=false;
 let dynamicSpectrumBottom=null,dynamicSpectrumTop=null;
 let context, node, gain, audioStarting=false, audioEnabled=false, audioEverStarted=false, audioProfile='balanced', opusDecoder=null, opusSupportPromise=null, lastOpusSequence=null, spectrumFrames=0, audioPackets=0;
-let digimodesAvailable=!!siteConfig.digimodes,digitalMode=null,digitalWorker=null,digitalRows=[],digitalDownloadUrl=null,digitalDecoderNotice=false,digitalAudioCompatible=true,digitalPreviousAudioProfile=null,digitalPreviousWaterfallPreference=null,digitalWaterfallManuallyChanged=false,digitalLogSized=false;
+let digimodesAvailable=!!siteConfig.digimodes,digitalMode=null,digitalWorker=null,digitalRows=[],digitalDownloadUrl=null,digitalDecoderNotice=false,digitalAudioCompatible=true,digitalPreviousAudioProfile=null,digitalPreviousWaterfallPreference=null,digitalWaterfallManuallyChanged=false,digitalProfilePending=false,digitalLogSized=false;
 let spectrumHistory=[];
 let waterfallPreference='balanced',waterfallProfile='balanced',waterfallSpeed=1,drawAverage=0,lastProfileRequest=0,profileTimer,pendingRow,waterfallFrame;
 let trafficBytes=0,trafficAt=performance.now();
@@ -228,6 +228,9 @@ function sizeDigitalLog(count){
   digitalLogSized=true;
 }
 function setDigitalProgress(value=0){$('digital-progress').value=Math.max(0,Math.min(100,Number(value)||0));}
+function showDigitalAudioStarter(){
+  $('digital-audio-start').hidden=!(digitalMode&&!audioEnabled&&digitalAudioCompatible&&!audioStarting);
+}
 function setDigitalCompatibility(compatible){
   digitalAudioCompatible=compatible;
   const warning=$('digital-waterfall-message');
@@ -239,6 +242,7 @@ function setDigitalCompatibility(compatible){
     $('digital-state').textContent='Perfil de audio incompatible, reinicie el modo digital';
     sendDigitalMode(null);
   }
+  showDigitalAudioStarter();
 }
 function setDigitalDspState(active){
   for(const id of ['low','high','filter-narrow','filter-wide','squelch','notch','nr'])$(id).disabled=active;
@@ -260,7 +264,7 @@ function setDigitalMode(next,{autoStartAudio=true}={}){
     resetDigitalSpectrum();
     mode='USB';narrow=false;[low,high]=defaults.USB;tune();
     $('audio-quality').querySelector('option[value="digiraw"]').hidden=false;
-    audioProfile='digiraw';resetAudio();showAudioProfile();
+    audioProfile='digiraw';digitalProfilePending=true;resetAudio();showAudioProfile();
     waterfallPreference='slow';digitalWaterfallManuallyChanged=false;$('waterfall-quality').value='slow';
   }else{
     digitalMode=null;
@@ -286,8 +290,10 @@ function setDigitalMode(next,{autoStartAudio=true}={}){
     if(digitalPreviousAudioProfile){audioProfile=digitalPreviousAudioProfile;resetAudio();showAudioProfile();sendAudioProfile();}
     if(digitalPreviousWaterfallPreference&&!digitalWaterfallManuallyChanged){waterfallPreference=digitalPreviousWaterfallPreference;$('waterfall-quality').value=waterfallPreference;sendWaterfallPreference();}
     digitalPreviousAudioProfile=null;digitalPreviousWaterfallPreference=null;digitalWaterfallManuallyChanged=false;
+    digitalProfilePending=false;
     $('audio-quality').querySelector('option[value="digiraw"]').hidden=true;
   }
+  showDigitalAudioStarter();
   updateSharedUrl();
 }
 function handleDigitalPacket(bytes){
@@ -544,6 +550,10 @@ function connect(){
         audioEnabled=msg.enabled;if(msg.profile)audioProfile=msg.profile;showAudioProfile();showAudioState();
         if(!audioEnabled&&digitalMode){stopDigitalWorker();setDigitalProgress();$('digital-state').textContent='Recepción detenida; inicia audio para decodificar.';}
       }else if(msg.type==='audio-profile'){
+        if(digitalMode&&digitalProfilePending&&msg.profile!=='digiraw'){
+          audioProfile='digiraw';resetAudio();showAudioProfile();sendAudioProfile();return;
+        }
+        if(digitalMode&&msg.profile==='digiraw')digitalProfilePending=false;
         audioProfile=msg.profile;resetAudio();showAudioProfile();
         if(digitalMode&&audioProfile!=='digiraw'&&digitalAudioCompatible)setDigitalCompatibility(false);
       }else if(msg.type==='digital-mode'){
@@ -584,7 +594,7 @@ function updateMeter(power){
 }
 async function listen(){
   if(audioStarting||audioEnabled)return;
-  audioStarting=true;
+  audioStarting=true;showDigitalAudioStarter();
   try{
     if('audioSession'in navigator){try{navigator.audioSession.type='playback';}catch{}}
     if(!context){context=new AudioContext({latencyHint:'interactive'});}
@@ -609,13 +619,14 @@ async function listen(){
     audioEnabled=true;audioEverStarted=true;window.radioSend({type:'audio',enabled:true});showAudioState();message();
     if(digitalMode)ensureDigitalWorker().postMessage({type:'start',mode:digitalMode,rate:12000,frequency,demodulation:mode});
   }catch(error){message(error.message);$('audio-status').textContent='No se pudo iniciar el audio. Pulsa Escuchar para reintentar.';}
-  finally{audioStarting=false;}
+  finally{audioStarting=false;showDigitalAudioStarter();}
 }
 function showAudioState(){
   $('listen').textContent=audioEnabled?'Pausar audio':'Iniciar audio';$('listen').setAttribute('aria-pressed',String(audioEnabled));
   $('listen').className=audioEnabled?'audio-playing':audioEverStarted?'audio-ready':'audio-initial';
   $('audio-status-top').textContent=audioEnabled?'Audio transmitiendo':'Audio detenido';
   $('audio-status').textContent=audioEnabled?'Audio activado.':'Audio detenido; no consume ancho de banda.';
+  showDigitalAudioStarter();
 }
 async function pauseAudio(){
   if(!audioEnabled)return;audioEnabled=false;window.radioSend({type:'audio',enabled:false});resetAudio();stopDigitalWorker();stopRecording();
@@ -629,6 +640,7 @@ function setMuted(value){
   updateSharedUrl();
 }
 $('listen').addEventListener('click',()=>audioEnabled?pauseAudio():listen());
+$('digital-audio-start').addEventListener('click',()=>void listen());
 $('mute').addEventListener('change',()=>setMuted($('mute').checked));
 $('digital-mute').addEventListener('click',()=>setMuted(!muted));
 $('volume').addEventListener('input',()=>{if(gain)gain.gain.value=muted?0:10**(Number($('volume').value)/20);});

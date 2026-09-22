@@ -120,6 +120,7 @@ async def main():
                 assert 'digital=FT8' in page.url
                 await expect(page.locator('#digital-panel')).to_be_visible()
                 await expect(page.locator('#digital-waterfall-message')).to_be_hidden()
+                await expect(page.locator('#digital-audio-start')).to_be_hidden()
                 await expect(page.locator('#digital-progress')).to_have_attribute('max','100')
                 await expect(page.locator('#digital-download')).to_have_text('Descargar log')
                 assert await page.locator('#digital-log thead').text_content()=='UTCSNRDTHzMensajePaíses'
@@ -164,7 +165,13 @@ async def main():
                     await expect(page.locator('#mode-display')).to_have_text('USB')
                     await expect(page.locator('#mute')).to_be_checked()
                     await expect(page.locator('#listen')).to_have_text('Iniciar audio')
+                    await expect(page.locator('#digital-audio-start')).to_be_visible()
                     assert 'digital=FT8' in page.url and 'mute=1' in page.url
+                    await page.locator('#digital-audio-start').click()
+                    await expect(page.locator('#listen')).to_have_text('Pausar audio')
+                    await expect(page.locator('#digital-audio-start')).to_be_hidden()
+                    await page.locator('#listen').click()
+                    await expect(page.locator('#listen')).to_have_text('Iniciar audio')
                     await page.locator('#mute').uncheck()
                     await page.locator('[data-digital-mode="FT8"]').click()
                     await expect(page.locator('#digital-panel')).to_be_hidden()
