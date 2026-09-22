@@ -810,12 +810,10 @@ class Gateway:
             selected.append(history[index])
             offset += gap
         selected.reverse()
-        zoom, view_center = client["waterfall_zoom"], client["waterfall_center"]
-        span = round(self.sample_rate/zoom)
-        lower = round(view_center-span/2)
-        start = max(0, min(4095, round((lower-self.band_lower)/self.sample_rate*4096)))
-        end = max(start+1, min(4096, round((lower+span-self.band_lower)/self.sample_rate*4096)))
-        encoded = [encode_waterfall(row, profile, sequence, start, end, lower, span)
+        # Snapshots cover the complete receiver band. They are a lightweight
+        # navigation layer; live rows still use the selected high-resolution view.
+        lower, span = round(self.band_lower), round(self.sample_rate)
+        encoded = [encode_waterfall(row, profile, sequence, 0, 4096, lower, span)
                    for sequence, row in selected]
         packet = bytearray([13])
         packet.extend(struct.pack("<IH", revision, len(encoded)))

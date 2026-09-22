@@ -16,7 +16,7 @@ let zoom=1, viewCenter=center, socket, retry=500, timer, tuneTimer, lastRow, vie
 let dynamicSpectrumBottom=null,dynamicSpectrumTop=null;
 let context, node, gain, audioStarting=false, audioEnabled=false, audioEverStarted=false, audioProfile='balanced', opusDecoder=null, opusSupportPromise=null, lastOpusSequence=null, spectrumFrames=0, audioPackets=0;
 let digimodesAvailable=!!siteConfig.digimodes,digitalMode=null,digitalWorker=null,digitalRows=[],digitalDownloadUrl=null,digitalDecoderNotice=false,digitalAudioCompatible=true,digitalPreviousAudioProfile=null,digitalPreviousWaterfallPreference=null,digitalWaterfallManuallyChanged=false,digitalProfilePending=false,digitalLogSized=false;
-let spectrumHistory=[];
+let spectrumHistory=[],waterfallNavigationHistory=[];
 let waterfallPreference='balanced',waterfallProfile='balanced',waterfallSpeed=1,drawAverage=0,lastProfileRequest=0,profileTimer,pendingRow,waterfallFrame;
 let waterfallViewRevision=0,waterfallViewTimer;
 let trafficBytes=0,trafficAt=performance.now();
@@ -464,8 +464,8 @@ function tune(){
 }
 function clampView(){viewCenter=Math.max(center-rate/2+width()/2,Math.min(center+rate/2-width()/2,viewCenter));}
 function clearWaterfall(){ctx.fillStyle='#000';ctx.fillRect(0,0,canvas.width,canvas.height);}
-function redrawHistory(){
-  clearWaterfall();lastDraw=0;const rows=spectrumHistory.slice(-canvas.height);
+function redrawHistory(source=spectrumHistory){
+  clearWaterfall();lastDraw=0;const rows=source.slice(-canvas.height);
   if(isSpectrum()){if(rows.length)drawRow(rows.at(-1),true);return;}
   const w=canvas.width,h=canvas.height,image=ctx.createImageData(w,h),pixels=image.data;
   for(let pixel=3;pixel<pixels.length;pixel+=4)pixels[pixel]=255;
@@ -531,6 +531,7 @@ function drawRow(frame,replay=false){
   if($('pause').checked&&!replay)return;
   lastDraw=performance.now();
   if(!replay){spectrumHistory.push({data:data.slice(),lower:rowLower,span:rowSpan,sequence:frame.sequence});if(spectrumHistory.length>600)spectrumHistory.shift();canvas.dataset.history=String(spectrumHistory.length);}
+  if(!replay&&touchPan?.active){redrawHistory(waterfallNavigationHistory.length?waterfallNavigationHistory:spectrumHistory);return;}
   const w=canvas.width,h=canvas.height;
   if(!isSpectrum())ctx.drawImage(canvas,0,1,w,h-1,0,0,w,h-1);else clearWaterfall();
   const row=ctx.createImageData(w,1),brightness=Number($('brightness').value);
@@ -575,6 +576,7 @@ function applyWaterfallSnapshot(bytes){
     const existing=new Set(frames.map(frame=>frame.sequence));
     for(const frame of spectrumHistory){const distance=(frame.sequence-newest)>>>0;if(Number.isInteger(frame.sequence)&&distance>0&&distance<0x80000000&&!existing.has(frame.sequence))frames.push(frame);}
   }
+  waterfallNavigationHistory=frames.slice(-600);canvas.dataset.navigationRows=String(waterfallNavigationHistory.length);
   spectrumHistory=frames.slice(-600);canvas.dataset.history=String(spectrumHistory.length);canvas.dataset.historyRevision=String(revision);
   if(frames.length){canvas.dataset.historyLower=String(frames[0].lower);canvas.dataset.historySpan=String(frames[0].span);}
   redrawHistory();
@@ -767,15 +769,15 @@ function setTouchPanPosition(pan,clientX){
   const maximum=Math.min(centerMaximum-pan.startCenter,center+rate/2-pan.startFrequency);
   const delta=Math.max(minimum,Math.min(maximum,requested));
   viewCenter=pan.startCenter+delta;frequency=pan.startFrequency+delta;
-  canvas.style.transform=`translateX(${-delta/span*rect.width}px)`;drawScale();
+  canvas.dataset.navigationActive='true';redrawHistory(waterfallNavigationHistory.length?waterfallNavigationHistory:spectrumHistory);drawScale();
 }
 canvas.addEventListener('pointerdown',e=>{
   if(e.pointerType!=='touch')return;
   waterfallTouches.set(e.pointerId,{x:e.clientX,y:e.clientY});try{canvas.setPointerCapture(e.pointerId);}catch{}
-  if(waterfallTouches.size===1&&zoom>1)touchPan={id:e.pointerId,startX:e.clientX,startY:e.clientY,startCenter:viewCenter,startFrequency:frequency,zoom,active:false};
+  if(waterfallTouches.size===1&&zoom>1){touchPan={id:e.pointerId,startX:e.clientX,startY:e.clientY,startCenter:viewCenter,startFrequency:frequency,zoom,active:false};sendWaterfallView();}
   if(waterfallTouches.size===2){
     if(touchPan?.active){redrawHistory();tune();sendWaterfallView();}
-    touchPan=null;canvas.style.transform='';
+    touchPan=null;
     const p=[...waterfallTouches.values()],rect=canvas.getBoundingClientRect(),mid=(p[0].x+p[1].x)/2;
     pinch={distance:Math.max(1,Math.hypot(p[0].x-p[1].x,p[0].y-p[1].y)),zoom,anchor:lower()+(mid-rect.left)/rect.width*width(),fraction:(mid-rect.left)/rect.width};suppressWaterfallClick=true;
   }
@@ -792,7 +794,7 @@ canvas.addEventListener('pointermove',e=>{
 function endWaterfallTouch(e){
   const finishedPinch=pinch&&waterfallTouches.size===2?pinch:null,finishedPan=touchPan?.id===e.pointerId?touchPan:null;
   waterfallTouches.delete(e.pointerId);
-  if(finishedPan){touchPan=null;canvas.style.transform='';if(finishedPan.active){redrawHistory();tune();sendWaterfallView();}}
+  if(finishedPan){touchPan=null;delete canvas.dataset.navigationActive;if(finishedPan.active){redrawHistory(waterfallNavigationHistory.length?waterfallNavigationHistory:spectrumHistory);tune();sendWaterfallView();}}
   if(waterfallTouches.size<2){pinch=null;canvas.style.transform='';canvas.style.transformOrigin='';if(finishedPinch?.next)changeZoom(finishedPinch.next,finishedPinch.anchor,finishedPinch.fraction);}
 }
 canvas.addEventListener('pointerup',endWaterfallTouch);canvas.addEventListener('pointercancel',endWaterfallTouch);

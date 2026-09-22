@@ -255,14 +255,17 @@ async def main():
             assert zoom_block_ms<100,f'zoom blocked the browser main thread for {zoom_block_ms:.1f} ms'
             await expect(page.locator('#zoom-label')).to_have_text('2×')
             await expect(page.locator('#waterfall')).to_have_attribute('data-span','512000')
-            await expect(page.locator('#waterfall')).to_have_attribute('data-history-span','512000')
+            await expect(page.locator('#waterfall')).to_have_attribute('data-history-span','1024000')
             history_after=int(await page.locator('#waterfall').get_attribute('data-history'))
             assert history_before>0 and history_after>0,'zoom failed to restore waterfall history'
             if viewport['width']==390:
                 before_pan=await page.locator('#scale').evaluate("e=>({frequency:Number(e.dataset.frequency),center:Number(e.dataset.viewCenter)})")
                 await page.locator('#waterfall').dispatch_event('pointerdown',{'pointerId':10,'pointerType':'touch','clientX':160,'clientY':100})
                 await page.locator('#waterfall').dispatch_event('pointermove',{'pointerId':10,'pointerType':'touch','clientX':220,'clientY':102})
+                await expect(page.locator('#waterfall')).to_have_attribute('data-navigation-active','true')
+                assert int(await page.locator('#waterfall').get_attribute('data-navigation-rows'))>0
                 await page.locator('#waterfall').dispatch_event('pointerup',{'pointerId':10,'pointerType':'touch','clientX':220,'clientY':102})
+                await expect(page.locator('#waterfall')).not_to_have_attribute('data-navigation-active','true')
                 after_pan=await page.locator('#scale').evaluate("e=>({frequency:Number(e.dataset.frequency),center:Number(e.dataset.viewCenter)})")
                 assert after_pan['frequency']<before_pan['frequency'],'right swipe did not move to a lower frequency'
                 assert abs((after_pan['frequency']-before_pan['frequency'])-(after_pan['center']-before_pan['center']))<=2,'tuning marker moved relative to the waterfall view'

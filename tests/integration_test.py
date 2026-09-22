@@ -316,8 +316,8 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
             length=struct.unpack_from('<I',packet,offset)[0];offset+=4
             rows.append(decode(packet[offset:offset+length]));offset+=length
         self.assertEqual(offset,len(packet))
-        self.assertTrue(all(row[2]==gateway.center_frequency-gateway.sample_rate//8 for row in rows))
-        self.assertTrue(all(row[3]==gateway.sample_rate//4 for row in rows))
+        self.assertTrue(all(row[2]==gateway.band_lower for row in rows))
+        self.assertTrue(all(row[3]==gateway.sample_rate for row in rows))
         self.assertTrue(all(max(row[4])==255 for row in rows))
         await ws.send_json({'type':'waterfall-view','zoom':4,'center':gateway.center_frequency,
                             'revision':78,'rows':601})
