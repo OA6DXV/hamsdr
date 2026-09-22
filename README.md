@@ -8,7 +8,7 @@ responsive browser interface and server-side DSP.
 The current `dev` branch is a development preview. The `main` branch is
 reserved for stable releases.
 
-## 0.5.2-dev
+## 0.5.3-dev
 
 - Decoded FT8/FT4 messages now resolve transmitter and recipient callsigns
   locally to their DXCC entities using the bundled, compressed Big CTY prefix

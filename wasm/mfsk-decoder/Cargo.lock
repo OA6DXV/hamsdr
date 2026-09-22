@@ -92,7 +92,7 @@ dependencies = [
 
 [[package]]
 name = "hamsdr-mfsk-decoder"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "js-sys",
  "mfsk-core",
