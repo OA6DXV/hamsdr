@@ -170,6 +170,11 @@ async def main():
                     assert mobile_log['table']>=760
                     assert mobile_log['message']>=260
                     assert mobile_log['whiteSpace']=='nowrap'
+                if viewport['width']<=650:
+                    mobile_controls=await page.evaluate("""()=>{const rect=id=>{const r=document.querySelector(id).getBoundingClientRect();return{x:r.x,y:r.y,w:r.width,h:r.height}};return{autoclear:rect('#digital-autoclear').parentElement.getBoundingClientRect().toJSON(),mute:rect('#digital-mute'),download:rect('#digital-download'),clear:rect('#digital-clear'),progress:rect('#digital-progress')}}""")
+                    assert mobile_controls['autoclear']['y']<mobile_controls['mute']['y']
+                    assert max(mobile_controls[name]['y'] for name in ('mute','download','clear'))-min(mobile_controls[name]['y'] for name in ('mute','download','clear'))<=2
+                    assert mobile_controls['progress']['y']>mobile_controls['mute']['y']
                 await page.wait_for_timeout(300)
                 await expect(page.locator('#digital-waterfall')).to_have_attribute('data-color-mode','adaptive')
                 await expect(page.locator('#digital-waterfall')).to_have_attribute('data-noise-floor',re.compile(r'^-?[0-9]+\.[0-9]$'))
