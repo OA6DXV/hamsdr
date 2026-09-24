@@ -35,12 +35,12 @@
     const noiseDbfs=percentile(noiseSamples,.5);
     const strongDbfs=Math.max(noiseDbfs+1,percentile(strongSamples,.9));
     const dynamicRange=strongDbfs-noiseDbfs;
-    // The measured noise floor is the S1 reference. Every following S-unit
+    // The measured noise floor is the S3 reference. Every following S-unit
     // remains six dB above it, so the display keeps a stable radio-style scale.
-    const noiseS=1;
+    const noiseS=3;
     return{noiseDbfs,strongDbfs,noiseS,dynamicRange};
   }
-  function sUnits(power,calibration){return 1+(power-calibration.noiseDbfs)/6;}
+  function sUnits(power,calibration){return 3+(power-calibration.noiseDbfs)/6;}
   function displayPosition(power,calibration){
     if(!calibration)return clamp((power+120)/120*7,0,7);
     const units=sUnits(power,calibration);

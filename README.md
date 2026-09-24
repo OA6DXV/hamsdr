@@ -14,7 +14,7 @@ reserved for stable releases.
   waterfall data without starting audio or changing receiver DSP.
 - Robust temporal and spectral percentiles estimate the noise floor and a
   strong-signal reference while rejecting isolated FFT spikes and center-DC.
-- The measured noise floor is always displayed as S1; each subsequent S-unit
+- The measured noise floor is always displayed as S3; each subsequent S-unit
   is six dB above that floor.
 - Calibrations persist locally per receiver band. Raw power and peak readings
   remain available in dBFS; only the S-scale presentation is adjusted.
