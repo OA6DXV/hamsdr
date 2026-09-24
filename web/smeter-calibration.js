@@ -40,7 +40,7 @@
     const noiseS=1;
     return{noiseDbfs,strongDbfs,noiseS,dynamicRange};
   }
-  function sUnits(power,calibration){return calibration.noiseS+(power-calibration.noiseDbfs)/6;}
+  function sUnits(power,calibration){return 1+(power-calibration.noiseDbfs)/6;}
   function displayPosition(power,calibration){
     if(!calibration)return clamp((power+120)/120*7,0,7);
     const units=sUnits(power,calibration);
