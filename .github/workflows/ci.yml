@@ -35,6 +35,7 @@ jobs:
           .venv/bin/python tests/history_tests.py -v
           .venv/bin/python tests/waterfall_codec_tests.py -v
           .venv/bin/python tests/tls_tests.py -v
+          .venv/bin/python tests/smeter_calibration_tests.py -v
       - name: Desktop and mobile browser
         run: |
           .venv/bin/python server.py --demo --port 18094 --database /tmp/hamsdr-ci.sqlite3 &

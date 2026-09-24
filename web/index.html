@@ -5,7 +5,7 @@
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#c0c0c0">
 <title>HamSDR · Preview</title>
 <link id="site-icon" rel="icon"><link id="site-touch-icon" rel="apple-touch-icon">
-<link rel="stylesheet" href="./style.css"><link rel="stylesheet" href="./zoom.css"><script src="./site-config.js" defer></script><script src="./site.js" defer></script><script src="./palette.js" defer></script><script src="./waterfall-codec.js" defer></script><script src="./classic-audio.js" defer></script><script src="./community.js" defer></script><script src="./app.js" defer></script>
+<link rel="stylesheet" href="./style.css"><link rel="stylesheet" href="./zoom.css"><script src="./site-config.js" defer></script><script src="./site.js" defer></script><script src="./palette.js" defer></script><script src="./waterfall-codec.js" defer></script><script src="./smeter-calibration.js" defer></script><script src="./classic-audio.js" defer></script><script src="./community.js" defer></script><script src="./app.js" defer></script>
 </head>
 <body><main>
 <header><h1><img id="site-logo" class="flag" width="148" height="84" alt=""><span id="site-name">HamSDR</span></h1>
@@ -39,8 +39,8 @@
 <label>Gráfico: <select id="wfmode"><option value="spectrum-fixed">espectro fijo</option><option value="spectrum-dynamic">espectro dinámico</option><option value="waterfall" selected>cascada</option><option value="weak">señales débiles</option><option value="strong">señales fuertes</option></select></label>
 <label class="brightness-control">Brillo <input type="range" id="brightness" min="-30" max="30" value="0"></label><button id="pause" class="waterfall-pause" type="button" aria-pressed="false">Detener cascada</button></section>
 <section class="ctl signal-panel" aria-label="Señal y volumen">
-<div class="smeter"><meter id="meter" min="-120" max="0" value="-120" aria-label="Nivel de señal"></meter><span id="peak-bar"></span><div class="meter-labels"><span>S1</span><span>S3</span><span>S5</span><span>S7</span><span>S9</span><span>+20</span><span>+40</span><span>+60</span></div></div>
-<output id="power">— dBFS</output>; peak <output id="peak">— dBFS</output><small class="meter-note">Escala S orientativa, sin calibración RF.</small><hr>
+<div class="smeter"><meter id="meter" min="0" max="7" value="0" aria-label="Nivel de señal"></meter><span id="peak-bar"></span><div class="meter-labels"><span>S1</span><span>S3</span><span>S5</span><span>S7</span><span>S9</span><span>+20</span><span>+40</span><span>+60</span></div></div>
+<div class="signal-reading-line"><button id="calibrate-smeter" class="small" type="button" disabled>Calibrar</button><span><output id="power">— dBFS</output>; peak <output id="peak">— dBFS</output></span></div><small id="smeter-calibration-status" class="meter-note" role="status">Escala S relativa sin calibrar.</small><hr>
 <label>Volumen: <input id="volume" type="range" min="-40" max="6" step="1" value="-7"></label> <label><input id="mute" type="checkbox" aria-pressed="false"> mute</label><hr>
 <label>Gráfico de señal: <select id="sgraphchoice"><option value="0">ninguno</option><option value="1">rápido</option><option value="10">lento</option><option value="100">muy lento</option></select></label><canvas id="sgraph" width="260" height="90" hidden aria-label="Historial de señal"></canvas><hr>
 <div class="dsp-control"><b>DSP reducción de ruido:</b> <select id="nr" aria-label="Nivel de reducción de ruido"><option value="0">Apagado</option><option value="1">Bajo</option><option value="2">Medio</option><option value="3">Alto</option><option value="4">Muy Alto</option></select></div></section>

@@ -90,6 +90,17 @@ async def main():
             assert await page.locator('#speed-high').evaluate('option=>option.disabled&&option.hidden')
             await expect(page.locator('#send-chat')).to_be_enabled()
             await expect(page.locator('#waterfall')).to_have_attribute('data-frames',re.compile(r'^[1-9][0-9]+$'))
+            await expect(page.locator('#calibrate-smeter')).to_be_visible()
+            meter_layout=await page.evaluate("""()=>{const button=document.querySelector('#calibrate-smeter').getBoundingClientRect(),power=document.querySelector('.signal-reading-line>span').getBoundingClientRect(),meter=document.querySelector('#meter');return{buttonX:button.x,buttonY:button.y,powerX:power.x,powerY:power.y,min:meter.min,max:meter.max}}""")
+            assert meter_layout['buttonX']<meter_layout['powerX'] and abs(meter_layout['buttonY']-meter_layout['powerY'])<12
+            assert meter_layout['min']==0 and meter_layout['max']==7
+            if viewport['width']==768:
+                await page.locator('#calibrate-smeter').click()
+                await expect(page.locator('#calibrate-smeter')).to_contain_text('Calibrando')
+                await expect(page.locator('#smeter-calibration-status')).to_contain_text('Calibrado',timeout=18000)
+                assert await page.locator('.signal-panel').get_attribute('data-calibrated')=='true'
+                assert await page.evaluate("Object.keys(localStorage).some(key=>key.startsWith('hamsdr-smeter:v1:'))")
+                assert 'dBFS' in await page.locator('#power').text_content()
             await expect(page.locator('#waterfall')).to_have_attribute('data-speed','1')
             await page.locator('#wfspeed').select_option('2')
             await expect(page.locator('#waterfall')).to_have_attribute('data-speed','2')

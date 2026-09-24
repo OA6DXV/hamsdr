@@ -8,6 +8,15 @@ responsive browser interface and server-side DSP.
 The current `dev` branch is a development preview. The `main` branch is
 reserved for stable releases.
 
+## 0.6.0-dev
+
+- The browser can calibrate its relative S-meter from 15 seconds of live
+  waterfall data without starting audio or changing receiver DSP.
+- Robust temporal and spectral percentiles estimate the noise floor and a
+  strong-signal reference while rejecting isolated FFT spikes and center-DC.
+- Calibrations persist locally per receiver band. Raw power and peak readings
+  remain available in dBFS; only the S-scale presentation is adjusted.
+
 ## 0.5.9-dev
 
 - The single-signal RTTY decoder now gates output behind persistent tone-pair
@@ -251,6 +260,7 @@ only for controlled diagnostics.
 .venv/bin/python tests/opus_codec_tests.py -v
 .venv/bin/python tests/history_tests.py -v
 .venv/bin/python tests/waterfall_codec_tests.py -v
+.venv/bin/python tests/smeter_calibration_tests.py -v
 .venv/bin/pip install playwright==1.62.0
 .venv/bin/playwright install --with-deps chromium
 # Start a separate demo server on port 18094 first.

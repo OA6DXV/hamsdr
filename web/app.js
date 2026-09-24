@@ -28,6 +28,8 @@ let waterfallPreference='balanced',waterfallProfile='balanced',waterfallSpeed=1,
 let waterfallViewRevision=0,waterfallViewTimer;
 let trafficBytes=0,trafficAt=performance.now();
 let lastWaterfallSequence=null,lastWaterfallAt=0,socketOpenedAt=0;
+const smeterCalibrationDuration=15000,smeterEngine=window.SMeterCalibration;
+let smeterCalibration=null,smeterCalibrationRun=null,smeterCalibrationTimer=null;
 let memories=[];
 try {
   const saved=JSON.parse(localStorage.getItem('hamsdr-memories')||'[]');
@@ -47,6 +49,61 @@ const beat=()=>mode==='CW'?700:0;
 function waterfallFps(){if(waterfallSpeed==='high')return 11.71875;return(waterfallProfile==='slow'?5:7.8125)/waterfallSpeed;}
 function waterfallSourceGap(){if(waterfallSpeed==='high')return 4/3;return(waterfallProfile==='slow'?25/8:2)*waterfallSpeed;}
 function message(text=''){ $('message').textContent=text; }
+function smeterStorageKey(){
+  return`hamsdr-smeter:v1:${location.host}:${Math.round(center)}:${Math.round(rate)}`;
+}
+function validSmeterCalibration(value){
+  return value&&Number.isFinite(value.noiseDbfs)&&Number.isFinite(value.strongDbfs)&&
+    Number.isFinite(value.noiseS)&&value.noiseS>=1&&value.noiseS<=7&&value.strongDbfs>value.noiseDbfs;
+}
+function showSmeterCalibration(){
+  const panel=document.querySelector('.signal-panel'),button=$('calibrate-smeter'),status=$('smeter-calibration-status');
+  panel.dataset.calibrating=String(!!smeterCalibrationRun);panel.dataset.calibrated=String(!!smeterCalibration);
+  if(smeterCalibrationRun)return;
+  button.disabled=!bandConfigured;button.textContent='Calibrar';
+  status.textContent=smeterCalibration?
+    `Calibrado · piso ${smeterCalibration.noiseDbfs.toFixed(1)} dBFS = S${smeterCalibration.noiseS} · referencia ${smeterCalibration.strongDbfs.toFixed(1)} dBFS.`:
+    'Escala S relativa sin calibrar.';
+}
+function loadSmeterCalibration(){
+  smeterCalibration=null;
+  try{
+    const saved=JSON.parse(localStorage.getItem(smeterStorageKey())||'null');
+    if(validSmeterCalibration(saved))smeterCalibration=saved;
+  }catch{}
+  showSmeterCalibration();
+}
+function finishSmeterCalibration(){
+  const run=smeterCalibrationRun;if(!run)return;
+  clearInterval(smeterCalibrationTimer);smeterCalibrationTimer=null;smeterCalibrationRun=null;
+  const result=smeterEngine.finalize(run.noiseSamples,run.strongSamples);
+  if(!result){
+    showSmeterCalibration();
+    $('smeter-calibration-status').textContent='No hubo suficientes tramas; comprueba la cascada e inténtalo de nuevo.';
+    return;
+  }
+  smeterCalibration={...result,center:Math.round(center),sampleRate:Math.round(rate),created:new Date().toISOString()};
+  try{localStorage.setItem(smeterStorageKey(),JSON.stringify(smeterCalibration));}catch{}
+  peakPower=-120;lastPeak=0;showSmeterCalibration();
+}
+function updateSmeterCountdown(){
+  if(!smeterCalibrationRun)return;
+  const remaining=Math.max(0,Math.ceil((smeterCalibrationRun.ends-performance.now())/1000));
+  $('calibrate-smeter').textContent=`Calibrando… ${remaining} s`;
+  $('smeter-calibration-status').textContent=`Midiendo piso de ruido y señales de la cascada · ${smeterCalibrationRun.noiseSamples.length} muestras.`;
+  if(!remaining)finishSmeterCalibration();
+}
+function startSmeterCalibration(){
+  if(!bandConfigured||smeterCalibrationRun)return;
+  const now=performance.now();smeterCalibrationRun={ends:now+smeterCalibrationDuration,noiseSamples:[],strongSamples:[]};
+  const button=$('calibrate-smeter');button.disabled=true;document.querySelector('.signal-panel').dataset.calibrating='true';
+  updateSmeterCountdown();smeterCalibrationTimer=setInterval(updateSmeterCountdown,250);
+}
+function collectSmeterCalibrationFrame(data,rowLower,rowSpan){
+  if(!smeterCalibrationRun)return;
+  const sample=smeterEngine.frameStatistics(data,rowLower,rowSpan,center);if(!sample)return;
+  smeterCalibrationRun.noiseSamples.push(sample.noiseDbfs);smeterCalibrationRun.strongSamples.push(sample.strongDbfs);
+}
 function applyResourcePolicy(policy){
   if(policy!==undefined)currentResourcePolicy=policy;
   policy=currentResourcePolicy;
@@ -643,6 +700,7 @@ window.addEventListener('radio-event',({detail})=>{if(detail.type==='presence'){
 function drawRow(frame,replay=false){
   const drawStarted=performance.now(),data=frame.data||frame,rowLower=frame.lower??center-rate/2,rowSpan=frame.span??rate;
   lastRow=frame;if(!replay){++spectrumFrames;canvas.dataset.frames=String(spectrumFrames);}
+  if(!replay)collectSmeterCalibrationFrame(data,rowLower,rowSpan);
   if($('pause').getAttribute('aria-pressed')==='true'&&!replay)return;
   lastDraw=performance.now();
   if(!replay){spectrumHistory.push({data:data.slice(),lower:rowLower,span:rowSpan,sequence:frame.sequence});if(spectrumHistory.length>600)spectrumHistory.shift();canvas.dataset.history=String(spectrumHistory.length);}
@@ -716,6 +774,7 @@ function connect(){
         if(!bandConfigured){
           frequency=Number.isFinite(msg.initial_frequency)?msg.initial_frequency:Math.round(center/1000)*1000;
           viewCenter=center;bandConfigured=true;
+          loadSmeterCalibration();
           const minimum=(center-rate/2)/1000,maximum=(center+rate/2)/1000;
           $('frequency').min=String(minimum);$('frequency').max=String(maximum);
           scale.setAttribute('aria-valuemin',String(minimum));scale.setAttribute('aria-valuemax',String(maximum));
@@ -777,9 +836,12 @@ function connect(){
 }
 window.radioSend=data=>{if(socket?.readyState!==WebSocket.OPEN)return false;socket.send(JSON.stringify(data));return true;};
 function updateMeter(power){
-  const now=performance.now();$('meter').value=power;$('power').value=`${power.toFixed(1)} dBFS`;
+  if(!Number.isFinite(power))return;
+  const now=performance.now(),meter=$('meter'),position=smeterEngine.displayPosition(power,smeterCalibration);
+  meter.value=position;meter.setAttribute('aria-valuetext',`${smeterEngine.formatS(power,smeterCalibration)}, ${power.toFixed(1)} dBFS`);$('power').value=`${power.toFixed(1)} dBFS`;
   if(power>peakPower||now-lastPeak>2000){peakPower=power;lastPeak=now;}
-  $('peak').value=`${peakPower.toFixed(1)} dBFS`;$('peak-bar').style.left=`${Math.max(1,Math.min(98,(peakPower+120)/120*100))}%`;
+  const peakPosition=smeterEngine.displayPosition(peakPower,smeterCalibration);
+  $('peak').value=`${peakPower.toFixed(1)} dBFS`;$('peak-bar').style.left=`${Math.max(1,Math.min(98,peakPosition/7*100))}%`;
   const speed=Number($('sgraphchoice').value),c=$('sgraph');c.hidden=!speed;
   if(speed&&now-lastGraph>=speed*100){
     lastGraph=now;const g=c.getContext('2d');g.drawImage(c,1,0,c.width-1,c.height,0,0,c.width-1,c.height);
@@ -837,6 +899,7 @@ function setMuted(value){
   updateSharedUrl();
 }
 $('listen').addEventListener('click',()=>audioEnabled?pauseAudio():listen());
+$('calibrate-smeter').addEventListener('click',startSmeterCalibration);
 $('digital-audio-start').addEventListener('click',()=>void listen());
 $('mute').addEventListener('change',()=>setMuted($('mute').checked));
 $('digital-mute').addEventListener('click',()=>setMuted(!muted));
@@ -959,7 +1022,7 @@ $('save').addEventListener('click',()=>{if(memories.length>=30){message('Máximo
 function recall(){const m=memories[Number($('memories').value)];if($('memories').value===''||!m||!defaults[m.mode])return;({frequency,mode,low,high}=m);narrow=!!m.narrow;$('memory-name').value=m.name;tune();}
 $('memories').addEventListener('change',recall);$('recall').onclick=recall;
 $('delete').addEventListener('click',()=>{if($('memories').value==='')return;memories.splice(Number($('memories').value),1);storeMemories();});
-window.addEventListener('pagehide',()=>{stopRecording();clearTimeout(timer);socket.onclose=null;socket.close();});
+window.addEventListener('pagehide',()=>{stopRecording();clearTimeout(timer);clearInterval(smeterCalibrationTimer);socket.onclose=null;socket.close();});
 window.addEventListener('pageshow',e=>{if(e.persisted)connect();});
 new ResizeObserver(()=>{const available=Math.max(1,Math.round($('panorama').getBoundingClientRect().width));if(canvas.width!==available){canvas.width=available;redrawHistory();}scale.width=available;drawScale();clearTimeout(profileTimer);profileTimer=setTimeout(()=>{if(waterfallPreference==='auto')sendWaterfallPreference();},500);}).observe($('panorama'));
 const digitalCanvas=$('digital-waterfall');
