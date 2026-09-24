@@ -4,19 +4,13 @@ await import('../web/smeter-calibration.js');
 
 const engine=globalThis.SMeterCalibration;
 assert(engine,'calibration engine exported');
-const row=new Uint8Array(1024).fill(100);
-for(let index=300;index<308;index++)row[index]=200;
-const frame=engine.frameStatistics(row,6588500,1024000,7100500);
-assert(frame,'valid waterfall frame');
-assert(Math.abs(frame.noiseDbfs-(-72.94))<.1,`noise percentile ${frame.noiseDbfs}`);
-assert(Math.abs(frame.strongDbfs-(-25.88))<.1,`signal percentile ${frame.strongDbfs}`);
-
-const noises=Array.from({length:40},(_,index)=>frame.noiseDbfs+(index%3-1)*.2);
-const signals=Array.from({length:40},(_,index)=>frame.strongDbfs+(index%5-2)*.3);
-const calibration=engine.finalize(noises,signals);
+const samples=Array.from({length:80},(_,index)=>-50+(index%5-2)*.2);
+samples.push(...Array.from({length:12},(_,index)=>-25+(index%3-1)*.3));
+const calibration=engine.finalizePower(samples);
 assert(calibration,'enough samples produce a calibration');
-assert(calibration.noiseS>=1&&calibration.noiseS<=7,'noise floor is capped at S7');
-assert.equal(engine.finalize(noises.slice(0,10),signals.slice(0,10)),null,'short captures are rejected');
+assert.equal(calibration.source,'channel-power','calibration uses tuned channel power');
+assert(Math.abs(calibration.noiseDbfs-(-50))<.5,`channel noise percentile ${calibration.noiseDbfs}`);
+assert.equal(engine.finalizePower(samples.slice(0,10)),null,'short captures are rejected');
 assert(engine.displayPosition(calibration.strongDbfs,calibration)>=3.8,'reference signal maps near S9');
 assert(engine.displayPosition(-200,calibration)===0,'low levels clamp to meter start');
 assert(engine.displayPosition(100,calibration)===7,'high levels clamp to meter end');

@@ -50,10 +50,10 @@ function waterfallFps(){if(waterfallSpeed==='high')return 11.71875;return(waterf
 function waterfallSourceGap(){if(waterfallSpeed==='high')return 4/3;return(waterfallProfile==='slow'?25/8:2)*waterfallSpeed;}
 function message(text=''){ $('message').textContent=text; }
 function smeterStorageKey(){
-  return`hamsdr-smeter:v1:${location.host}:${Math.round(center)}:${Math.round(rate)}`;
+  return`hamsdr-smeter:v2:${location.host}:${Math.round(center)}:${Math.round(rate)}:${mode}:${low}:${high}`;
 }
 function validSmeterCalibration(value){
-  return value&&Number.isFinite(value.noiseDbfs)&&Number.isFinite(value.strongDbfs)&&
+  return value&&value.source==='channel-power'&&Number.isFinite(value.noiseDbfs)&&Number.isFinite(value.strongDbfs)&&
     Number.isFinite(value.noiseS)&&value.noiseS>=1&&value.noiseS<=7&&value.strongDbfs>value.noiseDbfs;
 }
 function showSmeterCalibration(){
@@ -62,7 +62,7 @@ function showSmeterCalibration(){
   if(smeterCalibrationRun)return;
   button.disabled=!bandConfigured;button.textContent=smeterCalibration?'Restablecer':'Calibrar';
   status.textContent=smeterCalibration?
-    `Calibrado · piso ${smeterCalibration.noiseDbfs.toFixed(1)} dBFS = S${smeterCalibration.noiseS} · referencia ${smeterCalibration.strongDbfs.toFixed(1)} dBFS.`:
+    `Calibrado · piso del canal ${smeterCalibration.noiseDbfs.toFixed(1)} dBFS = S${smeterCalibration.noiseS} · referencia ${smeterCalibration.strongDbfs.toFixed(1)} dBFS.`:
     'Escala S relativa sin calibrar.';
 }
 function resetSmeterCalibration(){
@@ -73,17 +73,14 @@ function loadSmeterCalibration(){
   smeterCalibration=null;
   try{
     const saved=JSON.parse(localStorage.getItem(smeterStorageKey())||'null');
-    if(validSmeterCalibration(saved)){
-      saved.noiseS=1;smeterCalibration=saved;
-      localStorage.setItem(smeterStorageKey(),JSON.stringify(saved));
-    }
+    if(validSmeterCalibration(saved))smeterCalibration=saved;
   }catch{}
   showSmeterCalibration();
 }
 function finishSmeterCalibration(){
   const run=smeterCalibrationRun;if(!run)return;
   clearInterval(smeterCalibrationTimer);smeterCalibrationTimer=null;smeterCalibrationRun=null;
-  const result=smeterEngine.finalize(run.noiseSamples,run.strongSamples);
+  const result=smeterEngine.finalizePower(run.powerSamples);
   if(!result){
     showSmeterCalibration();
     $('smeter-calibration-status').textContent='No hubo suficientes tramas; comprueba la cascada e inténtalo de nuevo.';
@@ -97,19 +94,23 @@ function updateSmeterCountdown(){
   if(!smeterCalibrationRun)return;
   const remaining=Math.max(0,Math.ceil((smeterCalibrationRun.ends-performance.now())/1000));
   $('calibrate-smeter').textContent=`Calibrando… ${remaining} s`;
-  $('smeter-calibration-status').textContent=`Midiendo piso de ruido y señales de la cascada · ${smeterCalibrationRun.noiseSamples.length} muestras.`;
+  $('smeter-calibration-status').textContent=`Midiendo el nivel del canal sintonizado · ${smeterCalibrationRun.powerSamples.length} muestras.`;
   if(!remaining)finishSmeterCalibration();
 }
 function startSmeterCalibration(){
   if(!bandConfigured||smeterCalibrationRun)return;
-  const now=performance.now();smeterCalibrationRun={ends:now+smeterCalibrationDuration,noiseSamples:[],strongSamples:[]};
+  const now=performance.now();smeterCalibrationRun={ends:now+smeterCalibrationDuration,powerSamples:[]};
   const button=$('calibrate-smeter');button.disabled=true;document.querySelector('.signal-panel').dataset.calibrating='true';
   updateSmeterCountdown();smeterCalibrationTimer=setInterval(updateSmeterCountdown,250);
 }
-function collectSmeterCalibrationFrame(data,rowLower,rowSpan){
+function cancelSmeterCalibration(){
   if(!smeterCalibrationRun)return;
-  const sample=smeterEngine.frameStatistics(data,rowLower,rowSpan,center);if(!sample)return;
-  smeterCalibrationRun.noiseSamples.push(sample.noiseDbfs);smeterCalibrationRun.strongSamples.push(sample.strongDbfs);
+  clearInterval(smeterCalibrationTimer);smeterCalibrationTimer=null;smeterCalibrationRun=null;
+  showSmeterCalibration();$('smeter-calibration-status').textContent='Calibración cancelada al cambiar la sintonía o el filtro.';
+}
+function collectSmeterCalibrationPower(power){
+  if(!smeterCalibrationRun)return;
+  if(Number.isFinite(power))smeterCalibrationRun.powerSamples.push(power);
 }
 function applyResourcePolicy(policy){
   if(policy!==undefined)currentResourcePolicy=policy;
@@ -637,6 +638,7 @@ function tune(){
   if(!Number.isFinite(frequency)||!Number.isFinite(low)||!Number.isFinite(high)||!filterValid||high-low<100){message(focusedDigital?'Revisa los límites del filtro digital (−5000 a 5000 Hz).':'Revisa los límites del filtro (−6000 a 6000 Hz).');return;}
   frequency=Math.round(Math.max(center-rate/2,Math.min(center+rate/2,frequency)));
   if(frequency<lower()||frequency>lower()+width()){viewCenter=frequency;clampView();redrawHistory();sendWaterfallView(true);}
+  if(smeterCalibrationRun)cancelSmeterCalibration();else loadSmeterCalibration();
   controls();if(rttyActive)sendRttyConfiguration();else updateSharedUrl();message();
   clearTimeout(tuneTimer);
   tuneTimer=setTimeout(()=>{
@@ -718,7 +720,6 @@ window.addEventListener('radio-event',({detail})=>{if(detail.type==='presence'){
 function drawRow(frame,replay=false){
   const drawStarted=performance.now(),data=frame.data||frame,rowLower=frame.lower??center-rate/2,rowSpan=frame.span??rate;
   lastRow=frame;if(!replay){++spectrumFrames;canvas.dataset.frames=String(spectrumFrames);}
-  if(!replay)collectSmeterCalibrationFrame(data,rowLower,rowSpan);
   if($('pause').getAttribute('aria-pressed')==='true'&&!replay)return;
   lastDraw=performance.now();
   if(!replay){spectrumHistory.push({data:data.slice(),lower:rowLower,span:rowSpan,sequence:frame.sequence});if(spectrumHistory.length>600)spectrumHistory.shift();canvas.dataset.history=String(spectrumHistory.length);}
@@ -806,12 +807,11 @@ function connect(){
         if(!bandConfigured){
           frequency=Number.isFinite(msg.initial_frequency)?msg.initial_frequency:Math.round(center/1000)*1000;
           viewCenter=center;bandConfigured=true;
-          loadSmeterCalibration();
           const minimum=(center-rate/2)/1000,maximum=(center+rate/2)/1000;
           $('frequency').min=String(minimum);$('frequency').max=String(maximum);
           scale.setAttribute('aria-valuemin',String(minimum));scale.setAttribute('aria-valuemax',String(maximum));
           memories=memories.filter(memory=>memory.frequency>=center-rate/2&&memory.frequency<=center+rate/2);
-          applySharedTuning();applySharedDigitalState();controls();renderMemories();updateSharedUrl();if(protocolReady){sendWaterfallView(false);tune();}
+          applySharedTuning();applySharedDigitalState();loadSmeterCalibration();controls();renderMemories();updateSharedUrl();if(protocolReady){sendWaterfallView(false);tune();}
         }
         $('demo').hidden=!msg.demo;
         const labels={streaming:'● Receptor conectado',demo:'● Receptor de prueba',connecting:'Conectando al SDR…',disconnected:'SDR desconectado · reconectando…',reconnecting:'Recuperando receptor…','connect-failed':'SDR no disponible · reintentando…','invalid-header':'Entrada IQ incompatible','stopped':'SDR detenido'};
@@ -869,6 +869,7 @@ function connect(){
 window.radioSend=data=>{if(socket?.readyState!==WebSocket.OPEN)return false;socket.send(JSON.stringify(data));return true;};
 function updateMeter(power){
   if(!Number.isFinite(power))return;
+  collectSmeterCalibrationPower(power);
   const now=performance.now(),meter=$('meter'),position=smeterEngine.displayPosition(power,smeterCalibration);
   meter.value=position;meter.setAttribute('aria-valuetext',`${smeterEngine.formatS(power,smeterCalibration)}, ${power.toFixed(1)} dBFS`);$('power').value=`${power.toFixed(1)} dBFS`;
   if(power>peakPower||now-lastPeak>2000){peakPower=power;lastPeak=now;}

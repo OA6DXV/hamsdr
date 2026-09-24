@@ -10,10 +10,11 @@ reserved for stable releases.
 
 ## 0.6.0-dev
 
-- The browser can calibrate its relative S-meter from 15 seconds of live
-  waterfall data without starting audio or changing receiver DSP.
-- Robust temporal and spectral percentiles estimate the noise floor and a
-  strong-signal reference while rejecting isolated FFT spikes and center-DC.
+- The browser can calibrate its relative S-meter from 15 seconds of live,
+  tuned-channel power measurements without starting audio or changing receiver
+  DSP.
+- Robust temporal percentiles estimate the selected channel's noise floor and
+  a strong-signal reference, independently of waterfall FFT rendering.
 - The measured noise floor is always displayed as S1; each subsequent S-unit
   is six dB above that floor.
 - Calibrations persist locally per receiver band. Raw power and peak readings
