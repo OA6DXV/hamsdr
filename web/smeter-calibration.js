@@ -35,9 +35,9 @@
     const noiseDbfs=percentile(noiseSamples,.5);
     const strongDbfs=Math.max(noiseDbfs+1,percentile(strongSamples,.9));
     const dynamicRange=strongDbfs-noiseDbfs;
-    // Six dB per S-unit. Cap the measured noise floor at S7 so ordinary
-    // receiver noise cannot masquerade as an S9+ signal on its own.
-    const noiseS=clamp(Math.round(9-dynamicRange/6),1,7);
+    // The measured noise floor is the S1 reference. Every following S-unit
+    // remains six dB above it, so the display keeps a stable radio-style scale.
+    const noiseS=1;
     return{noiseDbfs,strongDbfs,noiseS,dynamicRange};
   }
   function sUnits(power,calibration){return calibration.noiseS+(power-calibration.noiseDbfs)/6;}
