@@ -75,7 +75,7 @@ function loadSmeterCalibration(){
   try{
     const saved=JSON.parse(localStorage.getItem(smeterStorageKey())||'null');
     if(validSmeterCalibration(saved)){
-      saved.noiseS=3;smeterCalibration=saved;
+      saved.noiseS=1;smeterCalibration=saved;
       localStorage.setItem(smeterStorageKey(),JSON.stringify(saved));
     }
   }catch{}
