@@ -102,9 +102,10 @@ async def main():
                 assert await page.locator('.signal-panel').get_attribute('data-calibrated')=='true'
                 assert await page.evaluate("Object.keys(localStorage).some(key=>key.startsWith('hamsdr-smeter:v1:'))")
                 assert 'dBFS' in await page.locator('#power').text_content()
-                await expect(page.locator('#reset-smeter')).to_be_visible()
-                await page.locator('#reset-smeter').click()
+                await expect(page.locator('#calibrate-smeter')).to_have_text('Restablecer')
+                await page.locator('#calibrate-smeter').click()
                 await expect(page.locator('#smeter-calibration-status')).to_have_text('Escala S relativa sin calibrar.')
+                await expect(page.locator('#calibrate-smeter')).to_have_text('Calibrar')
                 assert not await page.evaluate("Object.keys(localStorage).some(key=>key.startsWith('hamsdr-smeter:v1:'))")
             await expect(page.locator('#waterfall')).to_have_attribute('data-speed','1')
             await page.locator('#wfspeed').select_option('2')

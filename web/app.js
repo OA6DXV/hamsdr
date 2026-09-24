@@ -60,8 +60,7 @@ function showSmeterCalibration(){
   const panel=document.querySelector('.signal-panel'),button=$('calibrate-smeter'),status=$('smeter-calibration-status');
   panel.dataset.calibrating=String(!!smeterCalibrationRun);panel.dataset.calibrated=String(!!smeterCalibration);
   if(smeterCalibrationRun)return;
-  button.disabled=!bandConfigured;button.textContent='Calibrar';
-  $('reset-smeter').hidden=!smeterCalibration;
+  button.disabled=!bandConfigured;button.textContent=smeterCalibration?'Restablecer':'Calibrar';
   status.textContent=smeterCalibration?
     `Calibrado · piso ${smeterCalibration.noiseDbfs.toFixed(1)} dBFS = S${smeterCalibration.noiseS} · referencia ${smeterCalibration.strongDbfs.toFixed(1)} dBFS.`:
     'Escala S relativa sin calibrar.';
@@ -932,8 +931,7 @@ function setMuted(value){
   updateSharedUrl();
 }
 $('listen').addEventListener('click',()=>audioEnabled?pauseAudio():listen());
-$('calibrate-smeter').addEventListener('click',startSmeterCalibration);
-$('reset-smeter').addEventListener('click',resetSmeterCalibration);
+$('calibrate-smeter').addEventListener('click',()=>smeterCalibration?resetSmeterCalibration():startSmeterCalibration());
 $('digital-audio-start').addEventListener('click',()=>void listen());
 $('mute').addEventListener('change',()=>setMuted($('mute').checked));
 $('digital-mute').addEventListener('click',()=>setMuted(!muted));
