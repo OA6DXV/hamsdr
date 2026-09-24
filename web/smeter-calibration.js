@@ -13,14 +13,15 @@
     // A lower temporal percentile remains representative when a station is
     // active during part of the 15-second measurement.
     const noiseDbfs=percentile(samples,.25);
+    const s1Dbfs=noiseDbfs-10;
     const strongDbfs=Math.max(noiseDbfs+1,percentile(samples,.9));
     const dynamicRange=strongDbfs-noiseDbfs;
-    // The measured noise floor is the S1 reference. Every following S-unit
-    // remains six dB above it, so the display keeps a stable radio-style scale.
+    // Keep S1 ten dB below the measured channel noise floor. Every following
+    // S-unit remains six dB above that reference.
     const noiseS=1;
-    return{noiseDbfs,strongDbfs,noiseS,dynamicRange,source:'channel-power'};
+    return{noiseDbfs,s1Dbfs,strongDbfs,noiseS,dynamicRange,source:'channel-power'};
   }
-  function sUnits(power,calibration){return 1+(power-calibration.noiseDbfs)/6;}
+  function sUnits(power,calibration){return 1+(power-calibration.s1Dbfs)/6;}
   function displayPosition(power,calibration){
     if(!calibration)return clamp((power+120)/120*7,0,7);
     const units=sUnits(power,calibration);

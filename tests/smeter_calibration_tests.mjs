@@ -10,6 +10,7 @@ const calibration=engine.finalizePower(samples);
 assert(calibration,'enough samples produce a calibration');
 assert.equal(calibration.source,'channel-power','calibration uses tuned channel power');
 assert(Math.abs(calibration.noiseDbfs-(-50))<.5,`channel noise percentile ${calibration.noiseDbfs}`);
+assert(Math.abs(calibration.s1Dbfs-(-60))<.5,`S1 reference ${calibration.s1Dbfs}`);
 assert.equal(engine.finalizePower(samples.slice(0,10)),null,'short captures are rejected');
 assert(engine.displayPosition(calibration.strongDbfs,calibration)>=3.8,'reference signal maps near S9');
 assert(engine.displayPosition(-200,calibration)===0,'low levels clamp to meter start');

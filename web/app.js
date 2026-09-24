@@ -50,10 +50,10 @@ function waterfallFps(){if(waterfallSpeed==='high')return 11.71875;return(waterf
 function waterfallSourceGap(){if(waterfallSpeed==='high')return 4/3;return(waterfallProfile==='slow'?25/8:2)*waterfallSpeed;}
 function message(text=''){ $('message').textContent=text; }
 function smeterStorageKey(){
-  return`hamsdr-smeter:v2:${location.host}:${Math.round(center)}:${Math.round(rate)}:${mode}:${low}:${high}`;
+  return`hamsdr-smeter:v3:${location.host}:${Math.round(center)}:${Math.round(rate)}:${mode}:${low}:${high}`;
 }
 function validSmeterCalibration(value){
-  return value&&value.source==='channel-power'&&Number.isFinite(value.noiseDbfs)&&Number.isFinite(value.strongDbfs)&&
+  return value&&value.source==='channel-power'&&Number.isFinite(value.noiseDbfs)&&Number.isFinite(value.s1Dbfs)&&Number.isFinite(value.strongDbfs)&&
     Number.isFinite(value.noiseS)&&value.noiseS>=1&&value.noiseS<=7&&value.strongDbfs>value.noiseDbfs;
 }
 function showSmeterCalibration(){
@@ -62,7 +62,7 @@ function showSmeterCalibration(){
   if(smeterCalibrationRun)return;
   button.disabled=!bandConfigured;button.textContent=smeterCalibration?'Restablecer':'Calibrar';
   status.textContent=smeterCalibration?
-    `Calibrado · piso del canal ${smeterCalibration.noiseDbfs.toFixed(1)} dBFS = S${smeterCalibration.noiseS} · referencia ${smeterCalibration.strongDbfs.toFixed(1)} dBFS.`:
+    `Calibrado · piso del canal ${smeterCalibration.noiseDbfs.toFixed(1)} dBFS · S1 = ${smeterCalibration.s1Dbfs.toFixed(1)} dBFS · referencia ${smeterCalibration.strongDbfs.toFixed(1)} dBFS.`:
     'Escala S relativa sin calibrar.';
 }
 function resetSmeterCalibration(){

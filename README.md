@@ -15,8 +15,8 @@ reserved for stable releases.
   DSP.
 - Robust temporal percentiles estimate the selected channel's noise floor and
   a strong-signal reference, independently of waterfall FFT rendering.
-- The measured noise floor is always displayed as S1; each subsequent S-unit
-  is six dB above that floor.
+- S1 is set 10 dB below the measured channel noise floor; each subsequent
+  S-unit is six dB above that reference.
 - Calibrations persist locally per receiver band. Raw power and peak readings
   remain available in dBFS; only the S-scale presentation is adjusted.
 - New browser sessions now start with live waterfall rows instead of restoring
