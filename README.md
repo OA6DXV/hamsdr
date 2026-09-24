@@ -8,7 +8,7 @@ responsive browser interface and server-side DSP.
 The current `dev` branch is a development preview. The `main` branch is
 reserved for stable releases.
 
-## 0.5.8-dev
+## 0.5.9-dev
 
 - The single-signal RTTY decoder now gates output behind persistent tone-pair
   detection and valid framing, buffering candidates instead of printing random
