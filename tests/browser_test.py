@@ -90,6 +90,7 @@ async def main():
             assert await page.locator('#speed-high').evaluate('option=>option.disabled&&option.hidden')
             await expect(page.locator('#send-chat')).to_be_enabled()
             await expect(page.locator('#waterfall')).to_have_attribute('data-frames',re.compile(r'^[1-9][0-9]+$'))
+            assert await page.locator('#waterfall').get_attribute('data-history-revision') is None,'a new page restored server history'
             await expect(page.locator('#calibrate-smeter')).to_be_visible()
             meter_layout=await page.evaluate("""()=>{const button=document.querySelector('#calibrate-smeter').getBoundingClientRect(),power=document.querySelector('.signal-reading-line>span').getBoundingClientRect(),meter=document.querySelector('#meter');return{buttonX:button.x,buttonY:button.y,powerX:power.x,powerY:power.y,min:meter.min,max:meter.max}}""")
             assert meter_layout['buttonX']<meter_layout['powerX'] and abs(meter_layout['buttonY']-meter_layout['powerY'])<12
@@ -101,6 +102,10 @@ async def main():
                 assert await page.locator('.signal-panel').get_attribute('data-calibrated')=='true'
                 assert await page.evaluate("Object.keys(localStorage).some(key=>key.startsWith('hamsdr-smeter:v1:'))")
                 assert 'dBFS' in await page.locator('#power').text_content()
+                await expect(page.locator('#reset-smeter')).to_be_visible()
+                await page.locator('#reset-smeter').click()
+                await expect(page.locator('#smeter-calibration-status')).to_have_text('Escala S relativa sin calibrar.')
+                assert not await page.evaluate("Object.keys(localStorage).some(key=>key.startsWith('hamsdr-smeter:v1:'))")
             await expect(page.locator('#waterfall')).to_have_attribute('data-speed','1')
             await page.locator('#wfspeed').select_option('2')
             await expect(page.locator('#waterfall')).to_have_attribute('data-speed','2')
@@ -351,7 +356,7 @@ async def main():
             assert zoom_block_ms<100,f'zoom blocked the browser main thread for {zoom_block_ms:.1f} ms'
             await expect(page.locator('#zoom-label')).to_have_text('2×')
             await expect(page.locator('#waterfall')).to_have_attribute('data-span','512000')
-            await expect(page.locator('#waterfall')).to_have_attribute('data-history-span','1024000')
+            await expect(page.locator('#waterfall')).to_have_attribute('data-history-span','512000')
             history_after=int(await page.locator('#waterfall').get_attribute('data-history'))
             assert history_before>0 and history_after>0,'zoom failed to restore waterfall history'
             if viewport['width']==390:

@@ -16,6 +16,12 @@ reserved for stable releases.
   strong-signal reference while rejecting isolated FFT spikes and center-DC.
 - Calibrations persist locally per receiver band. Raw power and peak readings
   remain available in dBFS; only the S-scale presentation is adjusted.
+- New browser sessions now start with live waterfall rows instead of restoring
+  shared server history. History is requested only for explicit zoom or pan.
+- Historical rows retain native FFT resolution and use the exact live-view
+  projection. Cooperative server encoding and incremental browser decoding
+  prevent navigation snapshots from interrupting audio or controls.
+- A stored S-meter calibration can be explicitly reset from the signal panel.
 
 ## 0.5.9-dev
 

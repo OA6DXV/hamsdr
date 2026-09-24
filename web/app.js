@@ -25,7 +25,7 @@ let rttyPreviousAudioProfile=null,rttyProfilePending=false;
 let rttyProfileSuggestion=null;
 let spectrumHistory=[],waterfallNavigationHistory=[];
 let waterfallPreference='balanced',waterfallProfile='balanced',waterfallSpeed=1,drawAverage=0,lastProfileRequest=0,profileTimer,pendingRow,waterfallFrame;
-let waterfallViewRevision=0,waterfallViewTimer;
+let waterfallViewRevision=0,waterfallViewTimer,waterfallViewHistoryPending=false,waterfallSnapshotJob=0;
 let trafficBytes=0,trafficAt=performance.now();
 let lastWaterfallSequence=null,lastWaterfallAt=0,socketOpenedAt=0;
 const smeterCalibrationDuration=15000,smeterEngine=window.SMeterCalibration;
@@ -61,9 +61,14 @@ function showSmeterCalibration(){
   panel.dataset.calibrating=String(!!smeterCalibrationRun);panel.dataset.calibrated=String(!!smeterCalibration);
   if(smeterCalibrationRun)return;
   button.disabled=!bandConfigured;button.textContent='Calibrar';
+  $('reset-smeter').hidden=!smeterCalibration;
   status.textContent=smeterCalibration?
     `Calibrado · piso ${smeterCalibration.noiseDbfs.toFixed(1)} dBFS = S${smeterCalibration.noiseS} · referencia ${smeterCalibration.strongDbfs.toFixed(1)} dBFS.`:
     'Escala S relativa sin calibrar.';
+}
+function resetSmeterCalibration(){
+  try{localStorage.removeItem(smeterStorageKey());}catch{}
+  smeterCalibration=null;peakPower=-120;lastPeak=0;showSmeterCalibration();
 }
 function loadSmeterCalibration(){
   smeterCalibration=null;
@@ -173,10 +178,12 @@ function sendWaterfallPreference(forced){
   const profile=forced||(waterfallPreference==='auto'?recommendedWaterfallProfile():waterfallPreference);
   if(socket?.readyState===WebSocket.OPEN){socket.send(JSON.stringify({type:'waterfall',preference:waterfallPreference,profile}));lastProfileRequest=performance.now();}
 }
-function sendWaterfallView(){
+function sendWaterfallView(history=false){
   const revision=waterfallViewRevision=(waterfallViewRevision+1)>>>0;
+  waterfallViewHistoryPending=waterfallViewHistoryPending||history;waterfallSnapshotJob++;
   clearTimeout(waterfallViewTimer);waterfallViewTimer=setTimeout(()=>{
-    if(socket?.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type:'waterfall-view',zoom,center:Math.round(viewCenter),revision,rows:canvas.height}));
+    const includeHistory=waterfallViewHistoryPending;waterfallViewHistoryPending=false;
+    if(socket?.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type:'waterfall-view',zoom,center:Math.round(viewCenter),revision,rows:canvas.height,history:includeHistory}));
   },75);
 }
 function sendWaterfallSpeed(){if(socket?.readyState===WebSocket.OPEN){const value=$('wfspeed').value;socket.send(JSON.stringify({type:'waterfall-speed',divisor:value==='high'?'high':Number(value)}));}}
@@ -627,7 +634,7 @@ function tune(){
   const focusedDigital=Boolean(digitalMode||rttyActive),filterValid=focusedDigital?low>=-digitalFilterMaximum&&high<=digitalFilterMaximum:low>=-6000&&high<=6000;
   if(!Number.isFinite(frequency)||!Number.isFinite(low)||!Number.isFinite(high)||!filterValid||high-low<100){message(focusedDigital?'Revisa los límites del filtro digital (−5000 a 5000 Hz).':'Revisa los límites del filtro (−6000 a 6000 Hz).');return;}
   frequency=Math.round(Math.max(center-rate/2,Math.min(center+rate/2,frequency)));
-  if(frequency<lower()||frequency>lower()+width()){viewCenter=frequency;clampView();redrawHistory();sendWaterfallView();}
+  if(frequency<lower()||frequency>lower()+width()){viewCenter=frequency;clampView();redrawHistory();sendWaterfallView(true);}
   controls();if(rttyActive)sendRttyConfiguration();else updateSharedUrl();message();
   clearTimeout(tuneTimer);
   tuneTimer=setTimeout(()=>{
@@ -642,14 +649,23 @@ function redrawHistory(source=spectrumHistory){
   const w=canvas.width,h=canvas.height,image=ctx.createImageData(w,h),pixels=image.data;
   for(let pixel=3;pixel<pixels.length;pixel+=4)pixels[pixel]=255;
   const brightness=Number($('brightness').value),contrast=$('wfmode').value==='weak'?12:$('wfmode').value==='strong'?-12:0;
+  const viewLower=lower(),viewSpan=width(),maps=new Map();
   rows.forEach((frame,rowIndex)=>{
     const data=frame.data||frame,rowLower=frame.lower??center-rate/2,rowSpan=frame.span??rate,y=h-rows.length+rowIndex;
+    const key=`${data.length}:${rowLower}:${rowSpan}`;let map=maps.get(key);
+    if(!map){
+      const starts=new Int32Array(w),ends=new Int32Array(w);starts.fill(-1);
+      for(let x=0;x<w;x++){
+        const relative=(viewLower+x/w*viewSpan-rowLower)/rowSpan;
+        if(relative<0||relative>=1)continue;
+        const bin=Math.max(0,Math.min(data.length-1,Math.floor(relative*data.length)));
+        starts[x]=bin;ends[x]=Math.min(data.length,Math.max(bin+1,Math.ceil((relative+viewSpan/w/rowSpan)*data.length)));
+      }
+      map={starts,ends};maps.set(key,map);
+    }
     for(let x=0;x<w;x++){
-      const rf=lower()+x/w*width(),relative=(rf-rowLower)/rowSpan;
-      if(relative<0||relative>=1)continue;
-      const bin=Math.max(0,Math.min(data.length-1,Math.floor(relative*data.length)));
-      const binEnd=Math.min(data.length,Math.max(bin+1,Math.ceil((relative+width()/w/rowSpan)*data.length)));
-      let peak=data[bin];for(let next=bin+1;next<binEnd;next++)peak=Math.max(peak,data[next]);
+      const bin=map.starts[x];if(bin<0)continue;
+      let peak=data[bin];for(let next=bin+1;next<map.ends[x];next++)peak=Math.max(peak,data[next]);
       const db=peak/255*120-120,value=Math.max(0,Math.min(1,(db+74+brightness+contrast)/34)),color=window.radioPalette[Math.round(value*255)],offset=(y*w+x)*4;
       pixels[offset]=color[0];pixels[offset+1]=color[1];pixels[offset+2]=color[2];
     }
@@ -658,7 +674,7 @@ function redrawHistory(source=spectrumHistory){
 }
 function changeZoom(next,anchor=frequency,fraction=.5){
   zoom=Math.max(1,Math.min(64,next));viewCenter=anchor+(.5-fraction)*width();clampView();
-  $('zoom-label').value=`${zoom.toFixed(zoom<10?1:0).replace('.0','')}×`;redrawHistory();drawScale();sendWaterfallView();updateSharedUrl();
+  $('zoom-label').value=`${zoom.toFixed(zoom<10?1:0).replace('.0','')}×`;redrawHistory();drawScale();sendWaterfallView(true);updateSharedUrl();
 }
 function drawScale(){
   const w=scale.width; dial.fillStyle='#050505';dial.fillRect(0,0,w,44);dial.font='10px monospace';
@@ -731,19 +747,8 @@ function drawRow(frame,replay=false){
 function enqueueRow(frame){
   pendingRow=frame;if(waterfallFrame)return;waterfallFrame=requestAnimationFrame(()=>{waterfallFrame=undefined;if(!pendingRow)return;const latest=pendingRow;pendingRow=undefined;drawRow(latest);});
 }
-function applyWaterfallSnapshot(bytes){
-  if(bytes.byteLength<7)return;
-  const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength),revision=view.getUint32(1,true),count=view.getUint16(5,true);
-  if(revision!==waterfallViewRevision)return;
-  let offset=7;const frames=[];
-  for(let index=0;index<count;index++){
-    if(offset+4>bytes.byteLength)return;
-    const length=view.getUint32(offset,true);offset+=4;
-    if(length<1||offset+length>bytes.byteLength)return;
-    const decoded=window.decodeWaterfallRow(bytes.subarray(offset,offset+length));offset+=length;
-    if(!decoded)return;frames.push(decoded);
-  }
-  if(offset!==bytes.byteLength)return;
+function finishWaterfallSnapshot(frames,revision,job){
+  if(job!==waterfallSnapshotJob||revision!==waterfallViewRevision)return;
   const newest=frames.at(-1)?.sequence;
   if(Number.isInteger(newest)){
     const existing=new Set(frames.map(frame=>frame.sequence));
@@ -753,6 +758,31 @@ function applyWaterfallSnapshot(bytes){
   spectrumHistory=frames.slice(-600);canvas.dataset.history=String(spectrumHistory.length);canvas.dataset.historyRevision=String(revision);
   if(frames.length){canvas.dataset.historyLower=String(frames[0].lower);canvas.dataset.historySpan=String(frames[0].span);}
   redrawHistory();
+}
+function scheduleWaterfallSnapshotStep(callback){
+  if('requestIdleCallback'in window)requestIdleCallback(callback,{timeout:40});
+  else setTimeout(()=>callback(),0);
+}
+function applyWaterfallSnapshot(bytes){
+  if(bytes.byteLength<7)return;
+  const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength),revision=view.getUint32(1,true),count=view.getUint16(5,true);
+  if(revision!==waterfallViewRevision)return;
+  let offset=7;const packets=[];
+  for(let index=0;index<count;index++){
+    if(offset+4>bytes.byteLength)return;
+    const length=view.getUint32(offset,true);offset+=4;
+    if(length<1||offset+length>bytes.byteLength)return;
+    packets.push(bytes.subarray(offset,offset+length));offset+=length;
+  }
+  if(offset!==bytes.byteLength)return;
+  const job=++waterfallSnapshotJob,frames=[];let index=0;
+  const step=()=>{
+    if(job!==waterfallSnapshotJob||revision!==waterfallViewRevision)return;
+    const end=Math.min(packets.length,index+6);
+    for(;index<end;index++){const decoded=window.decodeWaterfallRow(packets[index]);if(!decoded)return;frames.push(decoded);}
+    if(index<packets.length)scheduleWaterfallSnapshotStep(step);else finishWaterfallSnapshot(frames,revision,job);
+  };
+  scheduleWaterfallSnapshotStep(step);
 }
 function connect(){
   clearTimeout(timer);
@@ -767,7 +797,7 @@ function connect(){
       window.dispatchEvent(new CustomEvent('radio-event',{detail:msg}));
       if(msg.type==='hello'){
         if(msg.protocol!==protocolVersion||msg.waterfall!==waterfallProtocolVersion){message('El servidor usa un protocolo incompatible.');socket.close(1002,'Incompatible protocol');return;}
-        protocolReady=true;if(bandConfigured){tune();sendWaterfallView();}sendWaterfallPreference();sendWaterfallSpeed();sendDigitalMode();sendAudioProfile();window.radioSend({type:'audio',enabled:audioEnabled});window.dispatchEvent(new Event('radio-open'));
+        protocolReady=true;if(bandConfigured){tune();sendWaterfallView(false);}sendWaterfallPreference();sendWaterfallSpeed();sendDigitalMode();sendAudioProfile();window.radioSend({type:'audio',enabled:audioEnabled});window.dispatchEvent(new Event('radio-open'));
       }else if(msg.type==='status'){
         center=msg.center;rate=msg.sample_rate;$('listeners').textContent=msg.users;
         digimodesAvailable=msg.digimodes!==false&&!!siteConfig.digimodes;setDigitalControlsVisible(digimodesAvailable);
@@ -779,7 +809,7 @@ function connect(){
           $('frequency').min=String(minimum);$('frequency').max=String(maximum);
           scale.setAttribute('aria-valuemin',String(minimum));scale.setAttribute('aria-valuemax',String(maximum));
           memories=memories.filter(memory=>memory.frequency>=center-rate/2&&memory.frequency<=center+rate/2);
-          applySharedTuning();applySharedDigitalState();controls();renderMemories();updateSharedUrl();if(protocolReady){sendWaterfallView();tune();}
+          applySharedTuning();applySharedDigitalState();controls();renderMemories();updateSharedUrl();if(protocolReady){sendWaterfallView(false);tune();}
         }
         $('demo').hidden=!msg.demo;
         const labels={streaming:'● Receptor conectado',demo:'● Receptor de prueba',connecting:'Conectando al SDR…',disconnected:'SDR desconectado · reconectando…',reconnecting:'Recuperando receptor…','connect-failed':'SDR no disponible · reintentando…','invalid-header':'Entrada IQ incompatible','stopped':'SDR detenido'};
@@ -789,9 +819,9 @@ function connect(){
         if(msg.opus_available===false&&['balanced','mobile'].includes(audioProfile))fallbackFromOpus('Opus no está instalado en el servidor.');
         if(!['streaming','demo'].includes(msg.source))resetAudio();
       }else if(msg.type==='waterfall-profile'){
-        waterfallProfile=msg.profile;if(msg.preference){waterfallPreference=msg.preference;$('waterfall-quality').value=waterfallPreference;}lastWaterfallSequence=null;lastWaterfallAt=0;showWaterfallProfile();sendWaterfallView();
+        waterfallProfile=msg.profile;if(msg.preference){waterfallPreference=msg.preference;$('waterfall-quality').value=waterfallPreference;}lastWaterfallSequence=null;lastWaterfallAt=0;showWaterfallProfile();
       }else if(msg.type==='waterfall-speed'){
-        waterfallSpeed=msg.divisor;lastWaterfallSequence=null;lastWaterfallAt=0;$('wfspeed').value=String(msg.divisor);$('waterfall').dataset.speed=String(msg.divisor);showWaterfallProfile();sendWaterfallView();
+        waterfallSpeed=msg.divisor;lastWaterfallSequence=null;lastWaterfallAt=0;$('wfspeed').value=String(msg.divisor);$('waterfall').dataset.speed=String(msg.divisor);showWaterfallProfile();
       }else if(msg.type==='stream-stats'){
         $('client-traffic').dataset.serverKbps=String(msg.kbps);
       }else if(msg.type==='audio-state'){
@@ -900,6 +930,7 @@ function setMuted(value){
 }
 $('listen').addEventListener('click',()=>audioEnabled?pauseAudio():listen());
 $('calibrate-smeter').addEventListener('click',startSmeterCalibration);
+$('reset-smeter').addEventListener('click',resetSmeterCalibration);
 $('digital-audio-start').addEventListener('click',()=>void listen());
 $('mute').addEventListener('change',()=>setMuted($('mute').checked));
 $('digital-mute').addEventListener('click',()=>setMuted(!muted));
@@ -940,7 +971,7 @@ $('zoom-in').addEventListener('click',()=>changeZoom(zoom*2));$('zoom-out').addE
 $('max-zoom').onclick=()=>changeZoom(64);
 document.querySelectorAll('[name=view]').forEach(r=>r.addEventListener('change',()=>{$('panorama').hidden=r.value==='none';}));
 $('wfmode').onchange=()=>{view=$('wfmode').value;if(view==='spectrum-dynamic'){dynamicSpectrumBottom=null;dynamicSpectrumTop=null;}renderSpectrumAxis();redrawHistory();};
-$('wfsize').onchange=()=>{canvas.height=Number($('wfsize').value);canvas.style.height=`${canvas.height}px`;renderSpectrumAxis();redrawHistory();sendWaterfallView();};
+$('wfsize').onchange=()=>{canvas.height=Number($('wfsize').value);canvas.style.height=`${canvas.height}px`;renderSpectrumAxis();redrawHistory();};
 $('wfspeed').onchange=sendWaterfallSpeed;
 $('brightness').addEventListener('input',()=>{if(isSpectrum())renderSpectrumAxis();redrawHistory();});
 $('pause').addEventListener('click',()=>{$('pause').setAttribute('aria-pressed',String($('pause').getAttribute('aria-pressed')!=='true'));});
@@ -973,9 +1004,9 @@ function setTouchPanPosition(pan,clientX){
 canvas.addEventListener('pointerdown',e=>{
   if(e.pointerType!=='touch')return;
   waterfallTouches.set(e.pointerId,{x:e.clientX,y:e.clientY});try{canvas.setPointerCapture(e.pointerId);}catch{}
-  if(waterfallTouches.size===1&&zoom>1){touchPan={id:e.pointerId,startX:e.clientX,startY:e.clientY,startCenter:viewCenter,startFrequency:frequency,zoom,active:false};sendWaterfallView();}
+  if(waterfallTouches.size===1&&zoom>1)touchPan={id:e.pointerId,startX:e.clientX,startY:e.clientY,startCenter:viewCenter,startFrequency:frequency,zoom,active:false};
   if(waterfallTouches.size===2){
-    if(touchPan?.active){redrawHistory();tune();sendWaterfallView();}
+    if(touchPan?.active){redrawHistory();tune();sendWaterfallView(true);}
     touchPan=null;
     const p=[...waterfallTouches.values()],rect=canvas.getBoundingClientRect(),mid=(p[0].x+p[1].x)/2;
     pinch={distance:Math.max(1,Math.hypot(p[0].x-p[1].x,p[0].y-p[1].y)),zoom,anchor:lower()+(mid-rect.left)/rect.width*width(),fraction:(mid-rect.left)/rect.width};suppressWaterfallClick=true;
@@ -993,7 +1024,7 @@ canvas.addEventListener('pointermove',e=>{
 function endWaterfallTouch(e){
   const finishedPinch=pinch&&waterfallTouches.size===2?pinch:null,finishedPan=touchPan?.id===e.pointerId?touchPan:null;
   waterfallTouches.delete(e.pointerId);
-  if(finishedPan){touchPan=null;delete canvas.dataset.navigationActive;if(finishedPan.active){redrawHistory(waterfallNavigationHistory.length?waterfallNavigationHistory:spectrumHistory);tune();sendWaterfallView();}}
+  if(finishedPan){touchPan=null;delete canvas.dataset.navigationActive;if(finishedPan.active){redrawHistory(waterfallNavigationHistory.length?waterfallNavigationHistory:spectrumHistory);tune();sendWaterfallView(true);}}
   if(waterfallTouches.size<2){pinch=null;canvas.style.transform='';canvas.style.transformOrigin='';if(finishedPinch?.next)changeZoom(finishedPinch.next,finishedPinch.anchor,finishedPinch.fraction);}
 }
 canvas.addEventListener('pointerup',endWaterfallTouch);canvas.addEventListener('pointercancel',endWaterfallTouch);

@@ -21,7 +21,7 @@ from urllib.parse import urlsplit
 from aiohttp import web, WSMsgType
 from community import History, plain_text
 from opus_codec import OPUS_AVAILABLE, OpusEncoder
-from waterfall_codec import VERSION as WATERFALL_PROTOCOL_VERSION, encode as encode_waterfall, project as project_waterfall
+from waterfall_codec import VERSION as WATERFALL_PROTOCOL_VERSION, encode as encode_waterfall
 
 ROOT = Path(__file__).resolve().parent
 VERSION = "0.6.0-dev"
@@ -765,7 +765,10 @@ class Gateway:
     def publish_spectrum(self, data):
         sequence = self.waterfall_sequence
         self.waterfall_sequence = (sequence+1) & 0xffffffff
-        self.waterfall_history.append((sequence, project_waterfall(data, 4096)))
+        # Keep the original FFT row. Historical views are projected using the
+        # same window and binning as live rows, avoiding a color/resolution jump
+        # after zooming or panning.
+        self.waterfall_history.append((sequence, bytes(data)))
         compressed = {}
         for ident, client in tuple(self.clients.items()):
             profile = client["waterfall_profile"]
@@ -791,7 +794,7 @@ class Gateway:
                 compressed[key] = bytes([7])+encode_waterfall(data, profile, sequence, start, end, lower, span)
             self.publish(compressed[key], ident)
 
-    def publish_waterfall_history(self, ident, revision, requested_rows):
+    async def publish_waterfall_history(self, ident, revision, requested_rows):
         """Send one atomic, view-specific snapshot from the shared full-band ring."""
         client = self.clients.get(ident)
         if not client or not self.waterfall_history:
@@ -810,11 +813,18 @@ class Gateway:
             selected.append(history[index])
             offset += gap
         selected.reverse()
-        # Snapshots cover the complete receiver band. They are a lightweight
-        # navigation layer; live rows still use the selected high-resolution view.
-        lower, span = round(self.band_lower), round(self.sample_rate)
-        encoded = [encode_waterfall(row, profile, sequence, 0, 4096, lower, span)
-                   for sequence, row in selected]
+        zoom, view_center = client["waterfall_zoom"], client["waterfall_center"]
+        span = round(self.sample_rate/zoom)
+        lower = round(view_center-span/2)
+        encoded = []
+        for index, (sequence, row) in enumerate(selected):
+            start = max(0, min(len(row)-1, round((lower-self.band_lower)/self.sample_rate*len(row))))
+            end = max(start+1, min(len(row), round((lower+span-self.band_lower)/self.sample_rate*len(row))))
+            encoded.append(encode_waterfall(row, profile, sequence, start, end, lower, span))
+            # Snapshot projection is deliberately cooperative: a large history
+            # request must not pause live audio, waterfall or other clients.
+            if index % 4 == 3:
+                await asyncio.sleep(0)
         packet = bytearray([13])
         packet.extend(struct.pack("<IH", revision, len(encoded)))
         for row in encoded:
@@ -1160,9 +1170,13 @@ class Gateway:
                             raise ValueError("Ventana de cascada fuera de banda")
                         client["waterfall_zoom"], client["waterfall_center"] = float(zoom), round(view_center)
                         revision, rows = update.get("revision", 0), update.get("rows", 100)
+                        include_history = update.get("history", True)
                         if type(revision) is not int or not 0 <= revision <= 0xffffffff or type(rows) is not int or not 1 <= rows <= 600:
                             raise ValueError("Solicitud de historial de cascada inválida")
-                        self.publish_waterfall_history(ident, revision, rows)
+                        if type(include_history) is not bool:
+                            raise ValueError("Solicitud de historial de cascada inválida")
+                        if include_history:
+                            await self.publish_waterfall_history(ident, revision, rows)
                         continue
                     if update.get("type") == "waterfall-speed":
                         speed = update.get("divisor")
