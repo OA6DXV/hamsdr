@@ -39,6 +39,9 @@ async def main():
             assert await page.locator('#site-touch-icon').get_attribute('href')==(site['logo']['url'] if site['logo']['enabled'] else None)
             assert await page.locator('[name="view"],#allowkeys,#audio-format').count()==0
             await expect(page.locator('#site-footer-text')).to_have_text(f"HamSDR v{site['version']}")
+            await expect(page.locator('#site-footer-link')).to_have_attribute('href','https://github.com/OA6DXV/hamsdr')
+            assert await page.locator('#site-footer-link svg').is_visible()
+            assert await page.locator('#site-footer-link').inner_text()==f"HamSDR v{site['version']}"
             assert await page.locator('#site-operator-row').count()==0
             await expect(page.locator('label').filter(has=page.locator('#wfmode'))).to_contain_text('Gráfico:')
             await expect(page.locator('label').filter(has=page.locator('#waterfall-quality'))).to_contain_text('Cascada:')

@@ -29,6 +29,8 @@ reserved for stable releases.
   the page closes or reloads, or the user clears the log.
 - Clearing the FT8/FT4 message log leaves the digital waterfall and the
   decoder's pending audio block untouched.
+- The version text in the footer links to the public project repository and
+  includes GitHub's mark before the configured version number.
 
 ## 0.6.0-dev
 
