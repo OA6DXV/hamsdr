@@ -23,16 +23,17 @@ function parseCountryDatabase(text){
   const exact=new Map(),prefixes=[],countries=new Set();
   for(const record of text.split(';')){
     const fields=record.split(':');
-    if(fields.length<8)continue;
+    if(fields.length<9)continue;
     const country=fields[0].trim();
     if(!country)continue;
     countries.add(country);
-    for(const alias of fields.slice(7).join(':').replaceAll(/\s+/g,'').split(',')){
+    // Field 7 is the primary prefix; aliases begin after its colon in field 8.
+    for(const alias of fields.slice(8).join(':').replaceAll(/\s+/g,'').split(',')){
       if(!alias)continue;
       const isExact=alias.startsWith('=');
       const token=(isExact?alias.slice(1):alias).match(/^[A-Z0-9/]+/i)?.[0]?.toUpperCase();
       if(!token)continue;
-      if(isExact)exact.set(token,country);else prefixes.push([token,country]);
+      if(isExact){if(!exact.has(token))exact.set(token,country);}else prefixes.push([token,country]);
     }
   }
   prefixes.sort((left,right)=>right[0].length-left[0].length);
@@ -48,19 +49,19 @@ function callsignsFromMessage(text){
   return String(text||'').toUpperCase().split(/\s+/).map(value=>value.replace(/^[^A-Z0-9/]+|[^A-Z0-9/]+$/g,'')).filter(isCallsign).slice(0,2);
 }
 
-function countryForCallsign(callsign){
-  if(!countryDatabase)return '';
-  if(countryDatabase.exact.has(callsign))return countryDatabase.exact.get(callsign);
-  for(const [prefix,country] of countryDatabase.prefixes)if(callsign.startsWith(prefix))return country;
+function countryForCallsign(callsign,database=countryDatabase){
+  if(!database)return '';
+  if(database.exact.has(callsign))return database.exact.get(callsign);
+  for(const [prefix,country] of database.prefixes)if(callsign.startsWith(prefix))return country;
   return '';
 }
 
-function countriesForMessage(text){
+function countriesForMessage(text,database=countryDatabase){
   const callsigns=callsignsFromMessage(text);
   if(!callsigns.length)return '';
-  const source=countryForCallsign(callsigns[0])||'—';
+  const source=countryForCallsign(callsigns[0],database)||'—';
   if(callsigns.length<2)return source;
-  return `${source} → ${countryForCallsign(callsigns[1])||'—'}`;
+  return `${source} → ${countryForCallsign(callsigns[1],database)||'—'}`;
 }
 
 async function loadCountryDatabase(){
@@ -192,3 +193,5 @@ self.onmessage=event=>{
   if(data.type==='start')start(data);
   if(data.type==='samples')consume(data);
 };
+
+export {parseCountryDatabase,countryForCallsign,countriesForMessage};

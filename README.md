@@ -15,6 +15,8 @@ reserved for stable releases.
 - SNR, DT, Hz and country headers sort decoded messages without changing the
   stored log. A country selector highlights matching transmitters or receivers
   using the offline country database.
+- Corrected the offline CTY alias parser so the first prefix of each entity is
+  recognized, including Russian `R` and Saudi `7Z` callsigns.
 
 ## 0.6.0-dev
 
@@ -278,6 +280,7 @@ only for controlled diagnostics.
 .venv/bin/python tests/history_tests.py -v
 .venv/bin/python tests/waterfall_codec_tests.py -v
 .venv/bin/python tests/smeter_calibration_tests.py -v
+node tests/country_lookup_tests.mjs
 .venv/bin/pip install playwright==1.62.0
 .venv/bin/playwright install --with-deps chromium
 # Start a separate demo server on port 18094 first.
