@@ -27,6 +27,8 @@ reserved for stable releases.
 - FT8/FT4 decoded messages now default to a 1,000-row browser-memory limit.
   The user can change the limit; zero retains and displays all messages until
   the page closes or reloads, or the user clears the log.
+- Clearing the FT8/FT4 message log leaves the digital waterfall and the
+  decoder's pending audio block untouched.
 
 ## 0.6.0-dev
 

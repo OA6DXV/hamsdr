@@ -145,6 +145,19 @@ async def main():
                 await expect(page.locator('#digital-progress')).to_have_attribute('max','100')
                 await expect(page.locator('#digital-download')).to_have_text('Descargar log')
                 await expect(page.locator('#digital-message-limit')).to_have_value('1000')
+                preserved=await page.evaluate("""()=>{
+                    digitalRows=[{utc:'00:00:00',text:'TO CLEAR'}];renderDigitalRows();
+                    const canvas=document.querySelector('#digital-waterfall'),context=canvas.getContext('2d');
+                    const before=context.getImageData(0,0,canvas.width,canvas.height),worker=digitalWorker;
+                    const pending=digitalSpectrumCount,progress=document.querySelector('#digital-progress').value;
+                    document.querySelector('#digital-clear').click();
+                    const after=context.getImageData(0,0,canvas.width,canvas.height);
+                    return {rows:digitalRows.length,visible:document.querySelectorAll('#digital-log tbody tr').length,
+                        waterfallUnchanged:before.data.every((value,index)=>value===after.data[index]),
+                        workerUnchanged:digitalWorker===worker,pendingUnchanged:digitalSpectrumCount===pending,
+                        progressUnchanged:document.querySelector('#digital-progress').value===progress};
+                }""")
+                assert preserved=={'rows':0,'visible':0,'waterfallUnchanged':True,'workerUnchanged':True,'pendingUnchanged':True,'progressUnchanged':True},preserved
                 if viewport['width']==1440:
                     await page.evaluate("""()=>{digitalRows=Array.from({length:1000},(_,i)=>({utc:'00:00:00',text:`ROW ${i}`}));addDigitalRow({utc:'00:00:01',text:'LATEST'})}""")
                     assert await page.evaluate('digitalRows.length===1000&&digitalRows[0].text==="ROW 1"')

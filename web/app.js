@@ -1049,7 +1049,7 @@ $('waterfall-quality').value=waterfallPreference;
 $('waterfall-quality').addEventListener('change',()=>{waterfallPreference=$('waterfall-quality').value;if(digitalMode)digitalWaterfallManuallyChanged=true;try{localStorage.setItem('hamsdr-waterfall',waterfallPreference);}catch{}sendWaterfallPreference();});
 $('audio-quality').value=audioProfile;
 $('audio-quality').addEventListener('change',async()=>{if(recording)stopRecording();const requested=$('audio-quality').value;if(rttyActive&&requested!=='digiraw'){audioProfile='digiraw';showAudioProfile();message('RTTY utiliza el perfil interno digiraw PCM16 a 12 kHz.');return;}audioProfile=requested;if(digitalMode&&audioProfile!=='digiraw')setDigitalCompatibility(false);if(['balanced','mobile'].includes(audioProfile)&&!await browserSupportsOpus()){fallbackFromOpus('Este navegador no ofrece decodificación Opus mediante WebCodecs.');return;}if(audioProfile!=='digiraw'){try{localStorage.setItem('hamsdr-audio-profile',audioProfile);}catch{}}resetAudio();showAudioProfile();sendAudioProfile();});
-$('digital-clear').addEventListener('click',()=>{digitalRows=[];renderDigitalRows();resetDigitalSpectrum();});
+$('digital-clear').addEventListener('click',()=>{digitalRows=[];renderDigitalRows();});
 $('digital-message-limit').addEventListener('change',()=>{
   const input=$('digital-message-limit'),limit=Number(input.value);
   if(input.value===''||!Number.isSafeInteger(limit)||limit<0)input.value='1000';
