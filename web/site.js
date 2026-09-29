@@ -3,7 +3,7 @@
 (() => {
   const config=window.hamSdrSiteConfig;
   if(!config)return;
-  document.title=`${config.receiver_name} · Preview`;
+  document.title=config.receiver_name;
   const heading=document.getElementById('site-name');
   const logo=document.getElementById('site-logo');
   const description=document.getElementById('site-details');

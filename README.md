@@ -20,6 +20,10 @@ reserved for stable releases.
   recognized, including Russian `R` and Saudi `7Z` callsigns.
 - A 2 px black line separates consecutive decoded FT8/FT4 time slots in the
   message log, including when the messages within a slot are sorted.
+- The initial HTML now includes the configured station name and description in
+  its title, visible heading, search metadata and social preview tags. Shared
+  tuning links retain their exact URL in Open Graph metadata, while canonical
+  indexing points to the station root.
 
 ## 0.6.0-dev
 

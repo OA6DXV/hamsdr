@@ -5,7 +5,7 @@ import tempfile
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from server import ROOT, load_listen_config, load_runtime_config, load_site_config
+from server import ROOT, load_listen_config, load_runtime_config, load_site_config, render_index_html
 
 
 def installation(directory, secure='mode="insecure"\ncertificate=""\nprivate_key=""\norigin=""'):
@@ -53,6 +53,22 @@ max_size_mb=50
 
 
 class SiteConfigTests(unittest.TestCase):
+    def test_share_metadata_uses_config_and_escapes_content(self):
+        config = {"receiver_name": "Radio & <40m>", "description": ['Señales "en vivo" & más']}
+        page = render_index_html(config, "https://radio.example.test", "/?freq=7074&mode=USB")
+        self.assertIn("<title>Radio &amp; &lt;40m&gt;</title>", page)
+        self.assertIn('<meta name="description" content="Señales &quot;en vivo&quot; &amp; más">', page)
+        self.assertIn('<meta property="og:title" content="Radio &amp; &lt;40m&gt;">', page)
+        self.assertIn('<meta property="og:url" content="https://radio.example.test/?freq=7074&amp;mode=USB">', page)
+        self.assertIn('<link rel="canonical" href="https://radio.example.test/">', page)
+        self.assertIn('<meta name="twitter:title" content="Radio &amp; &lt;40m&gt;">', page)
+        self.assertIn('<span id="site-name">Radio &amp; &lt;40m&gt;</span>', page)
+        self.assertIn('<li data-site-description>Señales &quot;en vivo&quot; &amp; más</li>', page)
+        self.assertNotIn('HamSDR · Preview', page)
+        self.assertNotIn('property="og:image"', page)
+        with_image = render_index_html(config, "https://radio.example.test", "/", logo_path=Path("flag.png"))
+        self.assertIn('<meta property="og:image" content="https://radio.example.test/site-logo">', with_image)
+
     def test_generic_example_is_unconfigured(self):
         generic, logo, station, bands, receiverbook = load_site_config(ROOT / "site.example.toml")
         self.assertEqual(generic["receiver_name"], "HamSDR")

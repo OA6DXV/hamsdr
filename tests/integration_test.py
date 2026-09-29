@@ -332,11 +332,18 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
         async with self.session.get(self.url+'/server.py') as response:self.assertEqual(response.status,404)
         async with self.session.get(self.url+'/') as response:
             self.assertEqual(response.status,200)
+            document=await response.text()
+            self.assertIn('<title>HamSDR</title>',document)
+            self.assertIn('<meta property="og:title" content="HamSDR">',document)
+            self.assertIn(f'<link rel="canonical" href="{self.url}/">',document)
             self.assertIn("script-src 'self'",response.headers['Content-Security-Policy'])
             self.assertIn("'wasm-unsafe-eval'",response.headers['Content-Security-Policy'])
             self.assertIn("base-uri 'none'",response.headers['Content-Security-Policy'])
             self.assertEqual(response.headers['Cross-Origin-Opener-Policy'],'same-origin')
             self.assertIn('microphone=()',response.headers['Permissions-Policy'])
+        async with self.session.get(self.url+'/?freq=7074&mode=USB') as response:
+            self.assertIn(f'<meta property="og:url" content="{self.url}/?freq=7074&amp;mode=USB">',
+                          await response.text())
         async with self.session.get(self.url+'/site-config.js') as response:
             self.assertEqual(response.status,200)
             self.assertIn('window.hamSdrSiteConfig=',await response.text())

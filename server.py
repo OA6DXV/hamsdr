@@ -4,6 +4,7 @@ import argparse
 import asyncio
 from collections import OrderedDict, deque
 import contextlib
+from html import escape
 import ipaddress
 import json
 import logging
@@ -30,6 +31,41 @@ MODES = {"USB": (300, 2700), "LSB": (-2700, -300), "AM": (-4000, 4000),
          "CW": (450, 950), "NFM": (-5000, 5000)}
 DIGITAL_AUDIO_RATE = 12000
 DIGITAL_PACKET_KIND = 12
+
+def render_index_html(site_config, public_origin, request_target, receiverbook_tag="", logo_path=None):
+    """Render crawlable station metadata in the initial HTML response."""
+    document = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
+    title = escape(site_config["receiver_name"], quote=True)
+    description = escape(" ".join(site_config["description"]) or
+                         f"Escucha {site_config['receiver_name']} en vivo.", quote=True)
+    page_url = escape(public_origin + request_target, quote=True)
+    canonical_url = escape(public_origin + "/", quote=True)
+    tags = [
+        f'<meta name="description" content="{description}">',
+        f'<link rel="canonical" href="{canonical_url}">',
+        '<meta property="og:type" content="website">',
+        f'<meta property="og:site_name" content="{title}">',
+        f'<meta property="og:title" content="{title}">',
+        f'<meta property="og:description" content="{description}">',
+        f'<meta property="og:url" content="{page_url}">',
+        '<meta name="twitter:card" content="summary">',
+        f'<meta name="twitter:title" content="{title}">',
+        f'<meta name="twitter:description" content="{description}">',
+    ]
+    if logo_path and logo_path.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}:
+        image_url = escape(public_origin + "/site-logo", quote=True)
+        tags.extend((f'<meta property="og:image" content="{image_url}">',
+                     f'<meta name="twitter:image" content="{image_url}">'))
+    if receiverbook_tag:
+        tags.append(receiverbook_tag)
+    document = document.replace("<title>HamSDR</title>", f"<title>{title}</title>", 1)
+    document = document.replace("<!-- SITE_METADATA -->", "\n".join(tags), 1)
+    document = document.replace('<span id="site-name">HamSDR</span>',
+                                f'<span id="site-name">{title}</span>', 1)
+    details = "".join(f'<li data-site-description>{escape(line)}</li>'
+                      for line in site_config["description"])
+    return document.replace('<ul id="site-details"></ul>',
+                            f'<ul id="site-details">{details}</ul>', 1)
 
 def read_site_config(requested=None):
     """Read the installation-specific configuration outside application code."""
@@ -1313,9 +1349,12 @@ def application(args):
             raise web.HTTPNotFound()
         if name in {"mfsk-decoder.js", "mfsk-decoder_bg.wasm"} and not (ROOT / "web" / name).exists():
             raise web.HTTPNotFound()
-        if name == "index.html" and gateway.receiverbook["enable"]:
-            document = (ROOT / "web/index.html").read_text(encoding="utf-8")
-            document = document.replace("<head>", f"<head>\n  {gateway.receiverbook['tag']}", 1)
+        if name == "index.html":
+            public_origin = (gateway.args.origin if gateway.args.origin not in ("", "*")
+                             else f"{request.scheme}://{request.host}")
+            document = render_index_html(gateway.site_config, public_origin, str(request.rel_url),
+                                         gateway.receiverbook["tag"] if gateway.receiverbook["enable"] else "",
+                                         gateway.site_logo)
             return web.Response(text=document, content_type="text/html")
         if name == "cty.dat":
             return web.FileResponse(ROOT / "web" / "cty.dat.gz", headers={
