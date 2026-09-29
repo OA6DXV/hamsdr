@@ -149,22 +149,29 @@ async def main():
                 await page.evaluate('sizeDigitalLog(1)')
                 assert await page.locator('.digital-log-wrap').evaluate("element=>parseInt(element.style.height,10)")==264
                 await page.evaluate("""()=>{digitalRows=[
-                    {utc:'00:00:01',snr:-20,dt:0.3,hz:1300,text:'FIRST',countries:'Spain → Canada'},
-                    {utc:'00:00:02',snr:10,dt:-0.2,hz:300,text:'SECOND',countries:'Canada → Spain'},
-                    {utc:'00:00:03',snr:-5,dt:0.1,hz:900,text:'THIRD',countries:'Spain → France'}
+                    {utc:'00:00:01',snr:-20,dt:0.3,hz:1300,text:'FIRST',countries:'Spain → Canada',batchId:'FT8:100'},
+                    {utc:'00:00:02',snr:10,dt:-0.2,hz:300,text:'SECOND',countries:'Canada → Spain',batchId:'FT8:100'},
+                    {utc:'00:00:03',snr:-5,dt:0.1,hz:900,text:'THIRD',countries:'Spain → France',batchId:'FT8:100'}
                 ];renderDigitalRows()}""")
                 await page.locator('[data-sort="snr"]').click()
                 assert await page.locator('#digital-log tbody tr:first-child td:nth-child(5)').text_content()=='SECOND'
                 await page.locator('[data-sort="snr"]').click()
                 assert await page.locator('#digital-log tbody tr:first-child td:nth-child(5)').text_content()=='FIRST'
+                await page.locator('[data-sort="snr"]').click()
+                assert await page.locator('#digital-log tbody tr:first-child td:nth-child(5)').text_content()=='THIRD'
+                await expect(page.locator('[data-sort="snr"]').locator('..')).to_have_attribute('aria-sort','none')
                 await page.locator('[data-sort="dt"]').click()
-                assert await page.locator('#digital-log tbody tr:first-child td:nth-child(5)').text_content()=='SECOND'
+                assert await page.locator('#digital-log tbody tr:first-child td:nth-child(5)').text_content()=='FIRST'
                 await page.locator('[data-sort="hz"]').click()
-                assert await page.locator('#digital-log tbody tr:first-child td:nth-child(5)').text_content()=='SECOND'
+                assert await page.locator('#digital-log tbody tr:first-child td:nth-child(5)').text_content()=='FIRST'
                 await page.locator('[data-sort="countries"]').click()
                 assert await page.locator('#digital-log tbody tr:first-child td:nth-child(5)').text_content()=='SECOND'
                 await page.locator('[data-sort="countries"]').click()
                 assert await page.locator('#digital-log tbody tr:first-child td:nth-child(5)').text_content()=='FIRST'
+                await page.evaluate("""()=>{digitalRows.push({utc:'00:00:15',snr:-100,dt:-5,hz:1,text:'NEW',countries:'Qatar → Iran',batchId:'FT8:101'});renderDigitalRows()}""")
+                assert await page.locator('#digital-log tbody tr:first-child td:nth-child(5)').text_content()=='NEW'
+                await page.locator('[data-sort="snr"]').click()
+                assert await page.locator('#digital-log tbody tr:nth-child(2) td:nth-child(5)').text_content()=='SECOND'
                 await page.locator('#digital-country').select_option('Spain')
                 assert await page.locator('#digital-log tbody tr.digital-country-match').count()==3
                 await page.evaluate('digitalRows=[];digitalSort=null;renderDigitalRows()')

@@ -12,9 +12,10 @@ reserved for stable releases.
 
 - FT8 and FT4 decoded-message logs start at ten visible rows and can expand
   to twenty after the first decode round; manual vertical resizing remains.
-- SNR, DT, Hz and country headers sort decoded messages without changing the
-  stored log. A country selector highlights matching transmitters or receivers
-  using the offline country database.
+- SNR, DT and Hz headers cycle through descending, ascending and original
+  order within each decoded FT8 or FT4 time slot. Country sorting keeps its
+  TX/RX cycle and also stays within each slot. A country selector highlights
+  matching transmitters or receivers using the offline country database.
 - Corrected the offline CTY alias parser so the first prefix of each entity is
   recognized, including Russian `R` and Saudi `7Z` callsigns.
 

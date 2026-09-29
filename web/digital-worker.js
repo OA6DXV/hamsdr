@@ -140,7 +140,10 @@ function finishSlot(){
   if(wasmDecoder&&slotFirstSample<=tolerance&&slotLastSample>=slotSamples-tolerance){
     const timestampUs=slotIndex*slotSamples/rate*1_000_000;
     const decoded=wasmDecoder.decode_slot(mode,slotBuffer,timestampUs)||[];
-    for(const result of decoded)postMessage({type:'decoded',result:enrichCountry(result)});
+    for(const result of decoded){
+      result.batchId=`${mode}:${slotIndex}`;
+      postMessage({type:'decoded',result:enrichCountry(result)});
+    }
     postMessage({type:'progress',value:100});
     postMessage({type:'status',message:`(${decoded.length}) Mensajes`,decodedCount:decoded.length});
   }else if(wasmDecoder){

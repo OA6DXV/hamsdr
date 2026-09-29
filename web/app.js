@@ -356,16 +356,23 @@ function setDigitalSort(key){
     const index=digitalSort?.key==='countries'?cycle.findIndex(item=>item.field===digitalSort.field&&item.direction===digitalSort.direction):-1;
     digitalSort={key,...cycle[(index+1)%cycle.length]};
   }else{
-    const firstDirection=key==='snr'?'desc':'asc';
-    digitalSort={key,direction:digitalSort?.key===key&&digitalSort.direction===firstDirection?(firstDirection==='asc'?'desc':'asc'):firstDirection};
+    if(digitalSort?.key!==key)digitalSort={key,direction:'desc'};
+    else if(digitalSort.direction==='desc')digitalSort={key,direction:'asc'};
+    else digitalSort=null;
   }
   renderDigitalRows();
 }
 function digitalSortedRows(){
   const entries=digitalRows.slice(-500).map((row,index)=>({row,index}));
-  if(!digitalSort)return entries.reverse();
-  const {key,field,direction}=digitalSort;
-  entries.sort((left,right)=>{
+  const groups=[];
+  for(const entry of entries){
+    const batchId=entry.row.batchId??`row:${entry.index}`;
+    const last=groups.at(-1);
+    if(last?.batchId===batchId)last.entries.push(entry);
+    else groups.push({batchId,entries:[entry]});
+  }
+  const compare=(left,right)=>{
+    const {key,field,direction}=digitalSort;
     let a,b;
     if(key==='countries'){
       a=digitalCountryParts(left.row)[field];b=digitalCountryParts(right.row)[field];
@@ -380,8 +387,8 @@ function digitalSortedRows(){
       if(order)return direction==='asc'?order:-order;
     }
     return right.index-left.index;
-  });
-  return entries;
+  };
+  return groups.reverse().flatMap(group=>digitalSort?group.entries.sort(compare):group.entries.reverse());
 }
 function renderDigitalRows(){
   const body=$('digital-log').tBodies[0];body.replaceChildren();
