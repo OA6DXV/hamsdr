@@ -388,7 +388,10 @@ function digitalSortedRows(){
     }
     return right.index-left.index;
   };
-  return groups.reverse().flatMap(group=>digitalSort?group.entries.sort(compare):group.entries.reverse());
+  return groups.reverse().flatMap((group,groupIndex)=>{
+    const rows=digitalSort?group.entries.sort(compare):group.entries.reverse();
+    return rows.map((entry,index)=>({...entry,batchBoundary:groupIndex>0&&index===0}));
+  });
 }
 function renderDigitalRows(){
   const body=$('digital-log').tBodies[0];body.replaceChildren();
@@ -398,8 +401,9 @@ function renderDigitalRows(){
     heading.parentElement.setAttribute('aria-sort',active?(digitalSort.direction==='asc'?'ascending':'descending'):'none');
     heading.title=active&&digitalSort.key==='countries'?`País ${digitalSort.field.toUpperCase()} · ${digitalSort.direction==='asc'?'A–Z':'Z–A'}`:'';
   }
-  for(const {row} of digitalSortedRows()){
+  for(const {row,batchBoundary} of digitalSortedRows()){
     const tr=document.createElement('tr');if(row.placeholder)tr.className='digital-placeholder';
+    if(batchBoundary)tr.classList.add('digital-batch-boundary');
     if(selectedCountry&&Object.values(digitalCountryParts(row)).includes(selectedCountry))tr.classList.add('digital-country-match');
     for(const key of ['utc','snr','dt','hz','text','countries']){
       const cell=document.createElement('td');cell.textContent=String(row[key]??'');tr.append(cell);

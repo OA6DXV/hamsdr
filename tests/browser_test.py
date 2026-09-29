@@ -170,8 +170,12 @@ async def main():
                 assert await page.locator('#digital-log tbody tr:first-child td:nth-child(5)').text_content()=='FIRST'
                 await page.evaluate("""()=>{digitalRows.push({utc:'00:00:15',snr:-100,dt:-5,hz:1,text:'NEW',countries:'Qatar → Iran',batchId:'FT8:101'});renderDigitalRows()}""")
                 assert await page.locator('#digital-log tbody tr:first-child td:nth-child(5)').text_content()=='NEW'
+                assert await page.locator('#digital-log tbody tr.digital-batch-boundary').count()==1
+                assert await page.locator('#digital-log tbody tr:nth-child(2)').evaluate("row=>row.classList.contains('digital-batch-boundary')")
+                assert await page.locator('#digital-log tbody tr:nth-child(2) td').first.evaluate("cell=>getComputedStyle(cell).borderTop==='2px solid rgb(0, 0, 0)'")
                 await page.locator('[data-sort="snr"]').click()
                 assert await page.locator('#digital-log tbody tr:nth-child(2) td:nth-child(5)').text_content()=='SECOND'
+                assert await page.locator('#digital-log tbody tr:nth-child(2)').evaluate("row=>row.classList.contains('digital-batch-boundary')")
                 await page.locator('#digital-country').select_option('Spain')
                 assert await page.locator('#digital-log tbody tr.digital-country-match').count()==3
                 await page.evaluate('digitalRows=[];digitalSort=null;renderDigitalRows()')

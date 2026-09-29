@@ -18,6 +18,8 @@ reserved for stable releases.
   matching transmitters or receivers using the offline country database.
 - Corrected the offline CTY alias parser so the first prefix of each entity is
   recognized, including Russian `R` and Saudi `7Z` callsigns.
+- A 2 px black line separates consecutive decoded FT8/FT4 time slots in the
+  message log, including when the messages within a slot are sorted.
 
 ## 0.6.0-dev
 
