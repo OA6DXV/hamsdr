@@ -8,6 +8,15 @@ responsive browser interface and server-side DSP.
 The current `dev` branch is a development preview. The `main` branch is
 reserved for stable releases.
 
+## 0.6.2-dev
+
+- Digital message retention is configurable in the browser, with 1,000 rows
+  by default and zero meaning unlimited retention for the current session.
+- Clearing the digital message log no longer resets its waterfall or pending
+  decoder audio.
+- The footer version links to the public repository and includes its GitHub
+  mark.
+
 ## 0.6.1-dev
 
 - FT8 and FT4 decoded-message logs start at ten visible rows and can expand
