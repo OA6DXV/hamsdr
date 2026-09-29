@@ -12,7 +12,7 @@
 .modes [data-digital-menu]{grid-column:span 2}
 .digital-panel{margin:0 0 12px}
 .digital-header{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.digital-header progress{flex:1 1 220px;min-width:140px;height:16px;accent-color:#6f0092}.digital-header label{margin-left:auto}
+.digital-header progress{flex:1 1 220px;min-width:140px;height:16px;accent-color:#6f0092}.digital-header label{margin-left:auto;display:flex;align-items:center;gap:5px;white-space:nowrap}#digital-message-limit{width:76px}
 .digital-mute{min-width:72px;font-weight:bold}.digital-mute[aria-pressed=true],.digital-mute[aria-pressed=true]:hover{background:#c40000;border-color:#8f0000;color:#fff}
 .digital-body{display:grid;grid-template-columns:minmax(0,1fr);gap:8px;margin-top:8px}
 .digital-waterfall-wrap{width:100%;min-width:0;background:#050005}.digital-canvas-wrap{position:relative;width:100%}#digital-waterfall{width:100%;height:clamp(150px,18vw,300px);background:#050005;border:1px solid #111}

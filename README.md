@@ -24,6 +24,9 @@ reserved for stable releases.
   its title, visible heading, search metadata and social preview tags. Shared
   tuning links retain their exact URL in Open Graph metadata, while canonical
   indexing points to the station root.
+- FT8/FT4 decoded messages now default to a 1,000-row browser-memory limit.
+  The user can change the limit; zero retains and displays all messages until
+  the page closes or reloads, or the user clears the log.
 
 ## 0.6.0-dev
 

@@ -329,10 +329,13 @@ function stopDigitalWorker(){
   digitalDecoderNotice=false;
 }
 function addDigitalRow(row){
-  const autoclear=$('digital-autoclear').checked;
   digitalRows.push(row);
-  if(autoclear&&digitalRows.length>300)digitalRows.splice(0,digitalRows.length-300);
+  trimDigitalRows();
   renderDigitalRows();
+}
+function trimDigitalRows(){
+  const limit=Number($('digital-message-limit').value);
+  if(Number.isSafeInteger(limit)&&limit>0&&digitalRows.length>limit)digitalRows.splice(0,digitalRows.length-limit);
 }
 function updateDigitalCountry(update){
   const row=digitalRows.find(item=>item.countryId===update.countryId);
@@ -363,7 +366,7 @@ function setDigitalSort(key){
   renderDigitalRows();
 }
 function digitalSortedRows(){
-  const entries=digitalRows.slice(-500).map((row,index)=>({row,index}));
+  const entries=digitalRows.map((row,index)=>({row,index}));
   const groups=[];
   for(const entry of entries){
     const batchId=entry.row.batchId??`row:${entry.index}`;
@@ -1047,6 +1050,11 @@ $('waterfall-quality').addEventListener('change',()=>{waterfallPreference=$('wat
 $('audio-quality').value=audioProfile;
 $('audio-quality').addEventListener('change',async()=>{if(recording)stopRecording();const requested=$('audio-quality').value;if(rttyActive&&requested!=='digiraw'){audioProfile='digiraw';showAudioProfile();message('RTTY utiliza el perfil interno digiraw PCM16 a 12 kHz.');return;}audioProfile=requested;if(digitalMode&&audioProfile!=='digiraw')setDigitalCompatibility(false);if(['balanced','mobile'].includes(audioProfile)&&!await browserSupportsOpus()){fallbackFromOpus('Este navegador no ofrece decodificación Opus mediante WebCodecs.');return;}if(audioProfile!=='digiraw'){try{localStorage.setItem('hamsdr-audio-profile',audioProfile);}catch{}}resetAudio();showAudioProfile();sendAudioProfile();});
 $('digital-clear').addEventListener('click',()=>{digitalRows=[];renderDigitalRows();resetDigitalSpectrum();});
+$('digital-message-limit').addEventListener('change',()=>{
+  const input=$('digital-message-limit'),limit=Number(input.value);
+  if(input.value===''||!Number.isSafeInteger(limit)||limit<0)input.value='1000';
+  trimDigitalRows();renderDigitalRows();
+});
 document.querySelectorAll('#digital-log [data-sort]').forEach(label=>{
   label.addEventListener('click',()=>setDigitalSort(label.dataset.sort));
   label.addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();setDigitalSort(label.dataset.sort);}});

@@ -144,6 +144,22 @@ async def main():
                 await expect(page.locator('#digital-audio-start')).to_be_hidden()
                 await expect(page.locator('#digital-progress')).to_have_attribute('max','100')
                 await expect(page.locator('#digital-download')).to_have_text('Descargar log')
+                await expect(page.locator('#digital-message-limit')).to_have_value('1000')
+                if viewport['width']==1440:
+                    await page.evaluate("""()=>{digitalRows=Array.from({length:1000},(_,i)=>({utc:'00:00:00',text:`ROW ${i}`}));addDigitalRow({utc:'00:00:01',text:'LATEST'})}""")
+                    assert await page.evaluate('digitalRows.length===1000&&digitalRows[0].text==="ROW 1"')
+                    assert await page.locator('#digital-log tbody tr').count()==1000
+                    await page.locator('#digital-message-limit').fill('0')
+                    await page.locator('#digital-message-limit').press('Tab')
+                    await page.evaluate("addDigitalRow({utc:'00:00:02',text:'UNLIMITED'})")
+                    assert await page.evaluate('digitalRows.length===1001')
+                    assert await page.locator('#digital-log tbody tr').count()==1001
+                    await page.locator('#digital-message-limit').fill('3')
+                    await page.locator('#digital-message-limit').press('Tab')
+                    assert await page.evaluate('digitalRows.length===3')
+                    await page.locator('#digital-message-limit').fill('1000')
+                    await page.locator('#digital-message-limit').press('Tab')
+                    await page.evaluate('digitalRows=[];renderDigitalRows()')
                 assert (await page.locator('#digital-log thead th').all_text_contents())[:6]==['UTC','SNR','DT','Hz','Mensaje','Países']
                 await expect(page.locator('#digital-country option')).not_to_have_count(1,timeout=10000)
                 await page.evaluate('sizeDigitalLog(1)')
@@ -223,8 +239,8 @@ async def main():
                     assert mobile_log['message']>=260
                     assert mobile_log['whiteSpace']=='nowrap'
                 if viewport['width']<=650:
-                    mobile_controls=await page.evaluate("""()=>{const rect=id=>{const r=document.querySelector(id).getBoundingClientRect();return{x:r.x,y:r.y,w:r.width,h:r.height}};return{autoclear:document.querySelector('#digital-autoclear').parentElement.getBoundingClientRect().toJSON(),mute:rect('#digital-mute'),download:rect('#digital-download'),clear:rect('#digital-clear'),progress:rect('#digital-progress')}}""")
-                    assert mobile_controls['autoclear']['y']<mobile_controls['mute']['y']
+                    mobile_controls=await page.evaluate("""()=>{const rect=id=>{const r=document.querySelector(id).getBoundingClientRect();return{x:r.x,y:r.y,w:r.width,h:r.height}};return{limit:document.querySelector('#digital-message-limit').parentElement.getBoundingClientRect().toJSON(),mute:rect('#digital-mute'),download:rect('#digital-download'),clear:rect('#digital-clear'),progress:rect('#digital-progress')}}""")
+                    assert mobile_controls['limit']['y']<mobile_controls['mute']['y']
                     assert max(mobile_controls[name]['y'] for name in ('mute','download','clear'))-min(mobile_controls[name]['y'] for name in ('mute','download','clear'))<=2
                     assert mobile_controls['progress']['y']>mobile_controls['mute']['y']
                 await page.wait_for_timeout(300)
