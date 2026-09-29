@@ -20,12 +20,13 @@ let countryRowSequence=0;
 let pendingCountryRows=[];
 
 function parseCountryDatabase(text){
-  const exact=new Map(),prefixes=[];
+  const exact=new Map(),prefixes=[],countries=new Set();
   for(const record of text.split(';')){
     const fields=record.split(':');
     if(fields.length<8)continue;
     const country=fields[0].trim();
     if(!country)continue;
+    countries.add(country);
     for(const alias of fields.slice(7).join(':').replaceAll(/\s+/g,'').split(',')){
       if(!alias)continue;
       const isExact=alias.startsWith('=');
@@ -35,7 +36,7 @@ function parseCountryDatabase(text){
     }
   }
   prefixes.sort((left,right)=>right[0].length-left[0].length);
-  return {exact,prefixes};
+  return {exact,prefixes,countries:[...countries].sort((left,right)=>left.localeCompare(right))};
 }
 
 function isCallsign(value){
@@ -69,6 +70,7 @@ async function loadCountryDatabase(){
     const response=await fetch(new URL('./cty.dat',import.meta.url),{cache:'force-cache'});
     if(!response.ok)throw new Error(`country database request failed: ${response.status}`);
     countryDatabase=parseCountryDatabase(await response.text());
+    postMessage({type:'country-list',countries:countryDatabase.countries});
     for(const pending of pendingCountryRows)postMessage({type:'country-update',countryId:pending.countryId,countries:countriesForMessage(pending.text)});
     pendingCountryRows=[];
   }catch(error){

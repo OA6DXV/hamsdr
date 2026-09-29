@@ -8,6 +8,14 @@ responsive browser interface and server-side DSP.
 The current `dev` branch is a development preview. The `main` branch is
 reserved for stable releases.
 
+## 0.6.1-dev
+
+- FT8 and FT4 decoded-message logs start at ten visible rows and can expand
+  to twenty after the first decode round; manual vertical resizing remains.
+- SNR, DT, Hz and country headers sort decoded messages without changing the
+  stored log. A country selector highlights matching transmitters or receivers
+  using the offline country database.
+
 ## 0.6.0-dev
 
 - The browser can calibrate its relative S-meter from 15 seconds of live,

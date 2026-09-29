@@ -18,6 +18,7 @@ let zoom=1, viewCenter=center, socket, retry=500, timer, tuneTimer, lastRow, vie
 let dynamicSpectrumBottom=null,dynamicSpectrumTop=null;
 let context, node, gain, audioStarting=false, audioEnabled=false, audioEverStarted=false, audioProfile='balanced', opusDecoder=null, opusSupportPromise=null, lastOpusSequence=null, spectrumFrames=0, audioPackets=0;
 let digimodesAvailable=!!siteConfig.digimodes,digitalMode=null,digitalWorker=null,digitalRows=[],digitalDownloadUrl=null,digitalDecoderNotice=false,digitalAudioCompatible=true,digitalPreviousAudioProfile=null,digitalPreviousWaterfallPreference=null,digitalWaterfallManuallyChanged=false,digitalProfilePending=false,digitalLogSized=false;
+let digitalSort=null;
 let rttyActive=false,rttyNode=null,rttySink=null,rttyModuleLoaded=false,rttyText='';
 let rttyNoiseFloor=null,rttyColorCeiling=null,rttySpectrumFrames=0;
 let rttyStreams=new Map();
@@ -319,6 +320,7 @@ function ensureDigitalWorker(){
     if(data.type==='notice'&&!digitalDecoderNotice){digitalDecoderNotice=true;addDigitalRow({utc:new Date().toISOString().slice(11,19),snr:'',dt:'',hz:'',text:data.message,placeholder:true});}
     if(data.type==='decoded')addDigitalRow(data.result);
     if(data.type==='country-update')updateDigitalCountry(data);
+    if(data.type==='country-list')setDigitalCountryList(data.countries);
   };
   return digitalWorker;
 }
@@ -338,20 +340,71 @@ function updateDigitalCountry(update){
   row.countries=update.countries;row.countryPending=false;
   renderDigitalRows();
 }
+function setDigitalCountryList(countries){
+  const select=$('digital-country'),selected=select.value;
+  select.replaceChildren(new Option('Todos los países',''));
+  for(const country of countries||[])select.add(new Option(country,country));
+  select.value=selected;
+}
+function digitalCountryParts(row){
+  const [tx='',rx='']=String(row.countries||'').split(' → ');
+  return{tx:tx==='—'?'':tx,rx:rx==='—'?'':rx};
+}
+function setDigitalSort(key){
+  if(key==='countries'){
+    const cycle=[{field:'tx',direction:'asc'},{field:'rx',direction:'asc'},{field:'rx',direction:'desc'},{field:'tx',direction:'desc'}];
+    const index=digitalSort?.key==='countries'?cycle.findIndex(item=>item.field===digitalSort.field&&item.direction===digitalSort.direction):-1;
+    digitalSort={key,...cycle[(index+1)%cycle.length]};
+  }else{
+    const firstDirection=key==='snr'?'desc':'asc';
+    digitalSort={key,direction:digitalSort?.key===key&&digitalSort.direction===firstDirection?(firstDirection==='asc'?'desc':'asc'):firstDirection};
+  }
+  renderDigitalRows();
+}
+function digitalSortedRows(){
+  const entries=digitalRows.slice(-500).map((row,index)=>({row,index}));
+  if(!digitalSort)return entries.reverse();
+  const {key,field,direction}=digitalSort;
+  entries.sort((left,right)=>{
+    let a,b;
+    if(key==='countries'){
+      a=digitalCountryParts(left.row)[field];b=digitalCountryParts(right.row)[field];
+    }else{
+      const rawA=String(left.row[key]??'').trim(),rawB=String(right.row[key]??'').trim();
+      a=rawA?Number(rawA):NaN;b=rawB?Number(rawB):NaN;
+    }
+    const missingA=key==='countries'?!a:!Number.isFinite(a),missingB=key==='countries'?!b:!Number.isFinite(b);
+    if(missingA!==missingB)return missingA?1:-1;
+    if(!missingA){
+      const order=key==='countries'?a.localeCompare(b,'en',{sensitivity:'base'}):a-b;
+      if(order)return direction==='asc'?order:-order;
+    }
+    return right.index-left.index;
+  });
+  return entries;
+}
 function renderDigitalRows(){
   const body=$('digital-log').tBodies[0];body.replaceChildren();
-  for(const row of digitalRows.slice(-500).reverse()){
+  const selectedCountry=$('digital-country').value;
+  for(const heading of document.querySelectorAll('#digital-log [data-sort]')){
+    const active=digitalSort?.key===heading.dataset.sort;
+    heading.parentElement.setAttribute('aria-sort',active?(digitalSort.direction==='asc'?'ascending':'descending'):'none');
+    heading.title=active&&digitalSort.key==='countries'?`País ${digitalSort.field.toUpperCase()} · ${digitalSort.direction==='asc'?'A–Z':'Z–A'}`:'';
+  }
+  for(const {row} of digitalSortedRows()){
     const tr=document.createElement('tr');if(row.placeholder)tr.className='digital-placeholder';
+    if(selectedCountry&&Object.values(digitalCountryParts(row)).includes(selectedCountry))tr.classList.add('digital-country-match');
     for(const key of ['utc','snr','dt','hz','text','countries']){
       const cell=document.createElement('td');cell.textContent=String(row[key]??'');tr.append(cell);
     }
+    tr.append(document.createElement('td'));
     body.append(tr);
   }
   $('digital-download').disabled=!digitalRows.length;
 }
 function sizeDigitalLog(count){
   if(digitalLogSized)return;
-  const lines=Math.max(1,Math.min(20,Number(count)||0));
+  const lines=Math.max(10,Math.min(20,Number(count)||0));
   $('digital-log').closest('.digital-log-wrap').style.height=`${(lines+1)*24}px`;
   digitalLogSized=true;
 }
@@ -391,7 +444,7 @@ function setDigitalMode(next,{autoStartAudio=true}={}){
     digitalMode=selected;
     setDigitalCompatibility(true);
     setDigitalProgress();
-    digitalLogSized=false;$('digital-log').closest('.digital-log-wrap').style.height='240px';
+    digitalLogSized=false;$('digital-log').closest('.digital-log-wrap').style.height='264px';
     setDigitalDspState(true);
     resetDigitalSpectrum();
     mode='USB';narrow=false;[low,high]=[0,3000];tune();
@@ -983,6 +1036,11 @@ $('waterfall-quality').addEventListener('change',()=>{waterfallPreference=$('wat
 $('audio-quality').value=audioProfile;
 $('audio-quality').addEventListener('change',async()=>{if(recording)stopRecording();const requested=$('audio-quality').value;if(rttyActive&&requested!=='digiraw'){audioProfile='digiraw';showAudioProfile();message('RTTY utiliza el perfil interno digiraw PCM16 a 12 kHz.');return;}audioProfile=requested;if(digitalMode&&audioProfile!=='digiraw')setDigitalCompatibility(false);if(['balanced','mobile'].includes(audioProfile)&&!await browserSupportsOpus()){fallbackFromOpus('Este navegador no ofrece decodificación Opus mediante WebCodecs.');return;}if(audioProfile!=='digiraw'){try{localStorage.setItem('hamsdr-audio-profile',audioProfile);}catch{}}resetAudio();showAudioProfile();sendAudioProfile();});
 $('digital-clear').addEventListener('click',()=>{digitalRows=[];renderDigitalRows();resetDigitalSpectrum();});
+document.querySelectorAll('#digital-log [data-sort]').forEach(label=>{
+  label.addEventListener('click',()=>setDigitalSort(label.dataset.sort));
+  label.addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();setDigitalSort(label.dataset.sort);}});
+});
+$('digital-country').addEventListener('change',renderDigitalRows);
 $('digital-download').addEventListener('click',()=>{
   const lines=[`HamSDR ${digitalMode||'digital'} decode export`, `Frequency: ${(frequency/1000).toFixed(3)} kHz`, `Demodulation: ${mode}`, `Exported: ${new Date().toISOString()}`, '', 'UTC\tSNR\tDT\tHz\tMessage\tCountries'];
   for(const row of digitalRows)lines.push([row.utc,row.snr,row.dt,row.hz,row.text,row.countries].map(value=>String(value??'')).join('\t'));

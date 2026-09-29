@@ -100,13 +100,13 @@ async def main():
                 await expect(page.locator('#calibrate-smeter')).to_contain_text('Calibrando')
                 await expect(page.locator('#smeter-calibration-status')).to_contain_text('Calibrado',timeout=18000)
                 assert await page.locator('.signal-panel').get_attribute('data-calibrated')=='true'
-                assert await page.evaluate("Object.keys(localStorage).some(key=>key.startsWith('hamsdr-smeter:v1:'))")
+                assert await page.evaluate("Object.keys(localStorage).some(key=>key.startsWith('hamsdr-smeter:v3:'))")
                 assert 'dBFS' in await page.locator('#power').text_content()
                 await expect(page.locator('#calibrate-smeter')).to_have_text('Restablecer')
                 await page.locator('#calibrate-smeter').click()
                 await expect(page.locator('#smeter-calibration-status')).to_have_text('Escala S relativa sin calibrar.')
                 await expect(page.locator('#calibrate-smeter')).to_have_text('Calibrar')
-                assert not await page.evaluate("Object.keys(localStorage).some(key=>key.startsWith('hamsdr-smeter:v1:'))")
+                assert not await page.evaluate("Object.keys(localStorage).some(key=>key.startsWith('hamsdr-smeter:v3:'))")
             await expect(page.locator('#waterfall')).to_have_attribute('data-speed','1')
             await page.locator('#wfspeed').select_option('2')
             await expect(page.locator('#waterfall')).to_have_attribute('data-speed','2')
@@ -144,7 +144,31 @@ async def main():
                 await expect(page.locator('#digital-audio-start')).to_be_hidden()
                 await expect(page.locator('#digital-progress')).to_have_attribute('max','100')
                 await expect(page.locator('#digital-download')).to_have_text('Descargar log')
-                assert await page.locator('#digital-log thead').text_content()=='UTCSNRDTHzMensajePaíses'
+                assert (await page.locator('#digital-log thead th').all_text_contents())[:6]==['UTC','SNR','DT','Hz','Mensaje','Países']
+                await expect(page.locator('#digital-country option')).not_to_have_count(1,timeout=10000)
+                await page.evaluate('sizeDigitalLog(1)')
+                assert await page.locator('.digital-log-wrap').evaluate("element=>parseInt(element.style.height,10)")==264
+                await page.evaluate("""()=>{digitalRows=[
+                    {utc:'00:00:01',snr:-20,dt:0.3,hz:1300,text:'FIRST',countries:'Spain → Canada'},
+                    {utc:'00:00:02',snr:10,dt:-0.2,hz:300,text:'SECOND',countries:'Canada → Spain'},
+                    {utc:'00:00:03',snr:-5,dt:0.1,hz:900,text:'THIRD',countries:'Spain → France'}
+                ];renderDigitalRows()}""")
+                await page.locator('[data-sort="snr"]').click()
+                assert await page.locator('#digital-log tbody tr:first-child td:nth-child(5)').text_content()=='SECOND'
+                await page.locator('[data-sort="snr"]').click()
+                assert await page.locator('#digital-log tbody tr:first-child td:nth-child(5)').text_content()=='FIRST'
+                await page.locator('[data-sort="dt"]').click()
+                assert await page.locator('#digital-log tbody tr:first-child td:nth-child(5)').text_content()=='SECOND'
+                await page.locator('[data-sort="hz"]').click()
+                assert await page.locator('#digital-log tbody tr:first-child td:nth-child(5)').text_content()=='SECOND'
+                await page.locator('[data-sort="countries"]').click()
+                assert await page.locator('#digital-log tbody tr:first-child td:nth-child(5)').text_content()=='SECOND'
+                await page.locator('[data-sort="countries"]').click()
+                assert await page.locator('#digital-log tbody tr:first-child td:nth-child(5)').text_content()=='FIRST'
+                await page.locator('#digital-country').select_option('Spain')
+                assert await page.locator('#digital-log tbody tr.digital-country-match').count()==3
+                await page.evaluate('digitalRows=[];digitalSort=null;renderDigitalRows()')
+                await page.locator('#digital-country').select_option('')
                 await expect(page.locator('#listen')).to_have_text('Pausar audio',timeout=10000)
                 await expect(page.locator('#bandwidth')).to_have_text('3000')
                 await expect(page.locator('#filter-unit')).to_have_text('Hz')
@@ -188,7 +212,7 @@ async def main():
                     assert mobile_log['message']>=260
                     assert mobile_log['whiteSpace']=='nowrap'
                 if viewport['width']<=650:
-                    mobile_controls=await page.evaluate("""()=>{const rect=id=>{const r=document.querySelector(id).getBoundingClientRect();return{x:r.x,y:r.y,w:r.width,h:r.height}};return{autoclear:rect('#digital-autoclear').parentElement.getBoundingClientRect().toJSON(),mute:rect('#digital-mute'),download:rect('#digital-download'),clear:rect('#digital-clear'),progress:rect('#digital-progress')}}""")
+                    mobile_controls=await page.evaluate("""()=>{const rect=id=>{const r=document.querySelector(id).getBoundingClientRect();return{x:r.x,y:r.y,w:r.width,h:r.height}};return{autoclear:document.querySelector('#digital-autoclear').parentElement.getBoundingClientRect().toJSON(),mute:rect('#digital-mute'),download:rect('#digital-download'),clear:rect('#digital-clear'),progress:rect('#digital-progress')}}""")
                     assert mobile_controls['autoclear']['y']<mobile_controls['mute']['y']
                     assert max(mobile_controls[name]['y'] for name in ('mute','download','clear'))-min(mobile_controls[name]['y'] for name in ('mute','download','clear'))<=2
                     assert mobile_controls['progress']['y']>mobile_controls['mute']['y']
@@ -210,6 +234,13 @@ async def main():
                 await expect(page.locator('#audio-quality')).to_have_value('digiraw')
                 await expect(page.locator('#mode-display')).to_have_text('USB')
                 await page.locator('[data-digital-mode="FT8"]').click()
+                await expect(page.locator('#digital-panel')).to_be_hidden()
+                await page.locator('[data-digital-mode="FT4"]').click()
+                await expect(page.locator('#digital-panel')).to_be_visible()
+                assert await page.locator('.digital-log-wrap').evaluate("element=>parseInt(element.style.height,10)")==264
+                await page.evaluate('sizeDigitalLog(1)')
+                assert await page.locator('.digital-log-wrap').evaluate("element=>parseInt(element.style.height,10)")==264
+                await page.locator('[data-digital-mode="FT4"]').click()
                 await expect(page.locator('#digital-panel')).to_be_hidden()
                 await page.locator('#listen').click()
                 await expect(page.locator('#listen')).to_have_text('Iniciar audio')
