@@ -6,6 +6,15 @@ build or runtime. Compiled browser decoders and the CTY database are included.
 - FFTW3f, GPL-2.0-or-later, for shared spectrum FFT processing.
 - aiohttp 3.14.3, Apache-2.0 or MIT, for HTTP and WebSocket transport.
 - libopus, BSD-3-Clause, for optional Opus audio encoding.
+- CWformer v0.2.0, MIT, by parsimo2010, for optional client-side neural CW
+  decoding. Its released FP32 ONNX weights and exact mel tables are included
+  in `web/cwformer/`. Source: https://github.com/parsimo2010/CWformer,
+  release https://github.com/parsimo2010/CWformer/releases/tag/v0.2.0.
+  Copyright and permission notice: `licenses/CWformer-MIT.txt`.
+- ONNX Runtime Web 1.22.0, MIT, Microsoft Corporation, for browser-only
+  inference. The WASM runtime and loaders are vendored in `web/cwformer/`.
+  Source: https://github.com/microsoft/onnxruntime/tree/v1.22.0.
+  Copyright and permission notice: `licenses/ONNX-Runtime-MIT.txt`.
 - mfsk-core, GPL-3.0, for browser WebAssembly FT8/FT4 decoding when digital
   modes are enabled.
 - cw-dit (`cwdit-dsp` and `cwdit-morse`), MIT OR Apache-2.0, by swilcox and

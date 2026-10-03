@@ -6,7 +6,7 @@ const protocolVersion=1,waterfallProtocolVersion=2;
 const sharedParams=new URLSearchParams(location.search);
 const sharedDigitalMode=(()=>{const value=(sharedParams.get('digital')||'').toUpperCase();return ['FT8','FT4'].includes(value)?value:(sharedParams.get('ft8')==='1'?'FT8':null);})();
 const sharedRtty=(sharedParams.get('digital')||'').toUpperCase()==='RTTY';
-const sharedCw=['CW','CW-DECODE'].includes((sharedParams.get('digital')||'').toUpperCase());
+const sharedCw=['CW','CW-DECODE','MORSE','CWFORMER'].includes((sharedParams.get('digital')||'').toUpperCase());
 const sharedMuted=sharedParams.get('mute')==='1';
 const siteConfig=window.hamSdrSiteConfig||{};
 const defaults = {LSB:[-2700,-300],USB:[300,2700],AM:[-4000,4000],CW:[450,950],NFM:[-5000,5000]};
@@ -25,7 +25,7 @@ let rttyNoiseFloor=null,rttyColorCeiling=null,rttySpectrumFrames=0;
 let rttyStreams=new Map();
 let rttyPreviousAudioProfile=null,rttyProfilePending=false;
 let rttyProfileSuggestion=null;
-let cwActive=false,cwCompatible=true,cwPreviousAudioProfile=null,cwProfilePending=false;
+let cwActive=false,cwCompatible=true,cwPreviousAudioProfile=null,cwProfilePending=false,cwDecoderType='morse';
 const cwPanel=new window.CWDecodePanel({listen:()=>listen(),mute:()=>setMuted(!muted),configure:()=>{updateCwPanel();updateSharedUrl();}});
 let spectrumHistory=[],waterfallNavigationHistory=[];
 let waterfallPreference='balanced',waterfallProfile='balanced',waterfallSpeed=1,drawAverage=0,lastProfileRequest=0,profileTimer,pendingRow,waterfallFrame;
@@ -559,22 +559,23 @@ function setRttyMode(enabled,{autoStartAudio=true}={}){
     rttyActive=true;mode='LSB';narrow=false;[low,high]=digitalDefaults.LSB;$('rtty-reverse').checked=false;setDigitalDspState(true);updateRttySpectrumRange(true);tune();
     $('audio-quality').querySelector('option[value="digiraw"]').hidden=false;audioProfile='digiraw';rttyProfilePending=true;resetAudio();showAudioProfile();sendDigitalMode('RTTY');sendAudioProfile();
     $('rtty-panel').hidden=false;$('digital-separator').hidden=false;$('rtty-multi-panel').hidden=!$('rtty-multi').checked;$('rtty-waterfall').dataset.multi=String($('rtty-multi').checked);
-    document.querySelector('[data-rtty-mode]').setAttribute('aria-pressed','true');updateRttyTitle();
+    updateRttyTitle();
     if(audioEnabled)void ensureRttyNode();else if(autoStartAudio)void listen();
   }else{
     rttyActive=false;$('rtty-panel').hidden=true;$('digital-separator').hidden=!(digitalMode||cwActive);hideRttyProfileSuggestion();if(!digitalMode&&!cwActive)setDigitalDspState(false);
-    document.querySelector('[data-rtty-mode]').setAttribute('aria-pressed','false');if(rttyNode)rttyNode.port.postMessage({type:'enabled',enabled:false});
+    if(rttyNode)rttyNode.port.postMessage({type:'enabled',enabled:false});
     sendDigitalMode(null);if(rttyPreviousAudioProfile){audioProfile=rttyPreviousAudioProfile;resetAudio();showAudioProfile();sendAudioProfile();}rttyPreviousAudioProfile=null;rttyProfilePending=false;$('audio-quality').querySelector('option[value="digiraw"]').hidden=true;
   }
   updateSharedUrl();
 }
-function updateCwPanel(){cwPanel.update({active:cwActive,audio:audioEnabled,compatible:cwCompatible,mode,frequency,low,high});}
-function setCwMode(enabled,{autoStartAudio=true}={}){
+function updateCwPanel(){cwPanel.update({active:cwActive,audio:audioEnabled,compatible:cwCompatible,decoderType:cwDecoderType,mode,frequency,low,high});}
+function setCwMode(enabled,{autoStartAudio=true,decoderType='morse'}={}){
+  if(enabled&&cwActive&&decoderType!==cwDecoderType){setCwMode(false);}
   const selected=Boolean(enabled)&&!cwActive;
   if(selected){
     if(!digimodesAvailable){message('Digimodos no están habilitados en este receptor.');return;}
     if(digitalMode)setDigitalMode(null);if(rttyActive)setRttyMode(false);
-    cwPreviousAudioProfile=audioProfile;cwActive=true;cwCompatible=true;cwProfilePending=true;
+    cwPreviousAudioProfile=audioProfile;cwActive=true;cwCompatible=true;cwProfilePending=true;cwDecoderType=decoderType;
     mode='CW';narrow=false;[low,high]=digitalDefaults.CW;setDigitalDspState(true);
     $('audio-quality').querySelector('option[value="digiraw"]').hidden=false;
     audioProfile='digiraw';resetAudio();showAudioProfile();tune();sendDigitalMode('CW');sendAudioProfile();
@@ -585,7 +586,7 @@ function setCwMode(enabled,{autoStartAudio=true}={}){
     if(cwPreviousAudioProfile){audioProfile=cwPreviousAudioProfile;resetAudio();showAudioProfile();sendAudioProfile();}
     cwPreviousAudioProfile=null;$('audio-quality').querySelector('option[value="digiraw"]').hidden=true;
   }
-  document.querySelector('[data-cw-mode]').setAttribute('aria-pressed',String(cwActive));
+  document.querySelector('[data-cw-mode]').setAttribute('aria-pressed',String(cwActive&&cwDecoderType==='morse'));
   $('digital-separator').hidden=!(digitalMode||rttyActive||cwActive);updateCwPanel();updateSharedUrl();
 }
 function handleDigitalPacket(bytes){
@@ -694,11 +695,14 @@ function sharedUrl(){
   if(low!==base[0]||high!==base[1]){url.searchParams.set('low',String(low));url.searchParams.set('high',String(high));}
   if(Math.abs(zoom-1)>.001)url.searchParams.set('zoom',String(Number(zoom.toFixed(2))));
   if(digitalMode)url.searchParams.set('digital',digitalMode);else if(rttyActive){url.searchParams.set('digital','RTTY');const baud=Number($('rtty-baud').value),shift=Number($('rtty-shift').value),rttyCenter=Number($('rtty-center').value);if(baud!==45.45)url.searchParams.set('baud',String(baud));if(shift!==170)url.searchParams.set('shift',String(shift));if(rttyCenter!==1000)url.searchParams.set('center',String(rttyCenter));url.searchParams.set('reverse',$('rtty-reverse').checked?'1':'0');if(!$('rtty-afc').checked)url.searchParams.set('afc','0');if($('rtty-multi').checked)url.searchParams.set('multi','1');}
-  if(cwActive){url.searchParams.set('digital','CW');url.searchParams.set('tone',$('cw-tone').value);url.searchParams.set('wpm',$('cw-wpm').value);}
+  if(cwActive){url.searchParams.set('digital',cwDecoderType==='cwformer'?'CWFORMER':'CW');url.searchParams.set('tone',$('cw-tone').value);url.searchParams.set('wpm',$('cw-wpm').value);}
   if(muted)url.searchParams.set('mute','1');
   return url;
 }
-function updateSharedUrl(){if(bandConfigured&&sharedTuningApplied)history.replaceState(null,'',sharedUrl());}
+function updateSharedUrl(){
+  document.querySelector('[data-digital-menu]').value=digitalMode==='FT4'?'FT4':rttyActive?'RTTY':cwActive&&cwDecoderType==='cwformer'?'CWFORMER':'';
+  if(bandConfigured&&sharedTuningApplied)history.replaceState(null,'',sharedUrl());
+}
 function applySharedTuning(){
   if(sharedTuningApplied)return;
   const requestedMode=(sharedParams.get('mode')||'').toUpperCase();
@@ -725,7 +729,7 @@ function applySharedDigitalState(){
     for(const [id,key,min,max] of [['cw-tone','tone',100,5000],['cw-wpm','wpm',5,60]]){
       const value=Number(sharedParams.get(key));if(sharedParams.has(key)&&Number.isFinite(value)&&value>=min&&value<=max)$(id).value=String(value);
     }
-    setCwMode(true,{autoStartAudio:false});
+    setCwMode(true,{autoStartAudio:false,decoderType:sharedParams.get('digital')?.toUpperCase()==='CWFORMER'?'cwformer':'morse'});
     const requestedMode=(sharedParams.get('mode')||'').toUpperCase();if(digitalDefaults[requestedMode]){mode=requestedMode;[low,high]=digitalDefaults[mode];}
     const requestedLow=Number(sharedParams.get('low')),requestedHigh=Number(sharedParams.get('high'));
     if(sharedParams.has('low')&&sharedParams.has('high')&&Number.isFinite(requestedLow)&&Number.isFinite(requestedHigh)&&requestedLow>=-digitalFilterMaximum&&requestedHigh<=digitalFilterMaximum&&requestedHigh-requestedLow>=100){low=requestedLow;high=requestedHigh;}tune();
@@ -1065,7 +1069,13 @@ document.querySelectorAll('[data-step]').forEach(b=>b.addEventListener('click',(
 document.querySelectorAll('[data-fix]').forEach(b=>b.addEventListener('click',()=>{frequency=Math.round(frequency/1000)*1000;tune();}));
 document.querySelectorAll('[data-mode]').forEach(b=>b.addEventListener('click',()=>{mode=b.dataset.mode;narrow=!!b.dataset.narrow;[low,high]=(digitalMode||rttyActive||cwActive?(narrow?narrowDefaults:digitalDefaults):(narrow?narrowDefaults:defaults))[mode];if(rttyActive&&mode==='USB')$('rtty-reverse').checked=true;else if(rttyActive&&mode==='LSB')$('rtty-reverse').checked=false;tune();}));
 document.querySelectorAll('[data-digital-mode]').forEach(b=>b.addEventListener('click',()=>setDigitalMode(b.dataset.digitalMode)));
-document.querySelector('[data-rtty-mode]').addEventListener('click',()=>setRttyMode(true));
+document.querySelector('[data-digital-menu]').addEventListener('change',event=>{
+  const selected=event.target.value;
+  if(selected==='FT4')setDigitalMode('FT4');
+  else if(selected==='RTTY')setRttyMode(true);
+  else if(selected==='CWFORMER')setCwMode(true,{decoderType:'cwformer'});
+  else {if(digitalMode)setDigitalMode(null);if(rttyActive)setRttyMode(false);if(cwActive)setCwMode(false);}
+});
 document.querySelector('[data-cw-mode]').addEventListener('click',()=>setCwMode(true));
 $('rtty-clear').addEventListener('click',()=>{rttyText='';rttyStreams.clear();$('rtty-terminal').textContent='';renderRttyStreams();if(rttyNode)rttyNode.port.postMessage({type:'reset'});});
 for(const id of ['rtty-baud','rtty-shift','rtty-center','rtty-reverse','rtty-afc'])$(id).addEventListener('change',()=>{hideRttyProfileSuggestion();sendRttyConfiguration();});

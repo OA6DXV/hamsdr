@@ -9,13 +9,17 @@ window.CWDecodePanel=class {
     this.$('cw-clear').onclick=()=>{this.text='';this.$('cw-terminal').textContent='';};
     for(const id of ['cw-tone','cw-wpm'])this.$(id).onchange=()=>configure();
     this.$('cw-waterfall').onclick=event=>{
+      if(this.decoderType==='cwformer')return;
       const rect=event.currentTarget.getBoundingClientRect(),{minimum,maximum}=this.configuration;
       this.$('cw-tone').value=String(Math.round(minimum+(maximum-minimum)*Math.max(0,Math.min(1,(event.clientX-rect.left)/rect.width))));configure();
     };
   }
-  update({active,audio,compatible=true,mode,frequency,low,high}){
+  update({active,audio,compatible=true,decoderType='morse',mode,frequency,low,high}){
+    if(decoderType!==this.decoderType){this.stop();this.decoderType=decoderType;this.text='';this.$('cw-terminal').textContent='';}
     this.active=active;this.audio=audio;this.compatible=compatible;this.$('cw-panel').hidden=!active;
-    this.$('cw-title').textContent=`CW-Decode · ${mode} · ${(frequency/1000).toFixed(3)} kHz`;
+    this.$('cw-title').textContent=`${decoderType==='cwformer'?'CW Experimental':'Morse'} · ${mode} · ${(frequency/1000).toFixed(3)} kHz`;
+    this.$('cw-tone').disabled=decoderType==='cwformer';this.$('cw-wpm').disabled=decoderType==='cwformer';
+    this.$('cw-tone-marker').hidden=decoderType==='cwformer';
     this.$('cw-audio-start').hidden=!(active&&!audio&&compatible);
     this.$('cw-waterfall-message').hidden=compatible;
     this.$('cw-waterfall-message').textContent=compatible?'':'Perfil de audio incompatible, reinicie el modo digital';
@@ -37,7 +41,7 @@ window.CWDecodePanel=class {
   }
   start(){
     this.$('cw-state').textContent='Preparando decoder…';this.ready=false;this.pending=0;
-    const worker=this.worker=new Worker(new URL('./cw-worker.js',location.href),{type:'module'});
+    const worker=this.worker=new Worker(new URL(this.decoderType==='cwformer'?'./cwformer-worker.mjs':'./cw-worker.js',location.href),{type:'module'});
     worker.onmessage=({data})=>{
       if(worker!==this.worker)return;
       if(data.type==='ready'){this.ready=true;this.$('cw-state').textContent='Buscando señal CW…';}
@@ -45,7 +49,7 @@ window.CWDecodePanel=class {
       else if(data.type==='text'){
         this.text=(this.text+data.text).slice(-20000);const terminal=this.$('cw-terminal');terminal.textContent=this.text;terminal.scrollTop=terminal.scrollHeight;
       }else if(data.type==='spectrum')this.draw(data);
-      else if(data.type==='status')this.$('cw-state').textContent=data.locked?`${data.wpm.toFixed(1)} WPM · ${data.keyed?'Señal':'Escuchando'}`:'Reconociendo velocidad…';
+      else if(data.type==='status')this.$('cw-state').textContent=data.message||(data.locked?`${data.wpm.toFixed(1)} WPM · ${data.keyed?'Señal':'Escuchando'}`:'Reconociendo velocidad…');
       else if(data.type==='error')this.failed(data.message);
     };
     worker.onerror=()=>this.failed('No se pudo cargar el decoder CW.');

@@ -133,10 +133,8 @@ async def main():
                 assert (await country_response.text()).startswith('Sov Mil Order of Malta:')
                 modes=page.locator('#modes button')
                 assert await modes.nth(10).text_content()=='FT8'
-                assert await modes.nth(11).text_content()=='FT4'
-                assert await modes.nth(12).text_content()=='RTTY'
-                assert await modes.nth(13).text_content()=='CW-Decode'
-                assert await modes.nth(14).text_content()=='Digimodos'
+                assert await modes.nth(11).text_content()=='Morse'
+                await expect(page.locator('[data-digital-menu]')).to_be_enabled()
                 await page.locator('[data-digital-mode="FT8"]').click()
                 await expect(page.locator('#mode-display')).to_have_text('USB')
                 await expect(page.locator('#audio-quality')).to_have_value('digiraw')
@@ -279,12 +277,12 @@ async def main():
                 await expect(page.locator('#mode-display')).to_have_text('USB')
                 await page.locator('[data-digital-mode="FT8"]').click()
                 await expect(page.locator('#digital-panel')).to_be_hidden()
-                await page.locator('[data-digital-mode="FT4"]').click()
+                await page.locator('[data-digital-menu]').select_option('FT4')
                 await expect(page.locator('#digital-panel')).to_be_visible()
                 assert await page.locator('.digital-log-wrap').evaluate("element=>parseInt(element.style.height,10)")==264
                 await page.evaluate('sizeDigitalLog(1)')
                 assert await page.locator('.digital-log-wrap').evaluate("element=>parseInt(element.style.height,10)")==264
-                await page.locator('[data-digital-mode="FT4"]').click()
+                await page.locator('[data-digital-menu]').select_option('')
                 await expect(page.locator('#digital-panel')).to_be_hidden()
                 await page.locator('#listen').click()
                 await expect(page.locator('#listen')).to_have_text('Iniciar audio')
@@ -316,9 +314,9 @@ async def main():
                     await expect(page.locator('#listen')).to_have_text('Pausar audio')
                     await expect(page.locator('#rtty-audio-start')).to_be_hidden()
                     await page.locator('#listen').click()
-                    await page.locator('[data-rtty-mode]').click()
+                    await page.locator('[data-digital-menu]').select_option('')
                     await expect(page.locator('#rtty-panel')).to_be_hidden()
-                await page.locator('[data-rtty-mode]').click()
+                await page.locator('[data-digital-menu]').select_option('RTTY')
                 await expect(page.locator('#rtty-panel')).to_be_visible()
                 await expect(page.locator('#audio-quality')).to_have_value('digiraw')
                 await expect(page.locator('#audio-profile-status')).to_contain_text('PCM16 · 12 kHz')
@@ -374,7 +372,7 @@ async def main():
                 await expect(page.locator('#rtty-mute')).to_have_text('Silenciar')
                 await page.locator('#rtty-multi').uncheck()
                 await expect(page.locator('#rtty-multi-panel')).to_be_hidden()
-                await page.locator('[data-rtty-mode]').click()
+                await page.locator('[data-digital-menu]').select_option('')
                 await expect(page.locator('#rtty-panel')).to_be_hidden()
                 await expect(page.locator('#audio-quality')).to_have_value('balanced')
                 await page.locator('#listen').click()

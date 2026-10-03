@@ -1345,6 +1345,12 @@ def application(args):
     app.router.add_get("/~~orgstatus", receiverbook_status)
     async def asset(request):
         name = request.match_info.get("name", "index.html")
+        if name in {"cwformer/ort.wasm.min.mjs", "cwformer/ort-wasm-simd-threaded.mjs",
+                    "cwformer/ort-wasm-simd-threaded.wasm", "cwformer/cwformer_streaming_fp32.onnx",
+                    "cwformer/mel_basis.npy", "cwformer/mel_window.npy"}:
+            return web.FileResponse(ROOT / "web" / name, headers={"Cache-Control": "public, max-age=86400"})
+        if name == "cwformer-worker.mjs":
+            return web.FileResponse(ROOT / "web" / name)
         if name not in {"index.html", "style.css", "zoom.css", "site.js", "app.js", "audio-worklet.js", "classic-audio.js", "digital-worker.js", "rtty-core.mjs", "rtty-worklet.js", "mfsk-decoder.js", "mfsk-decoder_bg.wasm", "cw-panel.js", "cw-worker.js", "cw-spectrum.mjs", "cw-decoder.js", "cw-decoder_bg.wasm", "cty.dat", "waterfall-codec.js", "smeter-calibration.js", "community.js", "palette.js"}:
             raise web.HTTPNotFound()
         if name in {"mfsk-decoder.js", "mfsk-decoder_bg.wasm"} and not (ROOT / "web" / name).exists():
@@ -1364,6 +1370,7 @@ def application(args):
             })
         return web.FileResponse(ROOT / "web" / name)
     app.router.add_get("/", asset)
+    app.router.add_get("/{name:cwformer/[^/]+}", asset)
     app.router.add_get("/{name}", asset)
     return app
 

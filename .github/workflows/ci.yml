@@ -49,6 +49,7 @@ jobs:
           done
           .venv/bin/python tests/browser_test.py
           .venv/bin/python tests/cw_browser_test.py
+          .venv/bin/python tests/cwformer_browser_test.py
 
   sanitizers:
     runs-on: ubuntu-24.04

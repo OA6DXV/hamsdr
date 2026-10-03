@@ -32,7 +32,8 @@ async def main():
                     await expect(page.locator('[data-cw-mode]')).to_be_visible()
                     await expect(page.locator('#cw-panel')).to_be_hidden()
                     assert await page.evaluate('cwPanel.worker===null')
-                    positions=await page.locator('[data-rtty-mode],[data-cw-mode],[data-digital-menu]').evaluate_all('(buttons)=>buttons.map(b=>{const r=b.getBoundingClientRect();return [r.x,r.y]})')
+                    await expect(page.locator('[data-cw-mode]')).to_have_text('Morse')
+                    positions=await page.locator('[data-digital-mode="FT8"],[data-cw-mode],[data-digital-menu]').evaluate_all('(buttons)=>buttons.map(b=>{const r=b.getBoundingClientRect();return [r.x,r.y]})')
                     assert len({pos[1] for pos in positions})==1 and positions[0][0]<positions[1][0]<positions[2][0]
                     await page.locator('[data-cw-mode]').click()
                     await expect(page.locator('#cw-panel')).to_be_visible()
@@ -88,7 +89,7 @@ async def main():
                     await page.locator('[data-cw-mode]').click();await page.locator('[data-cw-mode]').click()
                     await page.wait_for_function('()=>cwPanel.ready')
                     await expect(page.locator('#cw-waterfall-message')).to_be_hidden()
-                    await page.locator('[data-rtty-mode]').click()
+                    await page.locator('[data-digital-menu]').select_option('RTTY')
                     await expect(page.locator('#cw-panel')).to_be_hidden()
                     await expect(page.locator('#rtty-panel')).to_be_visible()
                     assert await page.evaluate('cwPanel.worker===null')
