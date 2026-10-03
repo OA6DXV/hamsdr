@@ -6,6 +6,7 @@ const protocolVersion=1,waterfallProtocolVersion=2;
 const sharedParams=new URLSearchParams(location.search);
 const sharedDigitalMode=(()=>{const value=(sharedParams.get('digital')||'').toUpperCase();return ['FT8','FT4'].includes(value)?value:(sharedParams.get('ft8')==='1'?'FT8':null);})();
 const sharedRtty=(sharedParams.get('digital')||'').toUpperCase()==='RTTY';
+const sharedCw=['CW','CW-DECODE'].includes((sharedParams.get('digital')||'').toUpperCase());
 const sharedMuted=sharedParams.get('mute')==='1';
 const siteConfig=window.hamSdrSiteConfig||{};
 const defaults = {LSB:[-2700,-300],USB:[300,2700],AM:[-4000,4000],CW:[450,950],NFM:[-5000,5000]};
@@ -24,6 +25,8 @@ let rttyNoiseFloor=null,rttyColorCeiling=null,rttySpectrumFrames=0;
 let rttyStreams=new Map();
 let rttyPreviousAudioProfile=null,rttyProfilePending=false;
 let rttyProfileSuggestion=null;
+let cwActive=false,cwCompatible=true,cwPreviousAudioProfile=null,cwProfilePending=false;
+const cwPanel=new window.CWDecodePanel({listen:()=>listen(),mute:()=>setMuted(!muted),configure:()=>{updateCwPanel();updateSharedUrl();}});
 let spectrumHistory=[],waterfallNavigationHistory=[];
 let waterfallPreference='balanced',waterfallProfile='balanced',waterfallSpeed=1,drawAverage=0,lastProfileRequest=0,profileTimer,pendingRow,waterfallFrame;
 let waterfallViewRevision=0,waterfallViewTimer,waterfallViewHistoryPending=false,waterfallSnapshotJob=0;
@@ -192,10 +195,11 @@ function sendWaterfallView(history=false){
 }
 function sendWaterfallSpeed(){if(socket?.readyState===WebSocket.OPEN){const value=$('wfspeed').value;socket.send(JSON.stringify({type:'waterfall-speed',divisor:value==='high'?'high':Number(value)}));}}
 function sendAudioProfile(){if(socket?.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type:'audio-profile',profile:audioProfile}));}
-function sendDigitalMode(selected=digitalMode||(rttyActive?'RTTY':null)){if(socket?.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type:'digital-mode',mode:selected}));}
+function sendDigitalMode(selected=digitalMode||(rttyActive?'RTTY':cwActive?'CW':null)){if(socket?.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type:'digital-mode',mode:selected}));}
 function setDigitalControlsVisible(visible){
-  document.querySelectorAll('[data-digital-mode],[data-rtty-mode],[data-digital-menu]').forEach(button=>button.hidden=!visible);
+  document.querySelectorAll('[data-digital-mode],[data-rtty-mode],[data-cw-mode],[data-digital-menu]').forEach(button=>button.hidden=!visible);
   if(!visible&&digitalMode)setDigitalMode(null);if(!visible&&rttyActive)setRttyMode(false);
+  if(!visible&&cwActive)setCwMode(false);
 }
 const digitalFftSize=2048,digitalSampleRate=12000,digitalFilterMaximum=5000;
 const digitalSpectrumBuffer=new Float32Array(digitalFftSize),digitalReal=new Float64Array(digitalFftSize),digitalImag=new Float64Array(digitalFftSize);
@@ -451,6 +455,7 @@ function setDigitalMode(next,{autoStartAudio=true}={}){
   const selected=digitalMode===next?null:next;
   if(selected){
     if(rttyActive)setRttyMode(false);
+    if(cwActive)setCwMode(false);
     if(!digitalMode){
       digitalPreviousAudioProfile=audioProfile;
       digitalPreviousWaterfallPreference=waterfallPreference;
@@ -472,7 +477,7 @@ function setDigitalMode(next,{autoStartAudio=true}={}){
     controls();
   }
   document.querySelectorAll('[data-digital-mode]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.digitalMode===digitalMode)));
-  $('digital-panel').hidden=!digitalMode;$('digital-separator').hidden=!(digitalMode||rttyActive);
+  $('digital-panel').hidden=!digitalMode;$('digital-separator').hidden=!(digitalMode||rttyActive||cwActive);
   if(digitalMode){
     $('digital-title').textContent=`${digitalMode} · ${mode} · ${(frequency/1000).toFixed(3)} kHz`;
     $('digital-state').textContent=audioEnabled?'Esperando muestras de 12 kHz…':'Inicia audio para decodificar.';
@@ -549,6 +554,7 @@ function setRttyMode(enabled,{autoStartAudio=true}={}){
   if(selected){
     if(!digimodesAvailable){message('Digimodos no están habilitados en este receptor.');return;}
     if(digitalMode)setDigitalMode(null);
+    if(cwActive)setCwMode(false);
     rttyPreviousAudioProfile=audioProfile;
     rttyActive=true;mode='LSB';narrow=false;[low,high]=digitalDefaults.LSB;$('rtty-reverse').checked=false;setDigitalDspState(true);updateRttySpectrumRange(true);tune();
     $('audio-quality').querySelector('option[value="digiraw"]').hidden=false;audioProfile='digiraw';rttyProfilePending=true;resetAudio();showAudioProfile();sendDigitalMode('RTTY');sendAudioProfile();
@@ -556,25 +562,47 @@ function setRttyMode(enabled,{autoStartAudio=true}={}){
     document.querySelector('[data-rtty-mode]').setAttribute('aria-pressed','true');updateRttyTitle();
     if(audioEnabled)void ensureRttyNode();else if(autoStartAudio)void listen();
   }else{
-    rttyActive=false;$('rtty-panel').hidden=true;$('digital-separator').hidden=!digitalMode;hideRttyProfileSuggestion();if(!digitalMode)setDigitalDspState(false);
+    rttyActive=false;$('rtty-panel').hidden=true;$('digital-separator').hidden=!(digitalMode||cwActive);hideRttyProfileSuggestion();if(!digitalMode&&!cwActive)setDigitalDspState(false);
     document.querySelector('[data-rtty-mode]').setAttribute('aria-pressed','false');if(rttyNode)rttyNode.port.postMessage({type:'enabled',enabled:false});
     sendDigitalMode(null);if(rttyPreviousAudioProfile){audioProfile=rttyPreviousAudioProfile;resetAudio();showAudioProfile();sendAudioProfile();}rttyPreviousAudioProfile=null;rttyProfilePending=false;$('audio-quality').querySelector('option[value="digiraw"]').hidden=true;
   }
   updateSharedUrl();
 }
+function updateCwPanel(){cwPanel.update({active:cwActive,audio:audioEnabled,compatible:cwCompatible,mode,frequency,low,high});}
+function setCwMode(enabled,{autoStartAudio=true}={}){
+  const selected=Boolean(enabled)&&!cwActive;
+  if(selected){
+    if(!digimodesAvailable){message('Digimodos no están habilitados en este receptor.');return;}
+    if(digitalMode)setDigitalMode(null);if(rttyActive)setRttyMode(false);
+    cwPreviousAudioProfile=audioProfile;cwActive=true;cwCompatible=true;cwProfilePending=true;
+    mode='CW';narrow=false;[low,high]=digitalDefaults.CW;setDigitalDspState(true);
+    $('audio-quality').querySelector('option[value="digiraw"]').hidden=false;
+    audioProfile='digiraw';resetAudio();showAudioProfile();tune();sendDigitalMode('CW');sendAudioProfile();
+    if(!audioEnabled&&autoStartAudio)void listen();
+  }else{
+    cwActive=false;cwPanel.stop();cwCompatible=true;cwProfilePending=false;setDigitalDspState(false);
+    sendDigitalMode(null);
+    if(cwPreviousAudioProfile){audioProfile=cwPreviousAudioProfile;resetAudio();showAudioProfile();sendAudioProfile();}
+    cwPreviousAudioProfile=null;$('audio-quality').querySelector('option[value="digiraw"]').hidden=true;
+  }
+  document.querySelector('[data-cw-mode]').setAttribute('aria-pressed',String(cwActive));
+  $('digital-separator').hidden=!(digitalMode||rttyActive||cwActive);updateCwPanel();updateSharedUrl();
+}
 function handleDigitalPacket(bytes){
-  const selectedMode=digitalMode||(rttyActive?'RTTY':null);
+  const selectedMode=digitalMode||(rttyActive?'RTTY':cwActive?'CW':null);
   if(!selectedMode||!audioEnabled||bytes.byteLength<16||(digitalMode&&!digitalAudioCompatible))return;
   const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength),modeCode=view.getUint8(0);
-  const packetMode=modeCode===1?'FT8':modeCode===2?'FT4':modeCode===3?'RTTY':'';
+  const packetMode=modeCode===1?'FT8':modeCode===2?'FT4':modeCode===3?'RTTY':modeCode===4?'CW':'';
   if(packetMode!==selectedMode)return;
   const sequence=view.getUint32(1,true),timestampUs=Number(view.getBigUint64(5,true)),sampleCount=view.getUint16(13,true);
+  if(sampleCount===0||bytes.byteLength!==15+sampleCount*2)return;
   const payload=bytes.slice(15),samples=new Int16Array(payload.buffer,payload.byteOffset,Math.floor(payload.byteLength/2));
-  if(packetMode==='RTTY'){
+  if(packetMode==='RTTY'||packetMode==='CW'){
     audioPackets++;$('audio-status').dataset.packets=String(audioPackets);
     const decoderPayload=payload.buffer.slice(0),playbackPayload=payload.buffer.slice(0);
     if(recording)recordPCM(payload.buffer.slice(0));
-    if(rttyNode)rttyNode.port.postMessage({type:'samples',rate:12000,payload:decoderPayload},[decoderPayload]);
+    if(packetMode==='RTTY'&&rttyNode)rttyNode.port.postMessage({type:'samples',rate:12000,payload:decoderPayload},[decoderPayload]);
+    if(packetMode==='CW'&&cwCompatible)cwPanel.samples(decoderPayload,sequence);
     if(node&&context?.state==='running')node.port.postMessage({codec:'pcm16',rate:12000,payload:playbackPayload,record:false},[playbackPayload]);
     return;
   }
@@ -648,8 +676,9 @@ function controls(){
   $('mode-display').textContent=mode==='NFM'?'FM':mode;
   if(digitalMode&&!$('digital-panel').hidden)$('digital-title').textContent=`${digitalMode} · ${mode} · ${(frequency/1000).toFixed(3)} kHz`;
   if(rttyActive)updateRttyTitle();
+  if(cwActive)updateCwPanel();
   $('low').value=low; $('high').value=high;
-  const focusedDigital=Boolean(digitalMode||rttyActive);
+  const focusedDigital=Boolean(digitalMode||rttyActive||cwActive);
   $('bandwidth').value=focusedDigital?String(Math.round((high-low)*100)/100):((high-low)/1000).toFixed(2);$('filter-unit').textContent=focusedDigital?'Hz':'kHz';
   if(digitalMode)updateDigitalSpectrumRange();
   if(rttyActive)updateRttySpectrumRange();
@@ -665,6 +694,7 @@ function sharedUrl(){
   if(low!==base[0]||high!==base[1]){url.searchParams.set('low',String(low));url.searchParams.set('high',String(high));}
   if(Math.abs(zoom-1)>.001)url.searchParams.set('zoom',String(Number(zoom.toFixed(2))));
   if(digitalMode)url.searchParams.set('digital',digitalMode);else if(rttyActive){url.searchParams.set('digital','RTTY');const baud=Number($('rtty-baud').value),shift=Number($('rtty-shift').value),rttyCenter=Number($('rtty-center').value);if(baud!==45.45)url.searchParams.set('baud',String(baud));if(shift!==170)url.searchParams.set('shift',String(shift));if(rttyCenter!==1000)url.searchParams.set('center',String(rttyCenter));url.searchParams.set('reverse',$('rtty-reverse').checked?'1':'0');if(!$('rtty-afc').checked)url.searchParams.set('afc','0');if($('rtty-multi').checked)url.searchParams.set('multi','1');}
+  if(cwActive){url.searchParams.set('digital','CW');url.searchParams.set('tone',$('cw-tone').value);url.searchParams.set('wpm',$('cw-wpm').value);}
   if(muted)url.searchParams.set('mute','1');
   return url;
 }
@@ -691,6 +721,14 @@ function applySharedDigitalState(){
     setDigitalMode(sharedDigitalMode,{autoStartAudio:false});
     const requestedLow=Number(sharedParams.get('low')),requestedHigh=Number(sharedParams.get('high'));
     if(sharedParams.has('low')&&sharedParams.has('high')&&Number.isFinite(requestedLow)&&Number.isFinite(requestedHigh)&&requestedLow>=-digitalFilterMaximum&&requestedHigh<=digitalFilterMaximum&&requestedHigh-requestedLow>=100){low=requestedLow;high=requestedHigh;tune();}
+  }else if(sharedCw&&digimodesAvailable){
+    for(const [id,key,min,max] of [['cw-tone','tone',100,5000],['cw-wpm','wpm',5,60]]){
+      const value=Number(sharedParams.get(key));if(sharedParams.has(key)&&Number.isFinite(value)&&value>=min&&value<=max)$(id).value=String(value);
+    }
+    setCwMode(true,{autoStartAudio:false});
+    const requestedMode=(sharedParams.get('mode')||'').toUpperCase();if(digitalDefaults[requestedMode]){mode=requestedMode;[low,high]=digitalDefaults[mode];}
+    const requestedLow=Number(sharedParams.get('low')),requestedHigh=Number(sharedParams.get('high'));
+    if(sharedParams.has('low')&&sharedParams.has('high')&&Number.isFinite(requestedLow)&&Number.isFinite(requestedHigh)&&requestedLow>=-digitalFilterMaximum&&requestedHigh<=digitalFilterMaximum&&requestedHigh-requestedLow>=100){low=requestedLow;high=requestedHigh;}tune();
   }else if(sharedRtty&&digimodesAvailable){
     for(const [id,key,minimum,maximum] of [['rtty-baud','baud',30,300],['rtty-shift','shift',50,1000],['rtty-center','center',100,5000]]){const value=Number(sharedParams.get(key));if(sharedParams.has(key)&&Number.isFinite(value)&&value>=minimum&&value<=maximum){const control=$(id);if(control.tagName==='SELECT'&&!Array.from(control.options).some(option=>Number(option.value)===value))control.add(new Option(String(value),String(value)));control.value=String(value);}}
     $('rtty-afc').checked=sharedParams.get('afc')!=='0';$('rtty-multi').checked=sharedParams.get('multi')==='1';$('rtty-multi-panel').hidden=!$('rtty-multi').checked;setRttyMode(true,{autoStartAudio:false});
@@ -701,7 +739,7 @@ function applySharedDigitalState(){
   }
 }
 function tune(){
-  const focusedDigital=Boolean(digitalMode||rttyActive),filterValid=focusedDigital?low>=-digitalFilterMaximum&&high<=digitalFilterMaximum:low>=-6000&&high<=6000;
+  const focusedDigital=Boolean(digitalMode||rttyActive||cwActive),filterValid=focusedDigital?low>=-digitalFilterMaximum&&high<=digitalFilterMaximum:low>=-6000&&high<=6000;
   if(!Number.isFinite(frequency)||!Number.isFinite(low)||!Number.isFinite(high)||!filterValid||high-low<100){message(focusedDigital?'Revisa los límites del filtro digital (−5000 a 5000 Hz).':'Revisa los límites del filtro (−6000 a 6000 Hz).');return;}
   frequency=Math.round(Math.max(center-rate/2,Math.min(center+rate/2,frequency)));
   if(frequency<lower()||frequency>lower()+width()){viewCenter=frequency;clampView();redrawHistory();sendWaterfallView(true);}
@@ -903,12 +941,17 @@ function connect(){
         if(rttyActive&&rttyProfilePending&&msg.profile!=='digiraw'){
           audioProfile='digiraw';resetAudio();showAudioProfile();sendAudioProfile();return;
         }
+        if(cwActive&&cwProfilePending&&msg.profile!=='digiraw'){
+          audioProfile='digiraw';resetAudio();showAudioProfile();sendAudioProfile();return;
+        }
         if(digitalMode&&msg.profile==='digiraw')digitalProfilePending=false;
         if(rttyActive&&msg.profile==='digiraw')rttyProfilePending=false;
+        if(cwActive&&msg.profile==='digiraw')cwProfilePending=false;
         audioProfile=msg.profile;resetAudio();showAudioProfile();
         if(digitalMode&&audioProfile!=='digiraw'&&digitalAudioCompatible)setDigitalCompatibility(false);
+        if(cwActive&&audioProfile!=='digiraw'){cwCompatible=false;updateCwPanel();}
       }else if(msg.type==='digital-mode'){
-        if(msg.mode!=='RTTY'&&msg.mode!==digitalMode&&msg.mode!==null)digitalMode=msg.mode;
+        if(['FT8','FT4'].includes(msg.mode)&&msg.mode!==digitalMode)digitalMode=msg.mode;
         if(digitalMode)$('digital-state').textContent=audioEnabled?'Esperando muestras de 12 kHz…':'Inicia audio para decodificar.';
       }else if(msg.type==='resource-policy')applyResourcePolicy(msg);
       else if(msg.type==='resource-limit')message(msg.message);
@@ -930,7 +973,7 @@ function connect(){
     if(kind===12)handleDigitalPacket(bytes.subarray(1));
     if(kind===3)updateMeter(Number(new TextDecoder().decode(bytes.subarray(1))));
   };
-  socket.onclose=()=>{if(socketOpenedAt&&performance.now()-socketOpenedAt>3000)reportStreamInterruption('websocket');socketOpenedAt=0;protocolReady=false;lastWaterfallSequence=null;lastWaterfallAt=0;resetAudio();occupants=[];drawUsers();window.dispatchEvent(new Event('radio-close'));$('connection').textContent='Conexión interrumpida · reintentando…';timer=setTimeout(connect,retry);retry=Math.min(retry*2,10000);};
+  socket.onclose=()=>{if(socketOpenedAt&&performance.now()-socketOpenedAt>3000)reportStreamInterruption('websocket');socketOpenedAt=0;protocolReady=false;lastWaterfallSequence=null;lastWaterfallAt=0;resetAudio();cwPanel.stop();occupants=[];drawUsers();window.dispatchEvent(new Event('radio-close'));$('connection').textContent='Conexión interrumpida · reintentando…';timer=setTimeout(connect,retry);retry=Math.min(retry*2,10000);};
   socket.onerror=()=>socket.close();
 }
 window.radioSend=data=>{if(socket?.readyState!==WebSocket.OPEN)return false;socket.send(JSON.stringify(data));return true;};
@@ -984,10 +1027,12 @@ function showAudioState(){
   $('audio-status').textContent=audioEnabled?'Audio activado.':'Audio detenido; no consume ancho de banda.';
   showDigitalAudioStarter();
   if(rttyActive)updateRttyTitle();
+  if(cwActive)updateCwPanel();
 }
 async function pauseAudio(){
   if(!audioEnabled)return;audioEnabled=false;window.radioSend({type:'audio',enabled:false});resetAudio();stopDigitalWorker();stopRecording();
   if(rttyNode)rttyNode.port.postMessage({type:'enabled',enabled:false});
+  cwPanel.stop();
   if(context?.state==='running')await context.suspend();showAudioState();
 }
 function setMuted(value){
@@ -995,6 +1040,7 @@ function setMuted(value){
   $('mute').checked=muted;$('mute').setAttribute('aria-pressed',String(muted));
   $('digital-mute').setAttribute('aria-pressed',String(muted));$('digital-mute').textContent=muted?'Silenciado':'Silenciar';
   $('rtty-mute').setAttribute('aria-pressed',String(muted));$('rtty-mute').textContent=muted?'Silenciado':'Silenciar';
+  $('cw-mute').setAttribute('aria-pressed',String(muted));$('cw-mute').textContent=muted?'Silenciado':'Silenciar';
   if(gain)gain.gain.value=muted?0:10**(Number($('volume').value)/20);
   updateSharedUrl();
 }
@@ -1017,15 +1063,16 @@ $('copy-link').addEventListener('click',async()=>{
 });
 document.querySelectorAll('[data-step]').forEach(b=>b.addEventListener('click',()=>{frequency+=Number(b.dataset.step);tune();}));
 document.querySelectorAll('[data-fix]').forEach(b=>b.addEventListener('click',()=>{frequency=Math.round(frequency/1000)*1000;tune();}));
-document.querySelectorAll('[data-mode]').forEach(b=>b.addEventListener('click',()=>{mode=b.dataset.mode;narrow=!!b.dataset.narrow;[low,high]=(digitalMode||rttyActive?(narrow?narrowDefaults:digitalDefaults):(narrow?narrowDefaults:defaults))[mode];if(rttyActive&&mode==='USB')$('rtty-reverse').checked=true;else if(rttyActive&&mode==='LSB')$('rtty-reverse').checked=false;tune();}));
+document.querySelectorAll('[data-mode]').forEach(b=>b.addEventListener('click',()=>{mode=b.dataset.mode;narrow=!!b.dataset.narrow;[low,high]=(digitalMode||rttyActive||cwActive?(narrow?narrowDefaults:digitalDefaults):(narrow?narrowDefaults:defaults))[mode];if(rttyActive&&mode==='USB')$('rtty-reverse').checked=true;else if(rttyActive&&mode==='LSB')$('rtty-reverse').checked=false;tune();}));
 document.querySelectorAll('[data-digital-mode]').forEach(b=>b.addEventListener('click',()=>setDigitalMode(b.dataset.digitalMode)));
 document.querySelector('[data-rtty-mode]').addEventListener('click',()=>setRttyMode(true));
+document.querySelector('[data-cw-mode]').addEventListener('click',()=>setCwMode(true));
 $('rtty-clear').addEventListener('click',()=>{rttyText='';rttyStreams.clear();$('rtty-terminal').textContent='';renderRttyStreams();if(rttyNode)rttyNode.port.postMessage({type:'reset'});});
 for(const id of ['rtty-baud','rtty-shift','rtty-center','rtty-reverse','rtty-afc'])$(id).addEventListener('change',()=>{hideRttyProfileSuggestion();sendRttyConfiguration();});
 $('rtty-profile-tune').addEventListener('click',()=>{if(!rttyProfileSuggestion)return;$('rtty-baud').value=String(rttyProfileSuggestion.baud);$('rtty-shift').value=String(rttyProfileSuggestion.shift);$('rtty-center').value=String(rttyProfileSuggestion.centerFrequency);$('rtty-afc').checked=true;hideRttyProfileSuggestion();sendRttyConfiguration();if(rttyNode)rttyNode.port.postMessage({type:'reset'});});
 $('rtty-profile-ignore').addEventListener('click',()=>{if(rttyNode&&rttyProfileSuggestion)rttyNode.port.postMessage({type:'ignore-profile',profile:rttyProfileSuggestion.profile});hideRttyProfileSuggestion();});
 $('rtty-multi').addEventListener('change',()=>{const active=$('rtty-multi').checked;$('rtty-multi-panel').hidden=!active;$('rtty-waterfall').dataset.multi=String(active);hideRttyProfileSuggestion();if(!active){rttyStreams.clear();renderRttyStreams();}sendRttyConfiguration();});
-function updateSquelchControl(){const active=$('squelch').checked&&!digitalMode&&!rttyActive;$('threshold').disabled=!active;$('squelch-threshold').dataset.active=String(active);$('threshold-value').value=`${String($('threshold').value).replace('-', '−')} dBFS`;}
+function updateSquelchControl(){const active=$('squelch').checked&&!digitalMode&&!rttyActive&&!cwActive;$('threshold').disabled=!active;$('squelch-threshold').dataset.active=String(active);$('threshold-value').value=`${String($('threshold').value).replace('-', '−')} dBFS`;}
 for(const id of ['low','high','threshold','notch','nr'])$(id).addEventListener('change',()=>{low=Number($('low').value);high=Number($('high').value);tune();});
 $('threshold').addEventListener('input',updateSquelchControl);
 $('squelch').addEventListener('change',()=>{updateSquelchControl();tune();});
@@ -1034,8 +1081,8 @@ function resizeFocusedFilter(delta){
   else if(mode==='LSB')low=Math.max(-digitalFilterMaximum,Math.min(-100,low-delta));
   else{const half=delta/2;low=Math.max(-digitalFilterMaximum,low-half);high=Math.min(digitalFilterMaximum,high+half);}
 }
-$('filter-narrow').onclick=()=>{if(high-low>100){if(digitalMode||rttyActive)resizeFocusedFilter(-100);else{low+=50;high-=50;}tune();}};
-$('filter-wide').onclick=()=>{if(digitalMode||rttyActive)resizeFocusedFilter(100);else{low=Math.max(-6000,low-50);high=Math.min(6000,high+50);}tune();};
+$('filter-narrow').onclick=()=>{if(high-low>100){if(digitalMode||rttyActive||cwActive)resizeFocusedFilter(-100);else{low+=50;high-=50;}tune();}};
+$('filter-wide').onclick=()=>{if(digitalMode||rttyActive||cwActive)resizeFocusedFilter(100);else{low=Math.max(-6000,low-50);high=Math.min(6000,high+50);}tune();};
 $('zoom-in').addEventListener('click',()=>changeZoom(zoom*2));$('zoom-out').addEventListener('click',()=>changeZoom(zoom/2));$('full-band').addEventListener('click',()=>changeZoom(1));
 $('max-zoom').onclick=()=>changeZoom(64);
 document.querySelectorAll('[name=view]').forEach(r=>r.addEventListener('change',()=>{$('panorama').hidden=r.value==='none';}));
@@ -1048,7 +1095,7 @@ $('labels').onchange=drawMarkers;
 $('waterfall-quality').value=waterfallPreference;
 $('waterfall-quality').addEventListener('change',()=>{waterfallPreference=$('waterfall-quality').value;if(digitalMode)digitalWaterfallManuallyChanged=true;try{localStorage.setItem('hamsdr-waterfall',waterfallPreference);}catch{}sendWaterfallPreference();});
 $('audio-quality').value=audioProfile;
-$('audio-quality').addEventListener('change',async()=>{if(recording)stopRecording();const requested=$('audio-quality').value;if(rttyActive&&requested!=='digiraw'){audioProfile='digiraw';showAudioProfile();message('RTTY utiliza el perfil interno digiraw PCM16 a 12 kHz.');return;}audioProfile=requested;if(digitalMode&&audioProfile!=='digiraw')setDigitalCompatibility(false);if(['balanced','mobile'].includes(audioProfile)&&!await browserSupportsOpus()){fallbackFromOpus('Este navegador no ofrece decodificación Opus mediante WebCodecs.');return;}if(audioProfile!=='digiraw'){try{localStorage.setItem('hamsdr-audio-profile',audioProfile);}catch{}}resetAudio();showAudioProfile();sendAudioProfile();});
+$('audio-quality').addEventListener('change',async()=>{if(recording)stopRecording();const requested=$('audio-quality').value;if(rttyActive&&requested!=='digiraw'){audioProfile='digiraw';showAudioProfile();message('RTTY utiliza el perfil interno digiraw PCM16 a 12 kHz.');return;}audioProfile=requested;if(digitalMode&&audioProfile!=='digiraw')setDigitalCompatibility(false);if(cwActive&&requested!=='digiraw'){cwCompatible=false;cwProfilePending=false;updateCwPanel();sendDigitalMode(null);}if(['balanced','mobile'].includes(audioProfile)&&!await browserSupportsOpus()){fallbackFromOpus('Este navegador no ofrece decodificación Opus mediante WebCodecs.');return;}if(audioProfile!=='digiraw'){try{localStorage.setItem('hamsdr-audio-profile',audioProfile);}catch{}}resetAudio();showAudioProfile();sendAudioProfile();});
 $('digital-clear').addEventListener('click',()=>{digitalRows=[];renderDigitalRows();});
 $('digital-message-limit').addEventListener('change',()=>{
   const input=$('digital-message-limit'),limit=Number(input.value);
@@ -1116,8 +1163,8 @@ scale.addEventListener('pointerdown',e=>{
 });
 scale.addEventListener('pointermove',e=>{
   if(!drag)return;const rect=scale.getBoundingClientRect();const f=lower()+(e.clientX-rect.left)/rect.width*width();
-  if(drag==='low')low=Math.round(Math.max((digitalMode||rttyActive)?-digitalFilterMaximum:-6000,Math.min(high-100,f-frequency+beat())));
-  else if(drag==='high')high=Math.round(Math.min((digitalMode||rttyActive)?digitalFilterMaximum:6000,Math.max(low+100,f-frequency+beat())));
+  if(drag==='low')low=Math.round(Math.max((digitalMode||rttyActive||cwActive)?-digitalFilterMaximum:-6000,Math.min(high-100,f-frequency+beat())));
+  else if(drag==='high')high=Math.round(Math.min((digitalMode||rttyActive||cwActive)?digitalFilterMaximum:6000,Math.max(low+100,f-frequency+beat())));
   else frequency=f;tune();
 });
 scale.addEventListener('pointerup',()=>{drag=null;});scale.addEventListener('pointercancel',()=>{drag=null;});
@@ -1132,7 +1179,7 @@ $('save').addEventListener('click',()=>{if(memories.length>=30){message('Máximo
 function recall(){const m=memories[Number($('memories').value)];if($('memories').value===''||!m||!defaults[m.mode])return;({frequency,mode,low,high}=m);narrow=!!m.narrow;$('memory-name').value=m.name;tune();}
 $('memories').addEventListener('change',recall);$('recall').onclick=recall;
 $('delete').addEventListener('click',()=>{if($('memories').value==='')return;memories.splice(Number($('memories').value),1);storeMemories();});
-window.addEventListener('pagehide',()=>{stopRecording();clearTimeout(timer);clearInterval(smeterCalibrationTimer);socket.onclose=null;socket.close();});
+window.addEventListener('pagehide',()=>{cwPanel.stop();stopRecording();clearTimeout(timer);clearInterval(smeterCalibrationTimer);socket.onclose=null;socket.close();});
 window.addEventListener('pageshow',e=>{if(e.persisted)connect();});
 new ResizeObserver(()=>{const available=Math.max(1,Math.round($('panorama').getBoundingClientRect().width));if(canvas.width!==available){canvas.width=available;redrawHistory();}scale.width=available;drawScale();clearTimeout(profileTimer);profileTimer=setTimeout(()=>{if(waterfallPreference==='auto')sendWaterfallPreference();},500);}).observe($('panorama'));
 const digitalCanvas=$('digital-waterfall');

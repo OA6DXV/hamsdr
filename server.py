@@ -714,7 +714,7 @@ class Gateway:
         client = self.clients.get(ident)
         if not client:
             return
-        if mode not in (None, "FT8", "FT4", "RTTY"):
+        if mode not in (None, "FT8", "FT4", "RTTY", "CW"):
             raise ValueError("Modo digital desconocido")
         if mode and not getattr(self.args, "digimodes", False):
             raise ValueError("Digimodos no están habilitados en este receptor")
@@ -742,7 +742,7 @@ class Gateway:
     def publish_digital_audio(self, ident, data):
         client = self.clients.get(ident)
         if (not client or not client["audio_enabled"] or client["audio_profile"] != "digiraw" or
-                client["digital_mode"] not in ("FT8", "FT4", "RTTY")):
+                client["digital_mode"] not in ("FT8", "FT4", "RTTY", "CW")):
             return
         pending = client["digital_tail"]
         pending.extend(data)
@@ -768,7 +768,7 @@ class Gateway:
             return
         sequence = client["digital_sequence"]
         client["digital_sequence"] = (sequence + 1) & 0xffffffff
-        mode_code = {"FT8": 1, "FT4": 2, "RTTY": 3}[client["digital_mode"]]
+        mode_code = {"FT8": 1, "FT4": 2, "RTTY": 3, "CW": 4}[client["digital_mode"]]
         timestamp_us = time.time_ns() // 1000
         sample_count = len(out) // 2
         header = struct.pack("<BIQH", mode_code, sequence, timestamp_us, sample_count)
@@ -874,7 +874,7 @@ class Gateway:
     def settings_command(self, ident, settings):
         effective = settings
         client = self.clients.get(ident)
-        if client and client.get("digital_mode") in ("FT8", "FT4", "RTTY"):
+        if client and client.get("digital_mode") in ("FT8", "FT4", "RTTY", "CW"):
             # Digital mode keeps the selected 0-5 kHz passband, but bypasses
             # squelch, autonotch and noise reduction so decoding remains intact.
             effective = {**settings, "squelch": -150, "notch": False, "nr": 0}
@@ -1241,7 +1241,7 @@ class Gateway:
                         profile = update.get("profile")
                         if profile not in ("raw", "balanced", "mobile", "digiraw"):
                             raise ValueError("Perfil de audio desconocido")
-                        if profile == "digiraw" and client["digital_mode"] not in ("FT8", "FT4", "RTTY"):
+                        if profile == "digiraw" and client["digital_mode"] not in ("FT8", "FT4", "RTTY", "CW"):
                             raise ValueError("El perfil digiraw requiere un modo digital activo")
                         audio_max = self.address_profile_limits(address)[1]
                         levels = ("mobile", "balanced", "digiraw", "raw")
@@ -1345,7 +1345,7 @@ def application(args):
     app.router.add_get("/~~orgstatus", receiverbook_status)
     async def asset(request):
         name = request.match_info.get("name", "index.html")
-        if name not in {"index.html", "style.css", "zoom.css", "site.js", "app.js", "audio-worklet.js", "classic-audio.js", "digital-worker.js", "rtty-core.mjs", "rtty-worklet.js", "mfsk-decoder.js", "mfsk-decoder_bg.wasm", "cty.dat", "waterfall-codec.js", "smeter-calibration.js", "community.js", "palette.js"}:
+        if name not in {"index.html", "style.css", "zoom.css", "site.js", "app.js", "audio-worklet.js", "classic-audio.js", "digital-worker.js", "rtty-core.mjs", "rtty-worklet.js", "mfsk-decoder.js", "mfsk-decoder_bg.wasm", "cw-panel.js", "cw-worker.js", "cw-spectrum.mjs", "cw-decoder.js", "cw-decoder_bg.wasm", "cty.dat", "waterfall-codec.js", "smeter-calibration.js", "community.js", "palette.js"}:
             raise web.HTTPNotFound()
         if name in {"mfsk-decoder.js", "mfsk-decoder_bg.wasm"} and not (ROOT / "web" / name).exists():
             raise web.HTTPNotFound()

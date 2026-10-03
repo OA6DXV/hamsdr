@@ -444,6 +444,36 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
         await ws.send_json({'type':'digital-mode','mode':None})
         disabled=await self.event(ws,'digital-mode');self.assertIsNone(disabled['mode'])
 
+    async def test_cw_decode_uses_digiraw_and_stops_stream(self):
+        self.app[GATEWAY].args.digimodes=True
+        ws=await self.connect()
+        await ws.send_json({'type':'digital-mode','mode':'CW'})
+        reply=await self.event(ws,'digital-mode')
+        self.assertEqual((reply['mode'],reply['rate']),('CW',12000))
+        gateway=self.app[GATEWAY];ident=next(iter(gateway.clients));client=gateway.clients[ident]
+        self.assertEqual(client['audio_profile'],'digiraw')
+        await ws.send_json({'type':'tune','mode':'CW','frequency':7035000,
+                            'low':450,'high':950,'squelch':0,'notch':True,'nr':4})
+        await self.event(ws,'tuned')
+        effective=gateway.settings_command(ident,client['settings']).split()
+        self.assertEqual((effective[3],*map(float,effective[4:7]),*map(int,effective[7:9])),('CW',450.0,950.0,-150.0,0,0))
+        await ws.send_json({'type':'audio','enabled':True});await self.event(ws,'audio-state')
+        async with asyncio.timeout(4):
+            while True:
+                packet=await ws.receive()
+                if packet.type!=WSMsgType.BINARY:continue
+                self.assertNotIn(packet.data[0],(2,10,11),'CW must not duplicate playback audio')
+                if packet.data[0]!=12:continue
+                code,sequence,timestamp,count=struct.unpack('<BIQH',packet.data[1:16])
+                self.assertEqual(code,4);self.assertGreater(timestamp,0);self.assertEqual(count*2,len(packet.data)-16)
+                break
+        await ws.send_json({'type':'audio','enabled':False});await self.event(ws,'audio-state')
+        end=asyncio.get_running_loop().time()+.3
+        while asyncio.get_running_loop().time()<end:
+            packet=await ws.receive(timeout=1)
+            if packet.type==WSMsgType.BINARY:self.assertNotEqual(packet.data[0],12)
+        await ws.close()
+
     async def test_receiverbook_status_and_confirmation_tag(self):
         gateway = self.app[GATEWAY]
         token = "a" * 64

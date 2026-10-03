@@ -12,7 +12,16 @@ releases.
 ## 0.7.0-unstable
 
 - Unstable work starts from the latest `dev` snapshot, 0.6.2-dev.
-- No functional changes are included in this branch baseline.
+- CW-Decode is available beside RTTY when digital modes are enabled. It starts
+  in CW with a 700 Hz tone and 450--950 Hz filter, using the lossless 12 kHz
+  `digiraw` audio stream.
+- cw-dit's DSP and adaptive Morse decoder run in a browser WebAssembly worker.
+  The responsive panel includes a focused, 4096-point audio waterfall, tone
+  selection by clicking the waterfall, initial WPM, mute and a live text log.
+- Pausing audio stops the stream and terminates the CW worker; muting keeps
+  decoding. Clearing text preserves the waterfall and decoder state.
+- Rebuild the included CW browser assets with `bash tools/build_cw_wasm.sh`.
+  Its upstream revision and Rust dependencies are pinned in the CW crate.
 
 ## 0.6.2-dev
 

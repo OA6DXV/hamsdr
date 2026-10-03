@@ -135,7 +135,8 @@ async def main():
                 assert await modes.nth(10).text_content()=='FT8'
                 assert await modes.nth(11).text_content()=='FT4'
                 assert await modes.nth(12).text_content()=='RTTY'
-                assert await modes.nth(13).text_content()=='Digimodos'
+                assert await modes.nth(13).text_content()=='CW-Decode'
+                assert await modes.nth(14).text_content()=='Digimodos'
                 await page.locator('[data-digital-mode="FT8"]').click()
                 await expect(page.locator('#mode-display')).to_have_text('USB')
                 await expect(page.locator('#audio-quality')).to_have_value('digiraw')

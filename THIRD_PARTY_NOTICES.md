@@ -1,13 +1,24 @@
 # Third-party notices
 
 HamSDR source code is GPL-3.0-only. It uses the following dependencies at
-build or runtime; they are not copied into this repository.
+build or runtime. Compiled browser decoders and the CTY database are included.
 
 - FFTW3f, GPL-2.0-or-later, for shared spectrum FFT processing.
 - aiohttp 3.14.3, Apache-2.0 or MIT, for HTTP and WebSocket transport.
 - libopus, BSD-3-Clause, for optional Opus audio encoding.
 - mfsk-core, GPL-3.0, for browser WebAssembly FT8/FT4 decoding when digital
   modes are enabled.
+- cw-dit (`cwdit-dsp` and `cwdit-morse`), MIT OR Apache-2.0, by swilcox and
+  contributors, for browser WebAssembly CW decoding. HamSDR selects Apache-2.0.
+  Source: https://github.com/swilcox/cw-dit at revision
+  `153fc247ce6e4934c94e0cd2dcbf7887e368ec29`. The HamSDR adapter is GPL-3.0-only;
+  the upstream crates remain under their original license. The Apache license
+  is included in `licenses/Apache-2.0.txt`. Rust runtime dependencies of this
+  adapter (wasm-bindgen, rustfft, num-traits, num-integer, num-complex,
+  primal-check, transpose, strength_reduce, cfg-if and once_cell) also offer
+  Apache-2.0; exact versions and sources are in `wasm/cw-decoder/Cargo.lock`.
+  Build dependencies also include unicode-ident; its Unicode data notice is
+  reproduced in `licenses/Unicode-3.0.txt`.
 - Big CTY (`web/cty.dat.gz`) by Jim Reisert, AD1C, MIT License, for offline
   DXCC entity and prefix lookups in decoded digital messages. Its copyright
   and permission notice are reproduced below.

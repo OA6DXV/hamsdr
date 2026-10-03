@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: GPL-3.0-only
+[package]
+name = "hamsdr-cw-decoder"
+version = "0.7.0"
+edition = "2024"
+license = "GPL-3.0-only"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wasm-bindgen = "0.2"
+cwdit-dsp = { git = "https://github.com/swilcox/cw-dit", rev = "153fc247ce6e4934c94e0cd2dcbf7887e368ec29" }
+cwdit-morse = { git = "https://github.com/swilcox/cw-dit", rev = "153fc247ce6e4934c94e0cd2dcbf7887e368ec29" }
+
+[profile.release]
+opt-level = "s"
+lto = true

@@ -11,3 +11,5 @@ __pycache__/
 /site.json
 /site.toml
 /wasm/mfsk-decoder/target/
+/wasm/cw-decoder/target/
+/wasm/cw-decoder/pkg/

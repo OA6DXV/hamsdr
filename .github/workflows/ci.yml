@@ -2,9 +2,9 @@ name: C++ core
 
 on:
   push:
-    branches: [dev, main]
+    branches: [dev, main, unstable]
   pull_request:
-    branches: [dev, main]
+    branches: [dev, main, unstable]
 
 permissions:
   contents: read
@@ -22,6 +22,8 @@ jobs:
         run: cmake --build build --parallel 2
       - name: Test
         run: ctest --test-dir build --output-on-failure
+      - name: CW decoder tests
+        run: cargo test --locked --manifest-path wasm/cw-decoder/Cargo.toml
       - name: Install web test dependencies
         run: |
           python3 -m venv .venv
@@ -46,6 +48,7 @@ jobs:
             sleep 1
           done
           .venv/bin/python tests/browser_test.py
+          .venv/bin/python tests/cw_browser_test.py
 
   sanitizers:
     runs-on: ubuntu-24.04
