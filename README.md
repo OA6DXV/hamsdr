@@ -5,8 +5,14 @@ Copyright (C) 2026 OA6DXV
 HamSDR is a lightweight, multi-user software-defined radio receiver with a
 responsive browser interface and server-side DSP.
 
-The current `dev` branch is a development preview. The `main` branch is
-reserved for stable releases.
+The `unstable` branch is the active experimental development line. The `dev`
+branch tracks reviewed development releases, and `main` is reserved for stable
+releases.
+
+## 0.7.0-unstable
+
+- Unstable work starts from the latest `dev` snapshot, 0.6.2-dev.
+- No functional changes are included in this branch baseline.
 
 ## 0.6.2-dev
 
