@@ -7,18 +7,34 @@ Activating it selects CW, a 450--950 Hz passband and the internal `digiraw`
 mono PCM16 stream at 12 kHz. The demodulation and filter controls remain usable.
 
 The browser sends copies of the same PCM packets to playback and a dedicated
-worker. The worker runs cw-dit's Goertzel, envelope slicing, debouncing and
-adaptive Morse decoding in WebAssembly. Two adjacent-frequency detectors
-reject broadband noise. The initial speed defaults to 20 WPM; the decoder
-estimates timing from the first eight marks and adapts thereafter. The tone
+worker. The classic decoder uses narrow quadrature filters, quantile-tracked
+envelope slicing and speed-adaptive glitch rejection in WebAssembly. Envelope
+sampling stays at 600 Hz independently of the receiver filter bandwidth.
+The narrow-filter width follows learned speed (35--80 Hz per pole), avoiding
+the same broad noise admission for slow and fast operators.
+Adjacent-frequency guards help reject noise without letting one strong
+neighbour block the selected carrier. Timing is fitted jointly to marks and
+gaps over a bounded rolling window, rather than trusting each noisy pulse.
+The initial speed defaults to 20 WPM; acquisition requires at least twelve
+marks with plausible dit/dah/gap cadence and supports 5--60 WPM. Mark-plus-gap
+periods reduce errors from eroded edges; a substantially better timing fit
+can recover from a stale speed estimate. The tone
 defaults to 700 Hz and can be changed numerically or by tapping the waterfall.
-This first implementation decodes one selected tone.
+Automatic acquisition/AFC is enabled by default. Up to six bounded candidate
+decoders validate actual Morse cadence before tone selection, even in single
+mode. Optional multidetection displays confirmed streams separately. Selection
+survives pauses and follows validated nearby tone steps, with level/speed
+guards against jumping to fast noise. Tapping the waterfall selects a new
+tone explicitly. Clearing the log preserves detection evidence and timing;
+cached acquisition text is not replayed after clearing or reacquisition.
 
 A 4096-point overlapping Hann FFT in the worker supplies six waterfall rows
 per second. The panel displays the receiver's audio passband with adaptive
 contrast and the same purple/yellow palette as the receiver. It adds no
-network stream. Worker backlog is bounded; sequence gaps reset timing so old
-audio cannot be joined to a new fragment.
+network stream. Worker backlog is bounded; sequence gaps discard partial
+characters but preserve learned speed. A four-second audio pre-roll, 64 timing
+intervals, at most 128 acquisition intervals and bounded per-stream logs keep
+memory independent of listening duration.
 
 Mute affects playback only. Pausing audio terminates the worker and disables
 audio transmission; starting it again creates a fresh decoder. Clearing the
@@ -29,9 +45,29 @@ reloaded links require the central audio-start button.
 
 Rebuild: `bash tools/build_cw_wasm.sh` (Rust and wasm-pack required).
 Tests: `cargo test --locked --manifest-path wasm/cw-decoder/Cargo.toml` and
-`.venv/bin/python tests/cw_browser_test.py`.
+`.venv/bin/python tests/cw_browser_test.py`, plus `tests/cw_detector_tests.mjs`
+and `tests/cw_tracking_browser_test.py` (Chromium and WebKit).
 The pinned upstream source and dependency licenses are documented in
 `THIRD_PARTY_NOTICES.md` and `wasm/cw-decoder/Cargo.lock`.
+
+## Real recordings and limitations
+
+`tests/cw_recording_browser_test.py WAV` replays external mono PCM16/12 kHz
+recordings through the shipped browser worker without touching rtl_tcp. It
+reports audio-time tracking traces; optional `--expect-text` and
+`--max-tone-offset` assertions support local regressions. A faster Rust-only
+check is `cargo run --release --locked --manifest-path wasm/cw-decoder/Cargo.toml
+--example replay -- WAV TONE SEED_WPM`. Recordings are not bundled or uploaded.
+
+The October 4 recordings exposed noise-driven tone selection and timing
+failures missed by clean synthetic tests. The revised decoder tracks the
+first recording's approximately 744/643/683 Hz tone changes and recovers more
+recognizable fragments (including CP4NET/73); the second recovers EZEIZA but
+still has damaged letters and spacing. These are raw algorithm outputs, not
+independently verified complete transcriptions. No dictionary, AI completion
+or callsign substitution is applied. Strong fading, overlapping signals and
+irregular hand keying still require further work; confidence is a timing-fit
+score, not a probability that the text or callsign is correct.
 
 ## CW Experimental
 

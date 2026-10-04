@@ -4,30 +4,18 @@ const median = values => {
   values.sort((a,b)=>a-b);
   return values[Math.floor(values.length/2)] ?? -160;
 };
-// A cheap complex preselector isolates neighbouring carriers before cw-dit DSP.
-// The original single-tone decoder remains unchanged and is reused per channel.
-export class CwChannel {
-  constructor(tone,wpm=20){
-    this.cos=1;this.sin=0;this.i=new Float64Array(4);this.q=new Float64Array(4);
-    this.width=Math.max(30,Math.min(150,wpm*2.5));this.gate=0;
-    this.alpha=1-Math.exp(-2*Math.PI*this.width/12000);
-    this.retune(tone);
-  }
-  retune(tone){const step=2*Math.PI*tone/12000;this.cs=Math.cos(step);this.ss=Math.sin(step);}
-  setNoise(db){this.gate=3*Math.pow(10,db/20)*Math.sqrt(this.width/(12000/4096));}
-  process(samples){
-    const output=new Float32Array(samples.length),{i,q,alpha}=this;
-    let c=this.cos,s=this.sin;
-    for(let n=0;n<samples.length;n++){
-      let re=2*samples[n]*c,im=2*samples[n]*s;
-      for(let k=0;k<4;k++){i[k]+=alpha*(re-i[k]);q[k]+=alpha*(im-q[k]);re=i[k];im=q[k];}
-      // Preselection must not turn broadband noise into an apparently keyed carrier.
-      output[n]=Math.hypot(re,im)>=this.gate?re*c+im*s:0;
-      const next=c*this.cs-s*this.ss;s=s*this.cs+c*this.ss;c=next;
-    }
-    const norm=Math.hypot(c,s)||1;this.cos=c/norm;this.sin=s/norm;
-    return output;
-  }
+// Activity gating is deliberately broader than candidate acquisition: keying
+// sidebands must not erase valid samples of an already selected transmission.
+export function cwCarrierPresent({levels,fftSize,sampleRate},tone){
+  const bin=Math.round(tone*fftSize/sampleRate),local=[];
+  let peak=-160;
+  for(let j=-3;j<=3;j++)peak=Math.max(peak,levels[bin+j]??-160);
+  for(let j=10;j<=24;j++)for(const k of [bin-j,bin+j])if(k>=0&&k<levels.length)local.push(levels[k]);
+  let neighbour=-160;
+  for(let j=Math.ceil(80*fftSize/sampleRate);j<=Math.ceil(150*fftSize/sampleRate);j++)
+    for(const k of [bin-j,bin+j])neighbour=Math.max(neighbour,levels[k]??-160);
+  // A weak sidelobe of a much stronger nearby station is not this carrier.
+  return peak>median(local)+6&&peak>neighbour-20;
 }
 export class CwToneTracker {
   constructor({minimum=100,maximum=5000,maxTracks=6}={}) {
@@ -44,19 +32,21 @@ export class CwToneTracker {
       const peak=levels[i];
       if(!Number.isFinite(peak)||peak<-105||peak<floor+12||peak<=levels[i-1]||peak<levels[i+1])continue;
       const neighbours=[];
-      for(let j=4;j<=12;j++)for(const k of [i-j,i+j])if(k>=first&&k<=last)neighbours.push(levels[k]);
+      for(let j=10;j<=24;j++)for(const k of [i-j,i+j])if(k>=first&&k<=last)neighbours.push(levels[k]);
       const noise=Math.max(floor,median(neighbours)),snr=peak-noise;
-      if(snr<10||levels[i-3]>peak-5||levels[i+3]>peak-5)continue;
+      // Keying broadens a real CW peak. A +/-9 Hz gate rejects clean dits;
+      // compare shoulders farther out without accepting flat broadband noise.
+      if(snr<10||(levels[i-8]??-160)>peak-3||(levels[i+8]??-160)>peak-3)continue;
       const denominator=levels[i-1]-2*peak+levels[i+1];
       const delta=denominator?Math.max(-.5,Math.min(.5,.5*(levels[i-1]-levels[i+1])/denominator)):0;
       peaks.push({tone:(i+delta)*binHz,snr,noise,level:peak});
     }
-    peaks.sort((a,b)=>b.snr-a.snr);
+    peaks.sort((a,b)=>(b.level+.25*b.snr)-(a.level+.25*a.snr));
     const selected=[];
     for(const peak of peaks)if(selected.every(p=>Math.abs(p.tone-peak.tone)>35)) {
       selected.push(peak);if(selected.length>=this.maxTracks)break;
     }
-    this.tracks=this.tracks.filter(t=>now-t.seen<8);
+    this.tracks=this.tracks.filter(t=>now-t.seen<(t.established?8:1.2));
     const assigned=new Set();
     for(const peak of selected) {
       const track=this.tracks.filter(t=>!assigned.has(t.id)&&Math.abs(t.tone-peak.tone)<30)
@@ -64,8 +54,16 @@ export class CwToneTracker {
       if(track) {
         if(now-track.seen>1)track.hits=0;
         track.tone+=.35*(peak.tone-track.tone);track.snr=peak.snr;track.level=peak.level;track.noise=peak.noise;
-        track.hits++;track.established ||= track.hits>=2;track.seen=now;assigned.add(track.id);
-      }else if(this.tracks.length<this.maxTracks) {
+        track.hits++;track.established ||= track.hits>=3;track.seen=now;assigned.add(track.id);
+      }else {
+        // Stale noise tracks must not occupy all slots when a stronger keyed
+        // carrier appears. Never exceed the fixed decoder/CPU resource cap.
+        if(this.tracks.length>=this.maxTracks){
+          const stale=this.tracks.filter(t=>!this.protected?.has(t.id)&&!assigned.has(t.id)&&(now-t.seen>.8||peak.level>t.level+15))
+            .sort((a,b)=>a.level-b.level)[0];
+          if(stale)this.tracks=this.tracks.filter(t=>t.id!==stale.id);
+        }
+        if(this.tracks.length>=this.maxTracks)continue;
         const fresh={...peak,id:this.nextId++,hits:1,seen:now,established:false};
         this.tracks.push(fresh);assigned.add(fresh.id);
       }

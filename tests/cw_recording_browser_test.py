@@ -19,11 +19,13 @@ from server import application, GATEWAY
 async def main():
     parser=argparse.ArgumentParser()
     parser.add_argument('wav',type=Path)
-    parser.add_argument('--tone',type=int,default=700)
-    parser.add_argument('--wpm',type=int,default=20)
+    parser.add_argument('--tone',type=float,default=700)
+    parser.add_argument('--wpm',type=float,default=20)
     parser.add_argument('--auto',choices=('0','1'),default='1')
     parser.add_argument('--afc',choices=('0','1'),default='1')
     parser.add_argument('--multi',choices=('0','1'),default='1')
+    parser.add_argument('--expect-text',action='append',default=[],help='Optional raw-output regression fragment; never fed to the decoder')
+    parser.add_argument('--max-tone-offset',type=float,help='Fail if automatic tracking leaves the expected tone neighbourhood')
     options=parser.parse_args()
     path=options.wav
     with wave.open(str(path),'rb') as recording:
@@ -45,7 +47,7 @@ async def main():
                 page.on('pageerror',lambda error:errors.append(str(error)))
                 await page.goto(url+f'?digital=CW&mode=USB&low=0&high=3000&tone={options.tone}&wpm={options.wpm}&auto={options.auto}&afc={options.afc}&multi={options.multi}&mute=1')
                 await page.locator('#cw-audio-start').click();await page.wait_for_function('()=>cwPanel.ready')
-                await page.evaluate('''()=>{const original=socket.onmessage;socket.onmessage=e=>{if(typeof e.data==='string')original(e)};cwPanel.stop();updateCwPanel();window.cwReplayTrace=[];window.cwTraceTimer=setInterval(()=>cwReplayTrace.push({state:document.querySelector('#cw-state').textContent,tracking:document.querySelector('#cw-tracking').textContent,text:cwPanel.text}),250)}''')
+                await page.evaluate('''()=>{const original=socket.onmessage;socket.onmessage=e=>{if(typeof e.data==='string')original(e)};cwPanel.stop();updateCwPanel();window.cwReplayTrace=[];cwPanel.worker.addEventListener('message',({data})=>{if(data.type==='status')cwReplayTrace.push({...data,state:document.querySelector('#cw-state').textContent,tracking:document.querySelector('#cw-tracking').textContent,text:cwPanel.text.slice(-100)})})}''')
                 await page.wait_for_function('()=>cwPanel.ready')
                 payload=base64.b64encode(audio).decode('ascii')
                 result=await page.evaluate('''async encoded=>{
@@ -55,7 +57,6 @@ async def main():
                     const pcm=bytes.slice(offset,offset+2400).buffer;cwPanel.samples(pcm,sequence++);
                   }
                   while(cwPanel.pending)await new Promise(r=>setTimeout(r,2));
-                  clearInterval(cwTraceTimer);
                   return {text:cwPanel.text,streams:cwPanel.streams,tracking:document.querySelector('#cw-tracking').textContent,
                     state:document.querySelector('#cw-state').textContent,trace:cwReplayTrace};
                 }''',payload)
@@ -67,15 +68,19 @@ async def main():
                     try:current_wpm=float(sample['state'].split(' WPM',1)[0])
                     except ValueError:current_wpm=None
                     if (current_tone is not None and (last_tone is None or abs(current_tone-last_tone)>25)) or (current_wpm is not None and (last_wpm is None or abs(current_wpm-last_wpm)>3)):
-                        trace.append({'state':sample['state'],'tracking':sample['tracking'],'text':sample['text'][-100:]})
-                    if current_tone is not None:last_tone=current_tone
-                    if current_wpm is not None:last_wpm=current_wpm
+                        trace.append({'time':sample.get('time'),'confidence':sample.get('confidence'),'state':sample['state'],'tracking':sample['tracking'],'text':sample['text'][-100:]})
+                        if current_tone is not None:last_tone=current_tone
+                        if current_wpm is not None:last_wpm=current_wpm
                 result['trace_summary']=trace
                 result.pop('trace')
                 print(json.dumps(result,ensure_ascii=False))
                 assert not errors,errors
                 assert result['trace_summary'], 'The real worker must report status while replaying.'
                 assert len(result['streams'])<=6
+                for fragment in options.expect_text:
+                    assert fragment in result['text'], f'Missing raw-output fragment: {fragment}'
+                if options.max_tone_offset is not None:
+                    assert all(abs(float(s['tracking'].split('Tono ',1)[1].split(' Hz',1)[0])-options.tone)<=options.max_tone_offset for s in trace),trace
                 await browser.close()
         finally:await runner.cleanup()
 

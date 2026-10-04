@@ -80,7 +80,7 @@ async def main():
                     print('multi',viewport['width'],result)
                     confirmed=[s for s in result['streams'] if s['confirmed']]
                     assert len(confirmed)==2,result
-                    assert all('DE W1AW' in s['text'] for s in confirmed),result
+                    assert all(s['text'].strip()=='CQ DE W1AW CQ DE W1AW' for s in confirmed),result
                     assert all(abs(s['tone']-target)<2 for s,target in zip(sorted(confirmed,key=lambda s:s['tone']),[1050,1170]))
                     await expect(page.locator('#cw-stream-count')).to_have_text('Streams detectados: 2')
                     assert await page.evaluate('document.documentElement.scrollWidth<=innerWidth')
@@ -98,6 +98,14 @@ async def main():
                     assert 'AFC +' in result['tracking'],result
                     tracked_tone=float(re.search(r'Tono ([\d.]+)',result['tracking']).group(1))
                     assert 1055<tracked_tone<1100,result
+                    # Disabling acquisition retains the selected decoder's
+                    # real tone and learned clock, not an unused seed decoder.
+                    before_state=await page.locator('#cw-state').text_content()
+                    await page.locator('#cw-auto').uncheck()
+                    await page.wait_for_function('()=>cwPanel.ready')
+                    assert await page.locator('#cw-state').text_content()==before_state
+                    assert float(re.search(r'Tono ([\d.]+)',await page.locator('#cw-tracking').text_content()).group(1))==tracked_tone
+                    await page.locator('#cw-auto').check()
                     # Neither noise nor a stationary carrier confirms a CW transmission.
                     await page.locator('#cw-clear').click()
                     await page.evaluate('()=>{cwPanel.stop();updateCwPanel();}')

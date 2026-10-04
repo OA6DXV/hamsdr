@@ -12,6 +12,13 @@ export class CwDecoder {
         wasm.__wbg_cwdecoder_free(ptr, 0);
     }
     /**
+     * @returns {number}
+     */
+    confidence() {
+        const ret = wasm.cwdecoder_confidence(this.__wbg_ptr);
+        return ret;
+    }
+    /**
      * Discard a partial character across a transport gap, not the learned WPM.
      */
     gap() {
