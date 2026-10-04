@@ -9,6 +9,21 @@ The `unstable` branch is the active experimental development line. The `dev`
 branch tracks reviewed development releases, and `main` is reserved for stable
 releases.
 
+## 0.7.3-unstable
+
+- Classic Morse improves narrow-tone filtering, fading recovery, adaptive
+  mark/gap timing and validated automatic tone tracking. CW Experimental
+  remains unchanged; complete transcription of difficult recordings is
+  not yet solved.
+- All digital modes use native float-to-PCM16 digiraw preparation with a
+  16-to-12 kHz polyphase antialias FIR and dedicated peak-hold gain instead
+  of listening AGC. Audio payload remains 192 kbit/s; added FIR delay is
+  approximately 4 ms.
+- Sampling-rate transitions are isolated, including automatic resource-policy
+  downgrades. Listening profiles retain their existing 16 kHz processing.
+- Added DSP regressions, an offline IQ replay tool and Chromium/WebKit live
+  digital audio checks. See `docs/CW_DECODER.md` for usage and limitations.
+
 ## 0.7.2-unstable
 
 - Morse adds automatic narrow-tone acquisition, AFC and optional client-side
