@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """Replay a captured 12 kHz CW WAV through the shipped Morse browser worker."""
 import asyncio
+import argparse
 import base64
 import json
 import os
@@ -16,9 +17,15 @@ from playwright.async_api import async_playwright, expect
 from server import application, GATEWAY
 
 async def main():
-    if len(sys.argv)!=2:
-        raise SystemExit('Usage: python tests/cw_recording_browser_test.py /path/to/12k-mono-pcm16.wav')
-    path=Path(sys.argv[1])
+    parser=argparse.ArgumentParser()
+    parser.add_argument('wav',type=Path)
+    parser.add_argument('--tone',type=int,default=700)
+    parser.add_argument('--wpm',type=int,default=20)
+    parser.add_argument('--auto',choices=('0','1'),default='1')
+    parser.add_argument('--afc',choices=('0','1'),default='1')
+    parser.add_argument('--multi',choices=('0','1'),default='1')
+    options=parser.parse_args()
+    path=options.wav
     with wave.open(str(path),'rb') as recording:
         spec=(recording.getnchannels(),recording.getsampwidth(),recording.getframerate(),recording.getnframes())
         if spec[:3]!=(1,2,12000):raise SystemExit(f'Expected mono PCM16 12 kHz, got {spec[:3]}')
@@ -36,8 +43,7 @@ async def main():
                 browser=await getattr(p,os.environ.get('BROWSER','chromium')).launch()
                 page=await browser.new_page(viewport={'width':1024,'height':900});errors=[]
                 page.on('pageerror',lambda error:errors.append(str(error)))
-                await page.goto(url+'?digital=CW&mode=USB&low=0&high=3000&tone=700&wpm=20&multi=1&mute=1')
-                await expect(page.locator('#cw-multi')).to_be_checked()
+                await page.goto(url+f'?digital=CW&mode=USB&low=0&high=3000&tone={options.tone}&wpm={options.wpm}&auto={options.auto}&afc={options.afc}&multi={options.multi}&mute=1')
                 await page.locator('#cw-audio-start').click();await page.wait_for_function('()=>cwPanel.ready')
                 await page.evaluate('''()=>{const original=socket.onmessage;socket.onmessage=e=>{if(typeof e.data==='string')original(e)};cwPanel.stop();updateCwPanel();window.cwReplayTrace=[];window.cwTraceTimer=setInterval(()=>cwReplayTrace.push({state:document.querySelector('#cw-state').textContent,tracking:document.querySelector('#cw-tracking').textContent,text:cwPanel.text}),250)}''')
                 await page.wait_for_function('()=>cwPanel.ready')
@@ -54,9 +60,21 @@ async def main():
                     state:document.querySelector('#cw-state').textContent,trace:cwReplayTrace};
                 }''',payload)
                 result['page_errors']=errors
+                trace=[];last_tone=None;last_wpm=None
+                for sample in result['trace']:
+                    try:current_tone=float(sample['tracking'].split('Tono ',1)[1].split(' Hz',1)[0])
+                    except (IndexError,ValueError):current_tone=None
+                    try:current_wpm=float(sample['state'].split(' WPM',1)[0])
+                    except ValueError:current_wpm=None
+                    if (current_tone is not None and (last_tone is None or abs(current_tone-last_tone)>25)) or (current_wpm is not None and (last_wpm is None or abs(current_wpm-last_wpm)>3)):
+                        trace.append({'state':sample['state'],'tracking':sample['tracking'],'text':sample['text'][-100:]})
+                    if current_tone is not None:last_tone=current_tone
+                    if current_wpm is not None:last_wpm=current_wpm
+                result['trace_summary']=trace
+                result.pop('trace')
                 print(json.dumps(result,ensure_ascii=False))
                 assert not errors,errors
-                assert result['trace'], 'The real worker must report status while replaying.'
+                assert result['trace_summary'], 'The real worker must report status while replaying.'
                 assert len(result['streams'])<=6
                 await browser.close()
         finally:await runner.cleanup()
