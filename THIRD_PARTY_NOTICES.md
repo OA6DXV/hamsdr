@@ -6,6 +6,18 @@ build or runtime. Compiled browser decoders and the CTY database are included.
 - FFTW3f, GPL-2.0-or-later, for shared spectrum FFT processing.
 - aiohttp 3.14.3, Apache-2.0 or MIT, for HTTP and WebSocket transport.
 - libopus, BSD-3-Clause, for optional Opus audio encoding.
+- Fldigi receive-only RTTY adaptation, GPL-3.0-or-later, by Dave Freese,
+  W1HKJ, Stefan Fendt, DL1SMF and contributors, with ancestry in Tomi
+  Manninen's gmfsk. Source: https://github.com/w1hkj/fldigi at revision
+  `61b97f4133c488063f3de1795c894d22d5032e8a`. Unmodified FFT-filter sources
+  and the reference RTTY receiver are in `wasm/rtty-fldigi/upstream/`;
+  the receive-only HamSDR adapter is GPL-3.0-only. Fldigi's g_fft template
+  is LGPL-3.0-or-later and based on public-domain John Green FFT code.
+  License notices: `licenses/Fldigi-GPL-3.0.txt` and `licenses/LGPL-3.0.txt`.
+  The bundled browser module is built with Emscripten 3.1.74; runtime
+  notices are in `licenses/Emscripten.txt`, `licenses/LLVM-libcxx.txt`
+  and `licenses/musl.txt`. Compiler source:
+  https://github.com/emscripten-core/emscripten/tree/3.1.74.
 - CWformer v0.2.0, MIT, by parsimo2010, for optional client-side neural CW
   decoding. Its released FP32 ONNX weights and exact mel tables are included
   in `web/cwformer/`. Source: https://github.com/parsimo2010/CWformer,

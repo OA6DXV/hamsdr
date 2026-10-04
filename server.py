@@ -25,7 +25,7 @@ from opus_codec import OPUS_AVAILABLE, OpusEncoder
 from waterfall_codec import VERSION as WATERFALL_PROTOCOL_VERSION, encode as encode_waterfall
 
 ROOT = Path(__file__).resolve().parent
-VERSION = "0.7.1-unstable"
+VERSION = "0.7.2-unstable"
 PROTOCOL_VERSION = 1
 MODES = {"USB": (300, 2700), "LSB": (-2700, -300), "AM": (-4000, 4000),
          "CW": (450, 950), "NFM": (-5000, 5000)}
@@ -1350,6 +1350,8 @@ def application(args):
                     "cwformer/mel_basis.npy", "cwformer/mel_window.npy"}:
             return web.FileResponse(ROOT / "web" / name, headers={"Cache-Control": "public, max-age=86400"})
         if name == "cwformer-worker.mjs":
+            return web.FileResponse(ROOT / "web" / name)
+        if name in {"rtty-fldigi-worker.mjs", "rtty-fldigi.mjs", "rtty-fldigi.wasm"}:
             return web.FileResponse(ROOT / "web" / name)
         if name not in {"index.html", "style.css", "zoom.css", "site.js", "app.js", "audio-worklet.js", "classic-audio.js", "digital-worker.js", "rtty-core.mjs", "rtty-worklet.js", "mfsk-decoder.js", "mfsk-decoder_bg.wasm", "cw-panel.js", "cw-worker.js", "cw-spectrum.mjs", "cw-decoder.js", "cw-decoder_bg.wasm", "cty.dat", "waterfall-codec.js", "smeter-calibration.js", "community.js", "palette.js"}:
             raise web.HTTPNotFound()

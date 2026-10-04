@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 [package]
 name = "hamsdr-cw-decoder"
-version = "0.7.1"
+version = "0.7.2"
 edition = "2024"
 license = "GPL-3.0-only"
 publish = false

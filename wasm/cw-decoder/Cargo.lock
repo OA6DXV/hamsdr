@@ -35,7 +35,7 @@ source = "git+https://github.com/swilcox/cw-dit?rev=153fc247ce6e4934c94e0cd2dcbf
 
 [[package]]
 name = "hamsdr-cw-decoder"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "cwdit-dsp",
  "cwdit-morse",

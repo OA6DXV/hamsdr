@@ -9,6 +9,18 @@ The `unstable` branch is the active experimental development line. The `dev`
 branch tracks reviewed development releases, and `main` is reserved for stable
 releases.
 
+## 0.7.2-unstable
+
+- Added RTTY Experimental to Digimodos without replacing the existing RTTY
+  decoder or its multidetection mode.
+- Receive-only Fldigi Nyquist filtering, optimal ATC and ITA2 timing run in a
+  small client-side WebAssembly worker, using the existing digiraw stream.
+- The focused waterfall, manual baud/shift, reverse, AFC, mute and pause
+  controls remain available. Experimental reception currently decodes one
+  selected stream; multidetection stays in the original RTTY mode.
+- Browser/native WASM tests and corresponding source/license notices are
+  included. Rebuild with `bash tools/build_rtty_fldigi_wasm.sh`.
+
 ## 0.7.1-unstable
 
 - Added CW Experimental (CWformer) as a client-side neural decoder with the

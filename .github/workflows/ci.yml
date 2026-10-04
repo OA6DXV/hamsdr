@@ -50,6 +50,8 @@ jobs:
           .venv/bin/python tests/browser_test.py
           .venv/bin/python tests/cw_browser_test.py
           .venv/bin/python tests/cwformer_browser_test.py
+          node tests/rtty_fldigi_tests.mjs
+          .venv/bin/python tests/rtty_fldigi_browser_test.py
 
   sanitizers:
     runs-on: ubuntu-24.04
