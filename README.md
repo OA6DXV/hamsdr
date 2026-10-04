@@ -9,6 +9,16 @@ The `unstable` branch is the active experimental development line. The `dev`
 branch tracks reviewed development releases, and `main` is reserved for stable
 releases.
 
+## 0.7.1-unstable
+
+- Added CW Experimental (CWformer) as a client-side neural decoder with the
+  lossless 12 kHz digiraw stream. The model is loaded lazily and inference
+  runs in a dedicated browser worker with bounded state.
+- Digital controls now expose FT8 and Morse, with FT4, RTTY and CW Experimental
+  in the Digimodos selector. Chromium and WebKit inference tests are included.
+- CWformer and ONNX Runtime Web assets and license notices are pinned and
+  served locally; no external decoding service is used.
+
 ## 0.7.0-unstable
 
 - Unstable work starts from the latest `dev` snapshot, 0.6.2-dev.
