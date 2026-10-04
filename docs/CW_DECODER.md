@@ -52,6 +52,29 @@ The pinned upstream source and dependency licenses are documented in
 
 ## Real recordings and limitations
 
+`digiraw` generation uses a dedicated peak-hold gain stage (one-second hold,
+ten-second release) and a native 16-to-12 kHz polyphase antialias FIR. Listening
+AGC and audio effects are bypassed in digital mode; PCM16 quantization occurs
+only after resampling. Added FIR delay is approximately 4 ms and network
+payload remains 24 kB/s. These DSP changes improve transport preparation,
+not proof of correct Morse transcription. Existing 12 kHz WAV recordings
+cannot undo their earlier AGC/resampling; use original IQ captures to test
+the new generation path.
+
+An offline tool accepts external unsigned 8-bit interleaved IQ without an
+rtl_tcp header: `build/hamsdr-digital-iq-replay INPUT CENTER_HZ FREQUENCY_HZ
+MODE LOW HIGH SECONDS DIGITAL_0_OR_1 OUTPUT_PCM`. It produces little-endian
+PCM16 at 12 kHz (digital=1) or 16 kHz (digital=0) and reports sample counts,
+RMS/peak and clipped samples. It never connects to or controls the live SDR.
+Keep recordings outside tracked source; they are not bundled or uploaded.
+
+DSP regressions: `ctest --test-dir build --output-on-failure` includes passband
+flatness, out-of-band alias rejection, uneven block continuity, gain hold/release
+and sample-rate switching. `tests/digital_audio_browser_test.py SERVER_URL`
+checks live FT8/FT4/RTTY/Morse audio, native packet sizes and pause in Chromium
+and WebKit without posting community messages. Integration tests also cover
+rate restoration after automatic shared-IP resource downgrades.
+
 `tests/cw_recording_browser_test.py WAV` replays external mono PCM16/12 kHz
 recordings through the shipped browser worker without touching rtl_tcp. It
 reports audio-time tracking traces; optional `--expect-text` and

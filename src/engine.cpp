@@ -61,7 +61,7 @@ int main(int argc,char** argv) {
             const auto audio=receiver->push(iq);
             std::vector<std::uint8_t> bytes; bytes.reserve(audio.size()*2);
             for (auto x:audio) { const auto u=static_cast<std::uint16_t>(x); bytes.push_back(u&255); bytes.push_back(u>>8); }
-            if (!bytes.empty()) frame(2,id,bytes);
+            if (!bytes.empty()) frame(receiver->audio_rate()==12000 ? 5 : 2,id,bytes);
             const auto reading=std::to_string(receiver->power_db());
             frame(3,id,{reinterpret_cast<const std::uint8_t*>(reading.data()),reading.size()});
         }
@@ -117,14 +117,15 @@ int main(int argc,char** argv) {
         std::scoped_lock lock(mutex);
         if (command=="del") receivers.erase(id);
         else if (command=="set" && (parser>>offset>>mode>>low>>high>>squelch)) {
-            unsigned notch=0,nr=0;
+            unsigned notch=0,nr=0,digital=0;
             parser>>notch>>nr;
-            if (notch>1 || nr>4) continue;
+            parser>>digital;
+            if (notch>1 || nr>4 || digital>1) continue;
             if (!receivers.contains(id) && receivers.size()>=20) continue;
             try {
                 if (auto found=receivers.find(id);found!=receivers.end())
-                    found->second->configure(offset,mode,low,high,squelch,notch!=0,nr);
-                else receivers[id]=std::make_unique<hamsdr::Receiver>(offset,mode,low,high,squelch,notch!=0,nr);
+                    found->second->configure(offset,mode,low,high,squelch,notch!=0,nr,digital!=0);
+                else receivers[id]=std::make_unique<hamsdr::Receiver>(offset,mode,low,high,squelch,notch!=0,nr,digital!=0);
             }
             catch (const std::exception& e) { std::cerr<<e.what()<<'\n'; }
         }

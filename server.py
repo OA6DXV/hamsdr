@@ -438,6 +438,7 @@ class Gateway:
         self.gain_mode = getattr(args, "gain_mode", "auto")
         self.gain_tenth_db = int(getattr(args, "gain_tenth_db", 0))
         self.clients = {}
+        self.receiver_dirty = set()
         self.next_id = 1
         self.process = None
         self.source = "connecting"
@@ -682,7 +683,10 @@ class Gateway:
         if not client: return
         if profile in ("balanced", "mobile") and not OPUS_AVAILABLE:
             raise ValueError("Opus no está disponible en el servidor")
+        if profile != "digiraw" and client["digital_mode"]:
+            self.digital_mode(ident, None)
         client["audio_profile"] = profile
+        self.receiver_dirty.add(ident)
         self.reset_audio_codec(client)
         retained = []
         while not client["queue"].empty():
@@ -707,7 +711,6 @@ class Gateway:
 
     @staticmethod
     def reset_digital_audio(client):
-        client["digital_tail"] = bytearray()
         client["digital_sequence"] = 0
 
     def digital_mode(self, ident, mode):
@@ -726,6 +729,7 @@ class Gateway:
         if client["digital_mode"] != mode:
             self.reset_digital_audio(client)
         client["digital_mode"] = mode
+        self.receiver_dirty.add(ident)
         if mode and client["audio_profile"] != "digiraw":
             self.audio_profile(ident, "digiraw")
         if mode is None:
@@ -744,41 +748,22 @@ class Gateway:
         if (not client or not client["audio_enabled"] or client["audio_profile"] != "digiraw" or
                 client["digital_mode"] not in ("FT8", "FT4", "RTTY", "CW")):
             return
-        pending = client["digital_tail"]
-        pending.extend(data)
-        block_bytes = 8
-        if len(pending) < block_bytes:
-            return
-        usable = len(pending) - (len(pending) % block_bytes)
-        source = memoryview(pending)[:usable]
-        samples = struct.unpack("<" + "h" * (usable // 2), source)
-        out = bytearray()
-        for index in range(0, len(samples), 4):
-            a, b, c, d = samples[index:index+4]
-            converted = (
-                a,
-                round(b * (2 / 3) + c * (1 / 3)),
-                round(c * (1 / 3) + d * (2 / 3)),
-            )
-            for sample in converted:
-                out.extend(struct.pack("<h", max(-32768, min(32767, sample))))
-        del source
-        del pending[:usable]
-        if not out:
+        # Engine kind 5 already contains antialiased PCM16 at 12 kHz.
+        # Do not interpret stale 16 kHz listening frames as digital samples.
+        if not data or len(data) % 2:
             return
         sequence = client["digital_sequence"]
         client["digital_sequence"] = (sequence + 1) & 0xffffffff
         mode_code = {"FT8": 1, "FT4": 2, "RTTY": 3, "CW": 4}[client["digital_mode"]]
         timestamp_us = time.time_ns() // 1000
-        sample_count = len(out) // 2
+        sample_count = len(data) // 2
         header = struct.pack("<BIQH", mode_code, sequence, timestamp_us, sample_count)
-        self.publish(bytes([DIGITAL_PACKET_KIND]) + header + out, ident)
+        self.publish(bytes([DIGITAL_PACKET_KIND]) + header + data, ident)
 
     def publish_audio(self, ident, data):
         client = self.clients.get(ident)
         if not client or not client["audio_enabled"]:
             return
-        self.publish_digital_audio(ident, data)
         profile = client["audio_profile"]
         if profile == "digiraw":
             return
@@ -874,13 +859,15 @@ class Gateway:
     def settings_command(self, ident, settings):
         effective = settings
         client = self.clients.get(ident)
-        if client and client.get("digital_mode") in ("FT8", "FT4", "RTTY", "CW"):
+        digital = bool(client and client.get("audio_profile") == "digiraw" and
+                       client.get("digital_mode") in ("FT8", "FT4", "RTTY", "CW"))
+        if digital:
             # Digital mode keeps the selected 0-5 kHz passband, but bypasses
             # squelch, autonotch and noise reduction so decoding remains intact.
             effective = {**settings, "squelch": -150, "notch": False, "nr": 0}
         # CW's displayed frequency is the RF carrier, with a 700 Hz beat note.
         offset = effective['frequency']-self.center_frequency-(700 if effective['mode']=='CW' else 0)
-        return f"set {ident} {offset} {effective['mode']} {effective['low']} {effective['high']} {effective['squelch']} {int(effective.get('notch', False))} {effective.get('nr', 0)}"
+        return f"set {ident} {offset} {effective['mode']} {effective['low']} {effective['high']} {effective['squelch']} {int(effective.get('notch', False))} {effective.get('nr', 0)} {int(digital)}"
 
     def presence(self):
         colors = ["#ff4040", "#ffa000", "#c0c000", "#80ff00", "#00ff00", "#00bbbb", "#559fff", "#ff40ff"]
@@ -1004,10 +991,19 @@ class Gateway:
                     stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
                     limit=262144)
                 self.process = process
+                self.receiver_dirty.clear()
                 for ident, client in tuple(self.clients.items()):
                     await self.command(self.settings_command(ident, client["settings"]))
                 started = time.monotonic()
                 while True:
+                    # Coalesce synchronous profile/resource-policy changes.
+                    # Distinct engine frame kinds keep rate transitions safe.
+                    dirty = tuple(self.receiver_dirty)
+                    self.receiver_dirty.clear()
+                    for cid in dirty:
+                        client = self.clients.get(cid)
+                        if client:
+                            await self.command(self.settings_command(cid, client["settings"]))
                     try:
                         header = await asyncio.wait_for(process.stdout.readexactly(9), 20)
                     except asyncio.TimeoutError:
@@ -1015,7 +1011,7 @@ class Gateway:
                             raise RuntimeError("DSP output stalled")
                         continue
                     kind, ident, size = struct.unpack("<BII", header)
-                    if size > 262144 or kind not in (1, 2, 3, 4):
+                    if size > 262144 or kind not in (1, 2, 3, 4, 5):
                         raise ValueError("invalid engine frame")
                     data = await process.stdout.readexactly(size)
                     if kind == 4:
@@ -1030,6 +1026,9 @@ class Gateway:
                     elif kind == 2:
                         self.last_data = time.monotonic()
                         self.publish_audio(ident, data)
+                    elif kind == 5:
+                        self.last_data = time.monotonic()
+                        self.publish_digital_audio(ident, data)
                     else:
                         self.last_data = time.monotonic()
                         self.publish(bytes([kind]) + data, ident)
@@ -1115,7 +1114,7 @@ class Gateway:
                   "congestion": 0, "stable_intervals": 0, "sent_bytes": 0, "last_sent": 0,
                   "audio_enabled": False, "audio_profile": "balanced",
                   "opus_encoder": None, "opus_pending": bytearray(), "opus_sequence": 0,
-                  "digital_mode": None, "digital_tail": bytearray(), "digital_sequence": 0,
+                  "digital_mode": None, "digital_sequence": 0,
                   "protocol_ready": False, "resource_policy": None}
         self.clients[ident] = client
         self.enforce_address_limits(address)
@@ -1290,6 +1289,7 @@ class Gateway:
                     self.publish(json.dumps({"type": "error", "message": "No se pudo guardar. Tu texto sigue en el formulario; vuelve a intentar."}), ident)
         finally:
             self.clients.pop(ident, None)
+            self.receiver_dirty.discard(ident)
             if not self.address_clients(address):
                 self.address_limit_stage.pop(address, None)
                 self.address_bandwidth_samples.pop(address, None)

@@ -384,6 +384,7 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
                             'low':0,'high':5000,'squelch':0,'notch':True,'nr':4})
         await self.event(ws,'tuned')
         effective=gateway.settings_command(ident,client['settings']).split()
+        self.assertEqual(effective[9],'1','engine must use dedicated 12 kHz digital DSP')
         self.assertEqual((effective[3],*map(float,effective[4:7]),*map(int,effective[7:9])),
                          ('USB',0.0,5000.0,-150.0,0,0))
         await ws.send_json({'type':'audio','enabled':True});await self.event(ws,'audio-state')
@@ -409,6 +410,7 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
         changed=await self.event(ws,'audio-profile')
         self.assertEqual(changed['profile'],'balanced')
         restored=gateway.settings_command(ident,client['settings']).split()
+        self.assertEqual(restored[9],'0','engine must restore the 16 kHz listening path')
         self.assertEqual((restored[3],*map(float,restored[4:7]),*map(int,restored[7:9])),
                          ('USB',0.0,5000.0,0.0,1,4))
         await ws.send_json({'type':'audio','enabled':False});await self.event(ws,'audio-state')
@@ -443,6 +445,59 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
                 if count:break
         await ws.send_json({'type':'digital-mode','mode':None})
         disabled=await self.event(ws,'digital-mode');self.assertIsNone(disabled['mode'])
+
+    async def test_digital_pcm_passthrough_and_rate_transitions(self):
+        self.app[GATEWAY].args.digimodes=True
+        ws=await self.connect()
+        gateway=self.app[GATEWAY];ident=next(iter(gateway.clients));client=gateway.clients[ident]
+        await self.tune(ws,'USB',7100000)
+        await ws.send_json({'type':'audio','enabled':True});await self.event(ws,'audio-state')
+        for mode,code in [('FT8',1),('FT4',2),('RTTY',3),('CW',4)]:
+            await ws.send_json({'type':'digital-mode','mode':mode});await self.event(ws,'digital-mode')
+            async with asyncio.timeout(3):
+                while True:
+                    packet=await ws.receive()
+                    if packet.type==WSMsgType.BINARY and packet.data[0]==12:break
+            self.assertEqual(packet.data[1],code)
+            self.assertEqual(struct.unpack_from('<H',packet.data,14)[0],192)
+            # Dispatch 12 kHz PCM unchanged; no second resample or rounding.
+            payload=struct.pack('<6h',-32768,-1000,-1,0,1000,32767)
+            saved=gateway.publish;emitted=[]
+            gateway.publish=lambda packet,target=0:emitted.append(packet)
+            try:
+                gateway.publish_audio(ident,b'\x00'*512)
+                self.assertEqual(emitted,[],'stale 16 kHz engine frame reached digital playback')
+                gateway.publish_digital_audio(ident,payload)
+                self.assertEqual(emitted[-1][16:],payload)
+                self.assertEqual(struct.unpack_from('<H',emitted[-1],14)[0],6)
+            finally:gateway.publish=saved
+            await ws.send_json({'type':'audio-profile','profile':'raw'});await self.event(ws,'audio-profile')
+            self.assertIsNone(client['digital_mode'])
+            async with asyncio.timeout(3):
+                while True:
+                    packet=await ws.receive()
+                    if packet.type==WSMsgType.BINARY and packet.data[0]==2:break
+            self.assertEqual(len(packet.data),513,'raw playback must return to 256 samples at 16 kHz')
+
+    async def test_digital_resource_downgrade_restores_listening(self):
+        self.app[GATEWAY].args.digimodes=True
+        ws=await self.connect()
+        await self.tune(ws,'USB',7100000)
+        await ws.send_json({'type':'digital-mode','mode':'CW'});await self.event(ws,'digital-mode')
+        await ws.send_json({'type':'audio','enabled':True});await self.event(ws,'audio-state')
+        gateway=self.app[GATEWAY];ident=next(iter(gateway.clients));client=gateway.clients[ident]
+        gateway.address_limit_stage['127.0.0.1']=1
+        gateway.enforce_address_limits('127.0.0.1')
+        self.assertIsNone(client['digital_mode'])
+        self.assertEqual(client['audio_profile'],'balanced')
+        self.assertEqual(gateway.settings_command(ident,client['settings']).split()[9],'0')
+        async with asyncio.timeout(3):
+            while True:
+                packet=await ws.receive()
+                if packet.type==WSMsgType.BINARY and packet.data[0]==10:break
+        decoder=OpusDecoder()
+        try:self.assertEqual(len(decoder.decode(packet.data[5:])),320)
+        finally:decoder.close()
 
     async def test_cw_decode_uses_digiraw_and_stops_stream(self):
         self.app[GATEWAY].args.digimodes=True

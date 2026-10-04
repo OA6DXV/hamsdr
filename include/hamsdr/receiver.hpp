@@ -6,16 +6,18 @@
 #include <vector>
 #include <cstdint>
 #include "hamsdr/audio_processing.hpp"
+#include "hamsdr/digital_audio.hpp"
 
 namespace hamsdr {
-// Fixed-rate first milestone: 1.024 MHz complex input, 16 kHz mono output.
+// 1.024 MHz complex input, 16 kHz listening or 12 kHz digital mono output.
 // Cascaded FIR decimation avoids filtering every sample with a narrow filter.
 class Receiver {
 public:
-    Receiver(double offset, std::string mode, float low, float high, float squelch, bool notch=false, unsigned nr=0);
-    void configure(double offset, std::string mode, float low, float high, float squelch, bool notch=false, unsigned nr=0);
+    Receiver(double offset, std::string mode, float low, float high, float squelch, bool notch=false, unsigned nr=0, bool digital=false);
+    void configure(double offset, std::string mode, float low, float high, float squelch, bool notch=false, unsigned nr=0, bool digital=false);
     std::vector<std::int16_t> push(std::span<const std::complex<float>> iq);
     float power_db() const;
+    unsigned audio_rate() const { return digital_ ? 12000 : 16000; }
 private:
     struct Fir {
         std::vector<std::complex<float>> taps, history;
@@ -33,5 +35,8 @@ private:
     unsigned phase_count_{0};
     unsigned settling_samples_{512};
     AudioProcessing processing_;
+    bool digital_{false};
+    DigitalGain digital_gain_;
+    DigitalResampler digital_resampler_;
 };
 }

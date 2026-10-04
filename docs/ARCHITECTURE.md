@@ -30,14 +30,27 @@ encoder required for their tuned frequency.
 ## Implemented preview protocol
 
 One aiohttp gateway supervises one native engine. The engine receives numeric
-`set ID OFFSET MODE LOW HIGH SQUELCH NOTCH NR` or `del ID` lines on stdin. Its stdout
+`set ID OFFSET MODE LOW HIGH SQUELCH NOTCH NR DIGITAL` or `del ID` lines on stdin.
+The optional DIGITAL flag defaults to zero for older command producers. Its stdout
 is binary: one type byte, little-endian uint32 client ID, little-endian uint32
 payload length, then payload. ID zero broadcasts. Types: 1 spectrum uint8,
-2 mono signed PCM16LE at 16 kHz, 3 ASCII dBFS, 4 ASCII source state. The
+2 mono signed PCM16LE at 16 kHz, 3 ASCII dBFS, 4 ASCII source state,
+5 mono signed PCM16LE at 12 kHz for the dedicated digital path. Distinct
+audio kinds prevent interpreting stale frames at the wrong sampling rate
+when changing profiles. The
 gateway sends audio to the browser as kind 2 raw PCM16/16 kHz, kind 10 balanced
 Opus wideband at 32 kbit/s, or kind 11 low-bandwidth Opus narrowband at 12 kbit/s. Opus uses 20 ms mono
 input frames at 16 kHz and is decoded through WebCodecs before entering the
 same AudioWorklet output path.
+
+Digital audio uses a separate peak-hold gain stage instead of listening AGC,
+bypasses squelch/notch/noise reduction, and resamples the demodulated float
+audio with a 3:4 polyphase antialias FIR before one PCM16 quantization. The
+129 taps per phase have a 5.5 kHz cutoff and approximately 4 ms group delay.
+The gateway only wraps native 12 kHz frames as browser kind 12; it does not
+resample them again. Network audio remains 192 kbit/s payload, with no second
+playback stream. Profile/resource-policy changes coalesce into bounded engine
+settings updates and restore normal 16 kHz processing on digital exit.
 
 The browser uses a same-origin `/ws` connection. Text messages are JSON
 `hello`, `tune`, `tuned`, `status`, `error`, `identify`, `identified`, `presence`,

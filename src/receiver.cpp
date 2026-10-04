@@ -34,22 +34,26 @@ bool Receiver::Fir::push(std::complex<float> x, std::complex<float>& out) {
     }
     return true;
 }
-Receiver::Receiver(double offset, std::string mode, float low, float high, float squelch, bool notch, unsigned nr)
+Receiver::Receiver(double offset, std::string mode, float low, float high, float squelch, bool notch, unsigned nr, bool digital)
     : first_(127,-40000,40000,1024000,8), second_(127,-6500,6500,128000,8),
       channel_(257,low,high,16000,1),
       rotation_(std::polar(1.0F, static_cast<float>(-2*std::numbers::pi*offset/1024000))),
-      offset_(offset), mode_(std::move(mode)), squelch_(squelch), processing_(notch,nr) {
+      offset_(offset), mode_(std::move(mode)), squelch_(squelch), processing_(notch,nr), digital_(digital) {
     if (!std::isfinite(offset) || std::abs(offset)>512000 || !std::isfinite(low) || !std::isfinite(high) ||
         low < -6000 || high > 6000 || high-low < 100 || !std::isfinite(squelch) ||
         (mode_!="AM" && mode_!="USB" && mode_!="LSB" && mode_!="CW" && mode_!="NFM"))
         throw std::invalid_argument("invalid receiver parameters");
 }
-void Receiver::configure(double offset, std::string mode, float low, float high, float squelch, bool notch, unsigned nr) {
+void Receiver::configure(double offset, std::string mode, float low, float high, float squelch, bool notch, unsigned nr, bool digital) {
     if (!std::isfinite(offset) || std::abs(offset)>512000 || !std::isfinite(low) || !std::isfinite(high) ||
         low < -6000 || high > 6000 || high-low < 100 || !std::isfinite(squelch) || nr>4 ||
         (mode!="AM" && mode!="USB" && mode!="LSB" && mode!="CW" && mode!="NFM"))
         throw std::invalid_argument("invalid receiver parameters");
     if (offset!=offset_ || mode!=mode_) {previous_={1,0};deemphasis_=0;}
+    if (digital!=digital_) {
+        digital_gain_.reset(); digital_resampler_.reset();
+    }
+    digital_=digital;
     offset_=offset;mode_=std::move(mode);squelch_=squelch;
     rotation_=std::polar(1.0F,static_cast<float>(-2*std::numbers::pi*offset/1024000));
     channel_.retune(low,high,16000);processing_.configure(notch,nr);
@@ -79,7 +83,20 @@ std::vector<std::int16_t> Receiver::push(std::span<const std::complex<float>> iq
         dc_x_=sample; dc_y_=dc; sample=dc;
         // Fill the cascaded FIR/DC state before training the AGC. This also
         // gives retuning a short silent transition instead of a click.
-        if (settling_samples_>0) {--settling_samples_;audio.push_back(0);continue;}
+        if (settling_samples_>0) {
+            --settling_samples_;sample=0;
+            if (!digital_) { audio.push_back(0);continue; }
+        }
+        if (digital_) {
+            // Keep digital amplitude dynamics separate from listening AGC,
+            // noise reduction, autonotch and squelch. Quantize only once,
+            // after the antialias FIR has generated the final 12 kHz samples.
+            sample=digital_gain_.push(sample);
+            float converted;
+            if (digital_resampler_.push(sample,converted))
+                audio.push_back(static_cast<std::int16_t>(std::clamp(converted,-0.95F,0.95F)*32767));
+            continue;
+        }
         const float magnitude=std::abs(sample);
         envelope_ += (magnitude>envelope_?0.02F:0.00005F)*(magnitude-envelope_);
         sample *= std::min(200.0F,0.15F/std::max(envelope_,0.00001F));
