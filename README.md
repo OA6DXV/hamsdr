@@ -11,6 +11,15 @@ releases.
 
 ## 0.7.2-unstable
 
+- Morse adds automatic narrow-tone acquisition, AFC and optional client-side
+  multidetection (up to six decoder instances) within the focused waterfall's
+  configured audio range. Auto and AFC start enabled; multi starts disabled.
+  Timing and text validation gate multi-stream display; a spectral peak alone
+  is only a candidate, not proof of Morse. Click a stream or the waterfall to
+  select a tone. Closely spaced signals and strong interference may still
+  reduce decoding accuracy. CW Experimental remains separate and unchanged.
+- Short audio gaps discard partial characters without losing learned WPM;
+  clearing text does not reset the decoder, AFC or waterfall.
 - Added RTTY Experimental to Digimodos without replacing the existing RTTY
   decoder or its multidetection mode.
 - Receive-only Fldigi Nyquist filtering, optimal ATC and ITA2 timing run in a

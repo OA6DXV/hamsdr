@@ -12,6 +12,12 @@ export class CwDecoder {
         wasm.__wbg_cwdecoder_free(ptr, 0);
     }
     /**
+     * Discard a partial character across a transport gap, not the learned WPM.
+     */
+    gap() {
+        wasm.cwdecoder_gap(this.__wbg_ptr);
+    }
+    /**
      * @returns {boolean}
      */
     keyed() {
@@ -53,6 +59,13 @@ export class CwDecoder {
         } finally {
             wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
         }
+    }
+    /**
+     * AFC changes only frequency-selective filters, preserving learned timing.
+     * @param {number} tone
+     */
+    retune(tone) {
+        wasm.cwdecoder_retune(this.__wbg_ptr, tone);
     }
     /**
      * @returns {number}

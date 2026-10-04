@@ -74,9 +74,10 @@ Grabar audio<br><button id="record">iniciar</button> <span id="record-status" ro
 </section>
 <section id="cw-panel" class="ctl cw-panel" aria-label="Decodificador CW" hidden>
 <div class="cw-header"><b id="cw-title">Morse</b><span id="cw-state" role="status">Inactivo</span><button id="cw-mute" class="small digital-mute" type="button" aria-pressed="false">Silenciar</button></div>
-<div class="cw-controls"><label>Tono <input id="cw-tone" type="number" min="100" max="5000" step="1" value="700"> Hz</label><label>Velocidad inicial <input id="cw-wpm" type="number" min="5" max="60" step="1" value="20"> WPM</label></div>
-<div class="cw-waterfall-wrap"><div class="cw-canvas-wrap"><canvas id="cw-waterfall" width="1024" height="220" aria-label="Cascada detallada CW"></canvas><div id="cw-tone-marker" aria-hidden="true"></div><p id="cw-waterfall-message" role="alert" hidden></p><button id="cw-audio-start" class="digital-audio-start" type="button" hidden>Iniciar audio</button></div><div class="cw-frequency-axis" aria-hidden="true"></div></div>
+<div class="cw-controls"><label>Tono <input id="cw-tone" type="number" min="100" max="5000" step="1" value="700"> Hz</label><label>Velocidad inicial <input id="cw-wpm" type="number" min="5" max="60" step="1" value="20"> WPM</label><label><input id="cw-auto" type="checkbox" checked> Autodetección</label><label><input id="cw-afc" type="checkbox" checked> AFC</label><label><input id="cw-multi" type="checkbox"> Multidetección</label><span id="cw-tracking" role="status"></span></div>
+<div class="cw-waterfall-wrap"><div class="cw-canvas-wrap"><canvas id="cw-waterfall" width="1024" height="220" aria-label="Cascada detallada CW"></canvas><div id="cw-tone-marker" aria-hidden="true"></div><div id="cw-stream-markers" aria-hidden="true"></div><p id="cw-waterfall-message" role="alert" hidden></p><button id="cw-audio-start" class="digital-audio-start" type="button" hidden>Iniciar audio</button></div><div class="cw-frequency-axis" aria-hidden="true"></div></div>
 <div class="cw-terminal-header"><b>Texto decodificado</b><button id="cw-clear" class="small" type="button">Limpiar</button></div><pre id="cw-terminal" role="log" aria-live="polite" aria-label="Texto CW decodificado"></pre>
+<div id="cw-multi-panel" hidden><b id="cw-stream-count">Streams detectados: 0</b><div class="cw-multi-table-wrap"><table id="cw-streams"><thead><tr><th>Tono</th><th>WPM</th><th>Texto decodificado</th></tr></thead><tbody></tbody></table></div></div>
 </section>
 <hr id="digital-separator" hidden>
 <div class="community-layout">

@@ -8,6 +8,7 @@ const RATE: f32 = 12_000.0;
 
 #[wasm_bindgen]
 pub struct CwDecoder {
+    tone: f32,
     filter: Goertzel,
     lower_guard: Goertzel,
     upper_guard: Goertzel,
@@ -49,6 +50,7 @@ impl CwDecoder {
         let lower=if tone-spacing*2.0>=spacing { tone-spacing*2.0 } else { (tone+spacing*4.0).min(5900.0) };
         let smoothing=(unit/4).max(1) as usize;
         CwDecoder {
+            tone,
             filter: Goertzel::new(tone, RATE, block),
             lower_guard: Goertzel::new(lower,RATE,block),
             upper_guard: Goertzel::new(upper,RATE,block),
@@ -106,6 +108,39 @@ impl CwDecoder {
     pub fn wpm(&self) -> f32 { self.morse.timing().wpm(self.envelope_rate) }
     pub fn locked(&self) -> bool { self.morse.is_bootstrapped() }
     pub fn keyed(&self) -> bool { self.keyed }
+
+    /// AFC changes only frequency-selective filters, preserving learned timing.
+    pub fn retune(&mut self, tone: f32) {
+        if !tone.is_finite() { return; }
+        let tone = tone.clamp(100.0, 5000.0);
+        // Low tones need a longer integration block to contain a full cycle.
+        if tone < self.envelope_rate {
+            *self = CwDecoder::new(tone, self.wpm());
+            return;
+        }
+        self.tone = tone;
+        let block = (RATE / self.envelope_rate).round() as u32;
+        let spacing = self.envelope_rate;
+        let lower = if tone - spacing * 2.0 >= spacing { tone - spacing * 2.0 }
+                    else { (tone + spacing * 4.0).min(5900.0) };
+        self.filter = Goertzel::new(tone, RATE, block);
+        self.lower_guard = Goertzel::new(lower, RATE, block);
+        self.upper_guard = Goertzel::new((tone + spacing * 2.0).min(5900.0), RATE, block);
+    }
+
+    /// Discard a partial character across a transport gap, not the learned WPM.
+    pub fn gap(&mut self) {
+        let locked = self.morse.is_bootstrapped();
+        let timing = self.morse.timing().clone();
+        self.morse = BootstrapDecoder::new(timing);
+        if locked { let _ = self.morse.finish(); }
+        self.runs = RunLengthEncoder::new();
+        self.debounce = Debouncer::new((self.morse.timing().unit() / 5).max(2));
+        self.silent_ticks = 0;
+        self.silence_flushed = false;
+        self.keyed = false;
+        self.retune(self.tone);
+    }
 }
 
 #[cfg(test)]
@@ -167,5 +202,23 @@ mod tests {
         }).collect();
         let mut decoder=CwDecoder::new(700.0,20.0);
         assert!(decoder.process(&audio).trim().is_empty());
+    }
+    #[test]
+    fn afc_and_transport_gaps_preserve_learned_speed() {
+        let mut decoder = CwDecoder::new(700.0, 20.0);
+        decoder.process(&fixture(28.0, 700.0, 0.15));
+        assert!(decoder.locked());
+        let wpm = decoder.wpm();
+        decoder.retune(720.0);
+        assert!(decoder.locked());
+        assert_eq!(decoder.wpm(), wpm);
+        decoder.gap();
+        assert!(decoder.locked());
+        assert_eq!(decoder.wpm(), wpm);
+        let text = decoder.process(&fixture(28.0, 720.0, 0.15));
+        assert_eq!(text.trim(), "CQ DE W1AW");
+        let mut fast = CwDecoder::new(700.0, 60.0);
+        fast.retune(100.0);
+        assert!(fast.process(&vec![0.0; 12000]).is_empty());
     }
 }

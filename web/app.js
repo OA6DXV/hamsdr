@@ -731,7 +731,7 @@ function sharedUrl(){
   if(low!==base[0]||high!==base[1]){url.searchParams.set('low',String(low));url.searchParams.set('high',String(high));}
   if(Math.abs(zoom-1)>.001)url.searchParams.set('zoom',String(Number(zoom.toFixed(2))));
   if(digitalMode)url.searchParams.set('digital',digitalMode);else if(rttyActive){url.searchParams.set('digital',rttyDecoderType==='fldigi'?'RTTY-EXPERIMENTAL':'RTTY');const baud=Number($('rtty-baud').value),shift=Number($('rtty-shift').value),rttyCenter=Number($('rtty-center').value);if(baud!==45.45)url.searchParams.set('baud',String(baud));if(shift!==170)url.searchParams.set('shift',String(shift));if(rttyCenter!==1000)url.searchParams.set('center',String(rttyCenter));url.searchParams.set('reverse',$('rtty-reverse').checked?'1':'0');if(!$('rtty-afc').checked)url.searchParams.set('afc','0');if($('rtty-multi').checked)url.searchParams.set('multi','1');}
-  if(cwActive){url.searchParams.set('digital',cwDecoderType==='cwformer'?'CWFORMER':'CW');url.searchParams.set('tone',$('cw-tone').value);url.searchParams.set('wpm',$('cw-wpm').value);}
+  if(cwActive){url.searchParams.set('digital',cwDecoderType==='cwformer'?'CWFORMER':'CW');url.searchParams.set('tone',$('cw-tone').value);url.searchParams.set('wpm',$('cw-wpm').value);if(cwDecoderType==='morse'){if(!$('cw-auto').checked)url.searchParams.set('auto','0');if(!$('cw-afc').checked)url.searchParams.set('afc','0');if($('cw-multi').checked)url.searchParams.set('multi','1');}}
   if(muted)url.searchParams.set('mute','1');
   return url;
 }
@@ -762,6 +762,7 @@ function applySharedDigitalState(){
     const requestedLow=Number(sharedParams.get('low')),requestedHigh=Number(sharedParams.get('high'));
     if(sharedParams.has('low')&&sharedParams.has('high')&&Number.isFinite(requestedLow)&&Number.isFinite(requestedHigh)&&requestedLow>=-digitalFilterMaximum&&requestedHigh<=digitalFilterMaximum&&requestedHigh-requestedLow>=100){low=requestedLow;high=requestedHigh;tune();}
   }else if(sharedCw&&digimodesAvailable){
+    $('cw-auto').checked=sharedParams.get('auto')!=='0';$('cw-afc').checked=sharedParams.get('afc')!=='0';$('cw-multi').checked=sharedParams.get('multi')==='1';
     for(const [id,key,min,max] of [['cw-tone','tone',100,5000],['cw-wpm','wpm',5,60]]){
       const value=Number(sharedParams.get(key));if(sharedParams.has(key)&&Number.isFinite(value)&&value>=min&&value<=max)$(id).value=String(value);
     }

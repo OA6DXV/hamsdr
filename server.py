@@ -1353,7 +1353,7 @@ def application(args):
             return web.FileResponse(ROOT / "web" / name)
         if name in {"rtty-fldigi-worker.mjs", "rtty-fldigi.mjs", "rtty-fldigi.wasm"}:
             return web.FileResponse(ROOT / "web" / name)
-        if name not in {"index.html", "style.css", "zoom.css", "site.js", "app.js", "audio-worklet.js", "classic-audio.js", "digital-worker.js", "rtty-core.mjs", "rtty-worklet.js", "mfsk-decoder.js", "mfsk-decoder_bg.wasm", "cw-panel.js", "cw-worker.js", "cw-spectrum.mjs", "cw-decoder.js", "cw-decoder_bg.wasm", "cty.dat", "waterfall-codec.js", "smeter-calibration.js", "community.js", "palette.js"}:
+        if name not in {"index.html", "style.css", "zoom.css", "site.js", "app.js", "audio-worklet.js", "classic-audio.js", "digital-worker.js", "rtty-core.mjs", "rtty-worklet.js", "mfsk-decoder.js", "mfsk-decoder_bg.wasm", "cw-panel.js", "cw-worker.js", "cw-spectrum.mjs", "cw-detector.mjs", "cw-decoder.js", "cw-decoder_bg.wasm", "cty.dat", "waterfall-codec.js", "smeter-calibration.js", "community.js", "palette.js"}:
             raise web.HTTPNotFound()
         if name in {"mfsk-decoder.js", "mfsk-decoder_bg.wasm"} and not (ROOT / "web" / name).exists():
             raise web.HTTPNotFound()
