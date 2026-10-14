@@ -1270,7 +1270,7 @@ function renderRecorder(state){
   $('record-status').title=state.active?'Grabando':'Grabación detenida';
   $('record-storage-status').textContent=state.error||(state.backend==='memory'?'La grabación está en memoria y no se recuperará al cerrar esta página.':'');
   $('record-storage-status').dataset.storage=state.backend;
-  const available=state.records,select=$('record-recovery-list'),previous=select.value,signature=available.map(record=>record.id+':'+record.bytes).join(',');
+  const available=state.recoveries,select=$('record-recovery-list'),previous=select.value,signature=available.map(record=>record.id+':'+record.bytes).join(',');
   if(signature!==recoveryListSignature){
     recoveryListSignature=signature;
     select.replaceChildren(...available.map(record=>new Option(new Date(record.started).toLocaleString()+' · '+record.format.toUpperCase()+' · '+HamRecorderCore.counter(record.samples,record.rate,record.bytes),record.id)));

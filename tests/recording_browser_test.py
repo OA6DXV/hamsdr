@@ -112,6 +112,8 @@ async def profile_cases(browser, name):
         await page.wait_for_timeout(2100)
         await expect(page.locator("#record-status")).to_have_text(re.compile(r"^\d{2}:\d{2} • \d+\.\d{2} MiB$"))
         await stop_recording(page)
+        # A normal stop (including repeated cycles) must use Save, not recovery.
+        await expect(page.locator("#record-recovery")).to_be_hidden()
         meta = await page.evaluate("recorder.metadata")
         wire = [bytes(packet) for packet in await page.evaluate("recordedWire")]
         path = await download(page, "#download", name + "-" + profile)
