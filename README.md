@@ -22,6 +22,8 @@ releases.
   and blinks red above one hour. WAV switches to RF64 above 4 GiB.
 - Profile and digital-mode changes are blocked while recording. A forced
   server profile change closes the recording for recovery.
+- FT8/FT4 decoded messages remain in page memory without a row limit; a live
+  count is shown and the current log can be exported as text or cleared.
 
 ## 0.7.4-dev
 

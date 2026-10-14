@@ -20,7 +20,7 @@ let bandConfigured=false,sharedTuningApplied=false,sharedDigitalApplied=false,pr
 let zoom=1, viewCenter=center, socket, retry=500, timer, tuneTimer, lastRow, view='waterfall', muted=false;
 let dynamicSpectrumBottom=null,dynamicSpectrumTop=null;
 let context, node, gain, audioStarting=false, audioEnabled=false, audioEverStarted=false, audioProfile='balanced', opusDecoder=null, opusSupportPromise=null, lastOpusSequence=null, spectrumFrames=0, audioPackets=0;
-let digimodesAvailable=!!siteConfig.digimodes,digitalMode=null,digitalWorker=null,digitalRows=[],digitalDownloadUrl=null,digitalDecoderNotice=false,digitalAudioCompatible=true,digitalPreviousAudioProfile=null,digitalPreviousWaterfallPreference=null,digitalWaterfallManuallyChanged=false,digitalProfilePending=false,digitalLogSized=false;
+let digimodesAvailable=!!siteConfig.digimodes,digitalMode=null,digitalWorker=null,digitalRows=[],digitalDownloadUrl=null,digitalDecoderNotice=false,digitalAudioCompatible=true,digitalPreviousAudioProfile=null,digitalPreviousWaterfallPreference=null,digitalWaterfallManuallyChanged=false,digitalProfilePending=false,digitalLogSized=false,digitalRenderScheduled=false;
 let digitalSort=null;
 let rttyActive=false,rttyNode=null,rttySink=null,rttyModuleLoaded=false,rttyText='';
 let rttyDecoderType='classic',rttyExperimentalWorker=null,rttyExperimentalReady=false,rttyExperimentalPending=0,rttySavedMulti=false,rttySavedMultiProfiles=false;
@@ -339,18 +339,18 @@ function stopDigitalWorker(){
 }
 function addDigitalRow(row){
   digitalRows.push(row);
-  trimDigitalRows();
-  renderDigitalRows();
+  scheduleDigitalRowsRender();
 }
-function trimDigitalRows(){
-  const limit=Number($('digital-message-limit').value);
-  if(Number.isSafeInteger(limit)&&limit>0&&digitalRows.length>limit)digitalRows.splice(0,digitalRows.length-limit);
+function scheduleDigitalRowsRender(){
+  if(digitalRenderScheduled)return;
+  digitalRenderScheduled=true;
+  requestAnimationFrame(()=>{digitalRenderScheduled=false;renderDigitalRows();});
 }
 function updateDigitalCountry(update){
   const row=digitalRows.find(item=>item.countryId===update.countryId);
   if(!row)return;
   row.countries=update.countries;row.countryPending=false;
-  renderDigitalRows();
+  scheduleDigitalRowsRender();
 }
 function setDigitalCountryList(countries){
   const select=$('digital-country'),selected=select.value;
@@ -407,6 +407,8 @@ function digitalSortedRows(){
 }
 function renderDigitalRows(){
   const body=$('digital-log').tBodies[0];body.replaceChildren();
+  const decodedCount=digitalRows.filter(row=>!row.placeholder).length;
+  $('digital-count').textContent=`${decodedCount} ${decodedCount===1?'mensaje':'mensajes'}`;
   const selectedCountry=$('digital-country').value;
   for(const heading of document.querySelectorAll('#digital-log [data-sort]')){
     const active=digitalSort?.key===heading.dataset.sort;
@@ -1156,11 +1158,6 @@ $('waterfall-quality').addEventListener('change',()=>{waterfallPreference=$('wat
 $('audio-quality').value=audioProfile;
 $('audio-quality').addEventListener('change',async()=>{if(recordingControlsLocked()){showAudioProfile();message('Detén la grabación para cambiar el perfil de audio.');return;}const requested=$('audio-quality').value;if(rttyActive&&requested!=='digiraw'){audioProfile='digiraw';showAudioProfile();message('RTTY utiliza el perfil interno digiraw PCM16 a 12 kHz.');return;}audioProfile=requested;if(digitalMode&&audioProfile!=='digiraw')setDigitalCompatibility(false);if(cwActive&&requested!=='digiraw'){cwCompatible=false;cwProfilePending=false;updateCwPanel();sendDigitalMode(null);}if(['balanced','mobile'].includes(audioProfile)&&!await browserSupportsOpus()){fallbackFromOpus('Este navegador no ofrece decodificación Opus mediante WebCodecs.');return;}if(audioProfile!=='digiraw'){try{localStorage.setItem('hamsdr-audio-profile',audioProfile);}catch{}}resetAudio();showAudioProfile();sendAudioProfile();});
 $('digital-clear').addEventListener('click',()=>{digitalRows=[];renderDigitalRows();});
-$('digital-message-limit').addEventListener('change',()=>{
-  const input=$('digital-message-limit'),limit=Number(input.value);
-  if(input.value===''||!Number.isSafeInteger(limit)||limit<0)input.value='1000';
-  trimDigitalRows();renderDigitalRows();
-});
 document.querySelectorAll('#digital-log [data-sort]').forEach(label=>{
   label.addEventListener('click',()=>setDigitalSort(label.dataset.sort));
   label.addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();setDigitalSort(label.dataset.sort);}});

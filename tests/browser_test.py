@@ -148,7 +148,7 @@ async def main():
                 await expect(page.locator('#digital-audio-start')).to_be_hidden()
                 await expect(page.locator('#digital-progress')).to_have_attribute('max','100')
                 await expect(page.locator('#digital-download')).to_have_text('Descargar log')
-                await expect(page.locator('#digital-message-limit')).to_have_value('1000')
+                await expect(page.locator('#digital-count')).to_have_text(re.compile(r'^\d+ mensajes?$'))
                 preserved=await page.evaluate("""()=>{
                     digitalRows=[{utc:'00:00:00',text:'TO CLEAR'}];renderDigitalRows();
                     const canvas=document.querySelector('#digital-waterfall'),context=canvas.getContext('2d');
@@ -156,26 +156,17 @@ async def main():
                     const pending=digitalSpectrumCount,progress=document.querySelector('#digital-progress').value;
                     document.querySelector('#digital-clear').click();
                     const after=context.getImageData(0,0,canvas.width,canvas.height);
-                    return {rows:digitalRows.length,visible:document.querySelectorAll('#digital-log tbody tr').length,
+                    return {rows:digitalRows.length,count:document.querySelector('#digital-count').textContent,visible:document.querySelectorAll('#digital-log tbody tr').length,
                         waterfallUnchanged:before.data.every((value,index)=>value===after.data[index]),
                         workerUnchanged:digitalWorker===worker,pendingUnchanged:digitalSpectrumCount===pending,
                         progressUnchanged:document.querySelector('#digital-progress').value===progress};
                 }""")
-                assert preserved=={'rows':0,'visible':0,'waterfallUnchanged':True,'workerUnchanged':True,'pendingUnchanged':True,'progressUnchanged':True},preserved
+                assert preserved=={'rows':0,'count':'0 mensajes','visible':0,'waterfallUnchanged':True,'workerUnchanged':True,'pendingUnchanged':True,'progressUnchanged':True},preserved
                 if viewport['width']==1440:
-                    await page.evaluate("""()=>{digitalRows=Array.from({length:1000},(_,i)=>({utc:'00:00:00',text:`ROW ${i}`}));addDigitalRow({utc:'00:00:01',text:'LATEST'})}""")
-                    assert await page.evaluate('digitalRows.length===1000&&digitalRows[0].text==="ROW 1"')
-                    assert await page.locator('#digital-log tbody tr').count()==1000
-                    await page.locator('#digital-message-limit').fill('0')
-                    await page.locator('#digital-message-limit').press('Tab')
-                    await page.evaluate("addDigitalRow({utc:'00:00:02',text:'UNLIMITED'})")
-                    assert await page.evaluate('digitalRows.length===1001')
-                    assert await page.locator('#digital-log tbody tr').count()==1001
-                    await page.locator('#digital-message-limit').fill('3')
-                    await page.locator('#digital-message-limit').press('Tab')
-                    assert await page.evaluate('digitalRows.length===3')
-                    await page.locator('#digital-message-limit').fill('1000')
-                    await page.locator('#digital-message-limit').press('Tab')
+                    await page.evaluate("""()=>{digitalRows=Array.from({length:1101},(_,i)=>({utc:'00:00:00',text:`ROW ${i}`}));renderDigitalRows()}""")
+                    assert await page.evaluate('digitalRows.length===1101')
+                    await expect(page.locator('#digital-count')).to_have_text('1101 mensajes')
+                    assert await page.locator('#digital-log tbody tr').count()==1101
                     await page.evaluate('digitalRows=[];renderDigitalRows()')
                 assert (await page.locator('#digital-log thead th').all_text_contents())[:6]==['UTC','SNR','DT','Hz','Mensaje','Países']
                 await expect(page.locator('#digital-country option')).not_to_have_count(1,timeout=10000)
@@ -256,8 +247,8 @@ async def main():
                     assert mobile_log['message']>=260
                     assert mobile_log['whiteSpace']=='nowrap'
                 if viewport['width']<=650:
-                    mobile_controls=await page.evaluate("""()=>{const rect=id=>{const r=document.querySelector(id).getBoundingClientRect();return{x:r.x,y:r.y,w:r.width,h:r.height}};return{limit:document.querySelector('#digital-message-limit').parentElement.getBoundingClientRect().toJSON(),mute:rect('#digital-mute'),download:rect('#digital-download'),clear:rect('#digital-clear'),progress:rect('#digital-progress')}}""")
-                    assert mobile_controls['limit']['y']<mobile_controls['mute']['y']
+                    mobile_controls=await page.evaluate("""()=>{const rect=id=>{const r=document.querySelector(id).getBoundingClientRect();return{x:r.x,y:r.y,w:r.width,h:r.height}};return{count:rect('#digital-count'),mute:rect('#digital-mute'),download:rect('#digital-download'),clear:rect('#digital-clear'),progress:rect('#digital-progress')}}""")
+                    assert mobile_controls['count']['y']<mobile_controls['mute']['y']
                     assert max(mobile_controls[name]['y'] for name in ('mute','download','clear'))-min(mobile_controls[name]['y'] for name in ('mute','download','clear'))<=2
                     assert mobile_controls['progress']['y']>mobile_controls['mute']['y']
                 await page.wait_for_timeout(300)
