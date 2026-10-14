@@ -9,6 +9,12 @@ The `unstable` branch is the active experimental development line. The `dev`
 branch tracks reviewed development releases, and `main` is reserved for stable
 releases.
 
+## 0.8.2-dev
+
+- Add the recording worker/controller, OPFS storage, IndexedDB and memory
+  fallbacks, periodic checkpoints, and cross-tab recovery protection.
+- Serve recorder assets for the upcoming browser integration.
+
 ## 0.8.1-dev
 
 - Add PCM16 WAV/RF64 and Ogg Opus recording containers, with checksum and
