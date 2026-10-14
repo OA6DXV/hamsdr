@@ -255,7 +255,7 @@ async def main():
                 for _ in range(100):
                     try:
                         with urllib.request.urlopen(URL + "health", timeout=.2) as response:
-                            assert json.load(response)["version"] == "0.9.0-dev"
+                            assert json.load(response)["version"] == "0.9.1-dev"
                         break
                     except OSError:
                         if server.poll() is not None:

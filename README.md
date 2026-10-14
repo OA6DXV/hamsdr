@@ -9,6 +9,20 @@ The `unstable` branch is the active experimental development line. The `dev`
 branch tracks reviewed development releases, and `main` is reserved for stable
 releases.
 
+## 0.9.1-dev
+
+- Enforce one chat message per second per browser session, including reloads
+  and reconnects. Keep rate-limit state in SQLite across server restarts.
+- Limit logbook submissions to two per callsign per UTC day, independent of
+  the submitting session and callsign capitalization. Retries remain idempotent.
+- Require a nonempty callsign of at most 10 ASCII characters before posting
+  chat or logbook entries. Allow only letters, digits, and `\ | / @ - _`,
+  normalize it to uppercase, and use that one callsign for chat identity and
+  logbook attribution; do not accept a second callsign in the log form.
+- Submit a valid identification after 600 ms without typing, as well as on
+  field confirmation, so mobile users do not have to blur the field first.
+  Posting remains disabled until the server acknowledges identification.
+
 ## 0.9.0-dev
 
 - Bound WebSocket output by queued bytes as well as item count, coalesce and

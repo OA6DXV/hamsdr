@@ -87,7 +87,7 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ack['event']['id'],repeated['event']['id'])
         await alice.send_json({'type':'log','request_id':uuid.uuid4().hex,'text':'Local test','call':'TEST-CALL'})
         logged=await self.event(alice,'ack')
-        self.assertEqual(logged['event']['call'],'TEST-CALL')
+        self.assertEqual(logged['event']['call'],'TESTER')
         self.assertEqual(logged['event']['kind'],'log')
         await alice.close()
         gone=await self.event(bob,'presence',lambda x:all(u['id']!=alice_id for u in x['users']))
@@ -103,6 +103,7 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
         await restored.send_json(request)
         repeated=await self.event(restored,'ack')
         self.assertEqual(repeated['event']['id'],ack['event']['id'])
+        await asyncio.sleep(1.01)
         unicode_message='📻'*500
         await restored.send_json({'type':'chat','request_id':uuid.uuid4().hex,'text':unicode_message})
         unicode_ack=await self.event(restored,'ack')
@@ -110,7 +111,7 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_community_validation_and_flood_limit(self):
         ws=await self.connect()
-        await self.identify(ws,'Prueba')
+        key,_=await self.identify(ws,'Prueba')
         for update in [
             {'type':'identify','key':uuid.uuid4().hex,'name':'Cambio de clave'},
             {'type':'chat','request_id':uuid.uuid4().hex,'text':'a'*501},
@@ -127,13 +128,59 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
             {'type':'audio','enabled':'yes'},
             {'type':'tune','nr':99}, {'type':'tune','notch':'yes'}]:
             await ws.send_json(update);await self.event(ws,'error')
-        for i in range(4):
-            await ws.send_json({'type':'chat','request_id':uuid.uuid4().hex,'text':str(i)})
-            await self.event(ws,'ack')
+        await ws.send_json({'type':'chat','request_id':uuid.uuid4().hex,'text':'first'})
+        await self.event(ws,'ack')
         await ws.send_json({'type':'chat','request_id':uuid.uuid4().hex,'text':'flood'})
         error=await self.event(ws,'error')
         self.assertIn('Espera',error['message'])
+        # A fresh WebSocket retaining the browser session cannot reset cooldown.
+        await ws.close()
+        ws=await self.connect()
+        await self.identify(ws,'Prueba',key)
+        await ws.send_json({'type':'chat','request_id':uuid.uuid4().hex,'text':'reload flood'})
+        error=await self.event(ws,'error')
+        self.assertIn('Espera',error['message'])
         async with self.session.get(self.url+'/community.sqlite3') as response:self.assertEqual(response.status,404)
+
+    async def test_logbook_daily_limit_across_sessions_and_case(self):
+        first,second=await self.connect(),await self.connect()
+        await self.identify(first,'OA6DXV')
+        await self.identify(second,'oa6dxv')
+        request={'type':'log','request_id':uuid.uuid4().hex,'text':'First entry','call':'OA6DXV'}
+        await first.send_json(request)
+        saved=await self.event(first,'ack')
+        await first.send_json(request)
+        self.assertEqual((await self.event(first,'ack'))['event']['id'],saved['event']['id'])
+        await second.send_json({**request,'request_id':uuid.uuid4().hex,'call':'oa6dxv'})
+        self.assertEqual((await self.event(second,'ack'))['event']['call'],'OA6DXV')
+        await first.send_json({**request,'request_id':uuid.uuid4().hex})
+        error=await self.event(first,'error')
+        self.assertIn('dos entradas',error['message'])
+
+    async def test_publication_requires_identification_with_ten_character_limit(self):
+        ws=await self.connect()
+        key,_=await self.identify(ws,'')
+        for kind in ('chat','log'):
+            await ws.send_json({'type':kind,'request_id':uuid.uuid4().hex,'text':'Anonymous','call':'oa6dxv'})
+            self.assertIn('Configura',(await self.event(ws,'error'))['message'])
+        await ws.send_json({'type':'identify','name':'A'*11,'key':key})
+        self.assertIn('10 caracteres',(await self.event(ws,'error'))['message'])
+        for name in ('A B', '<script>', 'OA6DXV!', 'ОA6DXV', 'ß'):
+            await ws.send_json({'type':'identify','name':name,'key':key})
+            self.assertIn('Indicativo inválido',(await self.event(ws,'error'))['message'])
+        await self.identify(ws,'a1\\|/@-_',key)
+        await ws.send_json({'type':'log','request_id':uuid.uuid4().hex,'text':'Allowed symbols','call':'SPOOFED'})
+        symbols=await self.event(ws,'ack')
+        self.assertEqual(symbols['event']['name'],'A1\\|/@-_')
+        self.assertEqual(symbols['event']['call'],'A1\\|/@-_')
+        await self.identify(ws,'A'*10,key)
+        await ws.send_json({'type':'chat','request_id':uuid.uuid4().hex,'text':'Identified'})
+        self.assertEqual((await self.event(ws,'ack'))['event']['name'],'A'*10)
+        await ws.send_json({'type':'log','request_id':uuid.uuid4().hex,'text':'Identified log','call':'oa6dxv'})
+        self.assertEqual((await self.event(ws,'ack'))['event']['call'],'A'*10)
+        await self.identify(ws,'   ',key)
+        await ws.send_json({'type':'log','request_id':uuid.uuid4().hex,'text':'Anonymous again','call':'cp4net'})
+        self.assertIn('Configura',(await self.event(ws,'error'))['message'])
 
     async def tune(self,ws,mode,frequency):
         await ws.send_json({'type':'tune','mode':mode,'frequency':frequency})

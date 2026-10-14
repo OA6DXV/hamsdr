@@ -20,12 +20,12 @@ import tomllib
 from urllib.parse import urlsplit
 
 from aiohttp import web, WSMsgType
-from community import History, plain_text
+from community import History, normalize_callsign, plain_text
 from opus_codec import OPUS_AVAILABLE, OpusEncoder
 from waterfall_codec import VERSION as WATERFALL_PROTOCOL_VERSION, encode as encode_waterfall
 
 ROOT = Path(__file__).resolve().parent
-VERSION = "0.9.0-dev"
+VERSION = "0.9.1-dev"
 PROTOCOL_VERSION = 1
 MODES = {"USB": (300, 2700), "LSB": (-2700, -300), "AM": (-4000, 4000),
          "CW": (450, 950), "NFM": (-5000, 5000)}
@@ -1103,7 +1103,7 @@ class Gateway:
                 raise ValueError("Sesión inválida")
             if client["key"] and client["key"] != key:
                 raise ValueError("La sesión no puede cambiar")
-            name = plain_text(update.get("name", ""), 32, allow_empty=True)
+            name = normalize_callsign(update.get("name", ""), allow_empty=True)
             changed = client["name"] != name
             client["name"] = name
             client["key"] = key
@@ -1125,25 +1125,25 @@ class Gateway:
             return
         if not client["key"]:
             raise ValueError("Identifica primero tu sesión")
+        if not client["name"]:
+            raise ValueError("Configura un indicativo válido (máximo 10 caracteres) para publicar")
         request_id = update.get("request_id", "")
         if not isinstance(request_id, str) or not re.fullmatch(r"[a-f0-9]{32}", request_id):
             raise ValueError("Identificador de mensaje inválido")
         text = plain_text(update.get("text"), 500)
-        call = plain_text(update.get("call", ""), 32, allow_empty=kind == "chat")
+        # Use the single identified callsign; ignore any second identity field.
+        call = client["name"] if kind == "log" else ""
         now = time.monotonic()
-        client["chat_tokens"] = min(4, client["chat_tokens"]+(now-client["chat_last"])/2)
-        client["chat_last"] = now
         self.community_tokens = min(30, self.community_tokens+(now-self.community_last)*5)
         self.community_last = now
-        if client["chat_tokens"] < 1 or self.community_tokens < 1:
+        if self.community_tokens < 1:
             raise ValueError("Espera unos segundos antes de volver a publicar")
-        client["chat_tokens"] -= 1
         self.community_tokens -= 1
         event = {"kind": kind, "time": int(time.time()), "name": client["name"] or "Anónimo", "text": text,
                  "frequency": round(client["settings"]["frequency"]), "mode": client["settings"]["mode"],
                  "call": call, "client_key": client["key"], "request_id": request_id}
         async with self.community_lock:
-            saved, created = await self.history.append(event)
+            saved, created = await self.history.append(event, enforce_limits=True)
             if created:
                 self.recent_history.pop(kind, None)
                 self.publish(json.dumps({"type": "event", "event": saved}))
@@ -1283,7 +1283,7 @@ class Gateway:
                   "reliable": asyncio.Queue(maxsize=64), "reliable_bytes": 0, "wake": asyncio.Event(),
                   "inflight_bytes": 0,
                   "closing": False, "settings": settings, "ws": ws, "name": "", "key": "", "address": address,
-                  "chat_tokens": 4.0, "chat_last": time.monotonic(), "history_last": 0,
+                  "history_last": 0,
                   "snapshot_task": None, "snapshot_revision": 0, "snapshot_last_at": 0.0,
                   "waterfall_profile": "balanced", "waterfall_preference": "balanced", "waterfall_ceiling": "balanced",
                   "waterfall_zoom": 1.0, "waterfall_center": self.center_frequency,

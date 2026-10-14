@@ -121,7 +121,7 @@ self-declared; no password, verified identity, or IP address is broadcast.
 Presence includes name, frequency, mode and color, updated after a tune,
 rename, connection or disconnection.
 
-History is SQLite schema version 1, PERSIST journal + synchronous FULL. A single executor
+History is SQLite schema version 2, PERSIST journal + synchronous FULL. A single executor
 thread owns the database connection, keeping fsync and queries off the audio
 event loop. Chat/log events are committed before acknowledgement; the unique
 (client_key, request_id) pair deduplicates reconnect retries. Snapshot delivery
@@ -131,7 +131,17 @@ history snapshot. History pages have 200 entries and a before-ID cursor.
 AV has a discard-oldest queue of 32 frames. JSON control/history events use a
 separate queue of 64 messages, prioritized for delivery. A stalled reliable
 queue closes the connection and the browser reloads persisted history. Chat
-is limited per connection and globally; only plain text is rendered. Records
+allows one new message per second per browser session, plus the global publication
+bucket. Logbook submissions allow two entries per normalized callsign per UTC day.
+SQLite persists these limits across reloads, reconnects and server restarts;
+idempotent retries do not consume additional allowance. Session keys and callsigns
+are self-declared, so these limits are not verified-person authentication.
+Publishing requires a nonempty callsign of at most 10 ASCII characters,
+containing only letters, digits, or `\ | / @ - _`; it is normalized to
+uppercase. Anonymous listeners can still receive streams and read history.
+Logbook callsigns come from that session identification. The logbook form has
+no separate callsign field.
+Only plain text is rendered. Records
 do not expire by age. The database-size ceiling defaults to 50 MB; when space
 must be reused, the oldest chat or logbook records are removed first. Browser
 history maps remain capped at 10,000 entries.

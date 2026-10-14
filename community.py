@@ -4,7 +4,30 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import sqlite3
+import time
 import unicodedata
+
+
+CALLSIGN_SYMBOLS = frozenset("\\|/@-_")
+
+
+def normalize_callsign(value, allow_empty=False):
+    """Trim and uppercase a callsign while enforcing its wire format."""
+    if not isinstance(value, str):
+        raise ValueError("El indicativo debe ser texto")
+    value = value.strip()
+    if not value:
+        if allow_empty:
+            return ""
+        raise ValueError("Escribe un indicativo antes de publicar")
+    if not value.isascii():
+        raise ValueError("Indicativo inválido: usa letras A-Z, números 0-9 y los símbolos \\ | / @ - _")
+    value = value.upper()
+    if len(value) > 10:
+        raise ValueError("El indicativo admite como máximo 10 caracteres")
+    if any(not (char.isalnum() or char in CALLSIGN_SYMBOLS) for char in value):
+        raise ValueError("Indicativo inválido: usa letras A-Z, números 0-9 y los símbolos \\ | / @ - _")
+    return value
 
 
 def plain_text(value, limit, allow_empty=False):
@@ -39,7 +62,7 @@ class History:
         self.db.execute("PRAGMA journal_mode=PERSIST")
         self.db.execute("PRAGMA synchronous=FULL")
         version = self.db.execute("PRAGMA user_version").fetchone()[0]
-        if version > 1:
+        if version > 2:
             raise RuntimeError("Unsupported history schema")
         self.db.executescript("""
             CREATE TABLE IF NOT EXISTS events (
@@ -51,8 +74,25 @@ class History:
                 UNIQUE(client_key, request_id)
             );
             CREATE INDEX IF NOT EXISTS events_kind_id ON events(kind,id);
-            PRAGMA user_version=1;
+            CREATE TABLE IF NOT EXISTS posting_limits (
+                scope TEXT NOT NULL, identity TEXT NOT NULL, period INTEGER NOT NULL,
+                count INTEGER NOT NULL, updated REAL NOT NULL,
+                PRIMARY KEY(scope,identity,period)
+            );
+            CREATE INDEX IF NOT EXISTS posting_limits_expiry ON posting_limits(scope,updated);
         """)
+        if version < 2:
+            # Existing logbook entries count toward today's allowance too.
+            day = int(time.time()) // 86400
+            rows = self.db.execute(
+                "SELECT call,time FROM events WHERE kind='log' AND time>=? AND time<?",
+                (day * 86400, (day + 1) * 86400)).fetchall()
+            with self.db:
+                for row in rows:
+                    self.db.execute("""INSERT INTO posting_limits VALUES ('log',?,?,1,?)
+                        ON CONFLICT(scope,identity,period) DO UPDATE SET count=count+1""",
+                        (self.callsign_key(row['call']), day, row['time']))
+                self.db.execute("PRAGMA user_version=2")
         page_size = self.db.execute("PRAGMA page_size").fetchone()[0]
         self.max_pages = self.max_size_bytes // page_size
         if self.max_pages < 16:
@@ -95,9 +135,38 @@ class History:
     def public(row):
         return {key: row[key] for key in ("id", "kind", "time", "name", "text", "frequency", "mode", "call")}
 
-    def _append(self, event):
+    @staticmethod
+    def callsign_key(call):
+        return unicodedata.normalize("NFKC", call).strip().casefold()
+
+    def _append(self, event, enforce_limits=False):
+        # Retries must acknowledge the original event without spending allowance.
+        row = self.db.execute("SELECT * FROM events WHERE client_key=? AND request_id=?",
+                              (event['client_key'], event['request_id'])).fetchone()
+        if row is not None:
+            return self.public(row), False
         self._make_room()
         with self.db:
+            if enforce_limits:
+                now = time.time()
+                day = int(now) // 86400
+                # Retain only active cooldowns and the current UTC day's quota.
+                self.db.execute("DELETE FROM posting_limits WHERE scope='chat' AND updated<=?", (now - 1,))
+                self.db.execute("DELETE FROM posting_limits WHERE scope='log' AND updated<?", (day * 86400,))
+                scope = event['kind']
+                identity = event['client_key'] if scope == 'chat' else self.callsign_key(event['call'])
+                period = 0 if scope == 'chat' else day
+                limit = self.db.execute(
+                    "SELECT count,updated FROM posting_limits WHERE scope=? AND identity=? AND period=?",
+                    (scope, identity, period)).fetchone()
+                if limit is not None:
+                    if scope == 'chat' and now - limit['updated'] < 1:
+                        raise ValueError("Espera un segundo antes de volver a enviar un mensaje")
+                    if scope == 'log' and limit['count'] >= 2:
+                        raise ValueError("Máximo dos entradas diarias por indicativo en el logbook (UTC)")
+                self.db.execute("""INSERT INTO posting_limits VALUES (?,?,?,1,?)
+                    ON CONFLICT(scope,identity,period) DO UPDATE SET count=count+1,updated=excluded.updated""",
+                    (scope, identity, period, now))
             cursor = self.db.execute("""INSERT OR IGNORE INTO events
                 (kind,time,name,text,frequency,mode,call,client_key,request_id)
                 VALUES (?,?,?,?,?,?,?,?,?)""", tuple(event[k] for k in (
@@ -117,8 +186,8 @@ class History:
     async def open(self):
         await self.call(self._open)
 
-    async def append(self, event):
-        return await self.call(self._append, event)
+    async def append(self, event, enforce_limits=False):
+        return await self.call(self._append, event, enforce_limits)
 
     async def history(self, kind, before=0):
         return await self.call(self._history, kind, before)
