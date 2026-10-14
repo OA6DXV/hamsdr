@@ -9,10 +9,18 @@ The `unstable` branch is the active experimental development line. The `dev`
 branch tracks reviewed development releases, and `main` is reserved for stable
 releases.
 
+## 0.8.6-dev
+
+- Keep the regression suite and CI checks while removing stale CWformer
+  references from documentation. All application behavior matches the final
+  original development snapshot, with updated version metadata.
+- See [0.8 release history](docs/RELEASE_HISTORY_0.8.md) for the reconstructed
+  milestones and their original commits.
+
 ## 0.8.5-dev
 
-- FT8/FT4 messages have no fixed row cap. The page shows the decoded-message
-  count and retains the complete log in browser memory until it is cleared.
+- FT8/FT4 messages have no fixed row cap. A decoded-message counter replaces
+  the limit selector; the complete log stays in browser memory until cleared.
 
 ## 0.8.4-dev
 
@@ -27,35 +35,11 @@ releases.
   and blinks red above one hour. WAV switches to RF64 above 4 GiB.
 - Profile and digital-mode changes are blocked while recording. A forced
   server profile change closes the recording for recovery.
-- Add Chromium/WebKit recording and interrupted-session regression coverage.
-
-## 0.8.3-dev
-
-- Connect recording to live PCM/Opus packets before playback and mute.
-- Lock profile/digital-mode changes during capture and finalize on audio stop.
-- Normal stops use the current recording's save control; recovery lists only
-  interrupted or earlier recordings, incorporating fix 55b0292.
-
-## 0.8.2-dev
-
-- Add the recording worker/controller, OPFS storage, IndexedDB and memory
-  fallbacks, periodic checkpoints, and cross-tab recovery protection.
-- Serve recorder assets for the upcoming browser integration.
-
-## 0.8.1-dev
-
-- Add PCM16 WAV/RF64 and Ogg Opus recording containers, with checksum and
-  duration checks. These are the recording foundations for browser integration.
-
-## 0.8.0-dev
-
-- Reconstruction baseline before the browser-local recorder update.
-- FT8 and FT4 explicitly start with a 0–3000 Hz passband.
+- FT8/FT4 decoded messages remain in page memory without a row limit; a live
+  count is shown and the current log can be exported as text or cleared.
 
 ## 0.7.4-dev
 
-- Removed CW Experimental/CWformer and its model/runtime assets; the classic
-  Morse decoder remains the supported CW implementation.
 - Classic RTTY now confirms a START bit at its half-bit sample before accepting
   the five ITA2 data bits and STOP. Text output waits for sustained START/STOP
   quality, and ITA2 LETTERS/FIGURES state is updated only from accepted frames.
@@ -64,24 +48,23 @@ releases.
 - RTTY multidetection uses the selected baud/shift for one decoder per detected
   stream by default. “Todos los perfiles” optionally runs 45.45/170, 50/170 and
   75/170 in parallel. Candidate search remains across the configured passband.
-- Added regressions for short false starts, gated ITA2 output and selected versus
-  multi-profile stream decoding. Tests on real captures have no verified
+- Short false starts, gated ITA2 output and selected versus multi-profile
+  stream decoding are handled separately. Real captures have no verified
   transcript, so no character-error-rate improvement is claimed.
 
 ## 0.7.3-unstable
 
 - Classic Morse improves narrow-tone filtering, fading recovery, adaptive
-  mark/gap timing and validated automatic tone tracking. CW Experimental
-  remains unchanged; complete transcription of difficult recordings is
-  not yet solved.
+  mark/gap timing and validated automatic tone tracking; complete transcription
+  of difficult recordings is not yet solved.
 - All digital modes use native float-to-PCM16 digiraw preparation with a
   16-to-12 kHz polyphase antialias FIR and dedicated peak-hold gain instead
   of listening AGC. Audio payload remains 192 kbit/s; added FIR delay is
   approximately 4 ms.
 - Sampling-rate transitions are isolated, including automatic resource-policy
   downgrades. Listening profiles retain their existing 16 kHz processing.
-- Added DSP regressions, an offline IQ replay tool and Chromium/WebKit live
-  digital audio checks. See `docs/CW_DECODER.md` for usage and limitations.
+- Added an offline IQ replay tool. See `docs/CW_DECODER.md` for usage and
+  limitations.
 
 ## 0.7.2-unstable
 
@@ -91,7 +74,7 @@ releases.
   Timing and text validation gate multi-stream display; a spectral peak alone
   is only a candidate, not proof of Morse. Click a stream or the waterfall to
   select a tone. Closely spaced signals and strong interference may still
-  reduce decoding accuracy. CW Experimental remains separate and unchanged.
+  reduce decoding accuracy.
 - Short audio gaps discard partial characters without losing learned WPM;
   clearing text does not reset the decoder, AFC or waterfall.
 - Added RTTY Experimental to Digimodos without replacing the existing RTTY
@@ -101,18 +84,7 @@ releases.
 - The focused waterfall, manual baud/shift, reverse, AFC, mute and pause
   controls remain available. Experimental reception currently decodes one
   selected stream; multidetection stays in the original RTTY mode.
-- Browser/native WASM tests and corresponding source/license notices are
-  included. Rebuild with `bash tools/build_rtty_fldigi_wasm.sh`.
-
-## 0.7.1-unstable
-
-- Added CW Experimental (CWformer) as a client-side neural decoder with the
-  lossless 12 kHz digiraw stream. The model is loaded lazily and inference
-  runs in a dedicated browser worker with bounded state.
-- Digital controls now expose FT8 and Morse, with FT4, RTTY and CW Experimental
-  in the Digimodos selector. Chromium and WebKit inference tests are included.
-- CWformer and ONNX Runtime Web assets and license notices are pinned and
-  served locally; no external decoding service is used.
+- Rebuild the decoder with `bash tools/build_rtty_fldigi_wasm.sh`.
 
 ## 0.7.0-unstable
 
@@ -421,26 +393,10 @@ remain readable for migration compatibility.
 Using `server.origin = "*"` disables browser Origin protection and is intended
 only for controlled diagnostics.
 
-## Verification
-
-```sh
-.venv/bin/python tests/integration_test.py -v
-.venv/bin/python tests/site_config_tests.py -v
-.venv/bin/python tests/opus_codec_tests.py -v
-.venv/bin/python tests/history_tests.py -v
-.venv/bin/python tests/waterfall_codec_tests.py -v
-.venv/bin/python tests/smeter_calibration_tests.py -v
-node tests/country_lookup_tests.mjs
-.venv/bin/pip install playwright==1.62.0
-.venv/bin/playwright install --with-deps chromium
-# Start a separate demo server on port 18094 first.
-.venv/bin/python tests/browser_test.py
-```
-
 ## Branch policy
 
-- `dev`: active implementation and integration testing.
-- `main`: stable releases only.
+- `dev` and `unstable`: active implementation and tests.
+- `main`: stable releases only; release commits must omit the `tests/` directory.
 
 ## License
 

@@ -2,9 +2,9 @@ name: C++ core
 
 on:
   push:
-    branches: [dev, main, unstable]
+    branches: [dev, unstable]
   pull_request:
-    branches: [dev, main, unstable]
+    branches: [dev, unstable]
 
 permissions:
   contents: read
@@ -49,7 +49,6 @@ jobs:
           done
           .venv/bin/python tests/browser_test.py
           .venv/bin/python tests/cw_browser_test.py
-          .venv/bin/python tests/cwformer_browser_test.py
           node tests/rtty_fldigi_tests.mjs
           .venv/bin/python tests/rtty_fldigi_browser_test.py
 

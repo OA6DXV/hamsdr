@@ -169,11 +169,6 @@ above one hour. Audio profile and digital-mode transitions are blocked during
 capture; server-forced profile changes finalize the existing recording first.
 Muting remains independent, and pausing audio finishes capture.
 
-Validation: node tests/recorder_core_tests.mjs checks containers, CRC,
-timestamps and RF64; .venv/bin/python tests/recording_browser_test.py runs
-an isolated local demo and verifies Chromium/WebKit exports against the
-received payload, interrupted capture, tab isolation and storage fallbacks.
-
 ## Porting checklist
 
 For another project that wants the same low-latency PCM approach:

@@ -44,9 +44,6 @@ Shared links use `digital=CW` with optional `tone`, `wpm` and `mute` parameters;
 reloaded links require the central audio-start button.
 
 Rebuild: `bash tools/build_cw_wasm.sh` (Rust and wasm-pack required).
-Tests: `cargo test --locked --manifest-path wasm/cw-decoder/Cargo.toml` and
-`.venv/bin/python tests/cw_browser_test.py`, plus `tests/cw_detector_tests.mjs`
-and `tests/cw_tracking_browser_test.py` (Chromium and WebKit).
 The pinned upstream source and dependency licenses are documented in
 `THIRD_PARTY_NOTICES.md` and `wasm/cw-decoder/Cargo.lock`.
 
@@ -58,8 +55,8 @@ AGC and audio effects are bypassed in digital mode; PCM16 quantization occurs
 only after resampling. Added FIR delay is approximately 4 ms and network
 payload remains 24 kB/s. These DSP changes improve transport preparation,
 not proof of correct Morse transcription. Existing 12 kHz WAV recordings
-cannot undo their earlier AGC/resampling; use original IQ captures to test
-the new generation path.
+cannot undo their earlier AGC/resampling; original IQ captures are needed to
+evaluate the new generation path.
 
 An offline tool accepts external unsigned 8-bit interleaved IQ without an
 rtl_tcp header: `build/hamsdr-digital-iq-replay INPUT CENTER_HZ FREQUENCY_HZ
@@ -68,22 +65,11 @@ PCM16 at 12 kHz (digital=1) or 16 kHz (digital=0) and reports sample counts,
 RMS/peak and clipped samples. It never connects to or controls the live SDR.
 Keep recordings outside tracked source; they are not bundled or uploaded.
 
-DSP regressions: `ctest --test-dir build --output-on-failure` includes passband
-flatness, out-of-band alias rejection, uneven block continuity, gain hold/release
-and sample-rate switching. `tests/digital_audio_browser_test.py SERVER_URL`
-checks live FT8/FT4/RTTY/Morse audio, native packet sizes and pause in Chromium
-and WebKit without posting community messages. Integration tests also cover
-rate restoration after automatic shared-IP resource downgrades.
-
-`tests/cw_recording_browser_test.py WAV` replays external mono PCM16/12 kHz
-recordings through the shipped browser worker without touching rtl_tcp. It
-reports audio-time tracking traces; optional `--expect-text` and
-`--max-tone-offset` assertions support local regressions. A faster Rust-only
-check is `cargo run --release --locked --manifest-path wasm/cw-decoder/Cargo.toml
---example replay -- WAV TONE SEED_WPM`. Recordings are not bundled or uploaded.
+The offline replay tool accepts external mono PCM16/12 kHz recordings without
+touching rtl_tcp. Recordings are not bundled or uploaded.
 
 The October 4 recordings exposed noise-driven tone selection and timing
-failures missed by clean synthetic tests. The revised decoder tracks the
+failures. The revised decoder tracks the
 first recording's approximately 744/643/683 Hz tone changes and recovers more
 recognizable fragments (including CP4NET/73); the second recovers EZEIZA but
 still has damaged letters and spacing. These are raw algorithm outputs, not
