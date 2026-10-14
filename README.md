@@ -9,6 +9,13 @@ The `unstable` branch is the active experimental development line. The `dev`
 branch tracks reviewed development releases, and `main` is reserved for stable
 releases.
 
+## 0.8.3-dev
+
+- Connect recording to live PCM/Opus packets before playback and mute.
+- Lock profile/digital-mode changes during capture and finalize on audio stop.
+- Normal stops use the current recording's save control; recovery lists only
+  interrupted or earlier recordings, incorporating fix 55b0292.
+
 ## 0.8.2-dev
 
 - Add the recording worker/controller, OPFS storage, IndexedDB and memory

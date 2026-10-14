@@ -5,10 +5,15 @@
   class RadioRecorder {
     constructor(onchange){
       this.onchange=onchange;this.active=false;this.busy=false;this.metadata=null;this.records=[];this.backend='memory';
-      this.pending=new Map();this.serial=0;this.worker=null;this.local=false;this.localRecords=new Map();this.error='';
+      this.pending=new Map();this.serial=0;this.worker=null;this.local=false;this.localRecords=new Map();this.error='';this.sessionIds=new Set();
       this.ready=this.initialize();
     }
-    state(){this.onchange?.({active:this.active,busy:this.busy,metadata:this.metadata,records:this.records,backend:this.backend,error:this.error});}
+    state(){
+      // Normal stops in this page use Save. Older unsaved recordings and
+      // incomplete checkpoints remain available if a session is interrupted.
+      const recoveries=this.records.filter(record=>!record.completed||!this.sessionIds.has(record.id));
+      this.onchange?.({active:this.active,busy:this.busy,metadata:this.metadata,records:this.records,recoveries,backend:this.backend,error:this.error});
+    }
     async initialize(){
       try{
         this.worker=new Worker(new URL('./recorder-worker.js',document.baseURI));
@@ -53,7 +58,7 @@
           this.metadata={id,profile,format,rate,started,samples:0,bytes:this.parts.reduce((sum,part)=>sum+part.length,0),filename:'hamsdr-'+new Date(started).toISOString().replaceAll(':','-')+'.'+(format==='wav'?'wav':'opus')};
           this.localTimer=setInterval(()=>this.state(),1000);
         }else this.metadata=await this.request('start',{profile});
-        this.active=true;
+        this.sessionIds.add(this.metadata.id);this.active=true;
       }finally{this.busy=false;this.state();}
     }
     pcm(payload,rate){

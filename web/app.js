@@ -13,6 +13,7 @@ const defaults = {LSB:[-2700,-300],USB:[300,2700],AM:[-4000,4000],CW:[450,950],N
 const narrowDefaults={LSB:[-2200,-500],USB:[500,2200],AM:[-2500,2500],CW:[600,800],NFM:[-3000,3000]};
 const digitalDefaults={LSB:[-3000,0],USB:[0,3000],AM:[-4000,4000],CW:[450,950],NFM:[-5000,5000]};
 const digitalModeFilterDefaults={FT8:[0,3000],FT4:[0,3000]};
+let recording=false,recordingFinishing=false,recorder,recordingDownloadURL,recoveryListSignature='';
 let narrow=false, peakPower=-120, lastPeak=0, lastGraph=0, lastDraw=0, occupants=[];
 let frequency=7100000, mode='LSB', low=-2700, high=-300, center=7100500, rate=1024000;
 let bandConfigured=false,sharedTuningApplied=false,sharedDigitalApplied=false,protocolReady=false,opusAvailable=true,currentResourcePolicy=null;
@@ -148,6 +149,7 @@ function browserSupportsOpus(){
 }
 function fallbackFromOpus(reason){
   if(audioProfile==='raw')return;
+  recordingProfileWillChange('raw');
   audioProfile='raw';
   try{localStorage.setItem('hamsdr-audio-profile',audioProfile);}catch{}
   resetAudio();showAudioProfile();sendAudioProfile();message(`${reason} Se activó audio raw PCM16.`);
@@ -161,7 +163,7 @@ function createOpusDecoder(){
         try{
           const options={planeIndex:0,format:'f32-planar'},buffer=new ArrayBuffer(audio.allocationSize(options)),rate=audio.sampleRate;
           audio.copyTo(buffer,options);audio.close();
-          if(node&&context?.state==='running')node.port.postMessage({codec:'float32',rate,payload:buffer,record:recording},[buffer]);
+          if(node&&context?.state==='running')node.port.postMessage({codec:'float32',rate,payload:buffer,record:false},[buffer]);
         }catch(error){audio.close();fallbackFromOpus(`No se pudo convertir Opus: ${error.message}.`);}
       },
       error:error=>fallbackFromOpus(`El decodificador Opus falló: ${error.message}.`)
@@ -169,9 +171,10 @@ function createOpusDecoder(){
     opusDecoder.configure(opusConfig);return opusDecoder;
   }catch(error){resetOpusDecoder();fallbackFromOpus(`Opus no está disponible: ${error.message}.`);return null;}
 }
-function decodeOpusPacket(bytes){
+function decodeOpusPacket(bytes,profile=audioProfile){
   if(bytes.byteLength<5)return;
   const sequence=new DataView(bytes.buffer,bytes.byteOffset,4).getUint32(0,true);
+  if(recording&&recorder.metadata?.profile===profile)recorder.opus(bytes.subarray(4),sequence);
   let decoder=createOpusDecoder();
   if(!decoder)return;
   if(decoder.decodeQueueSize>8){reportStreamInterruption('audio-decoder');resetOpusDecoder();decoder=createOpusDecoder();if(!decoder)return;}
@@ -453,6 +456,7 @@ function setDigitalDspState(active){
   updateSquelchControl();
 }
 function setDigitalMode(next,{autoStartAudio=true}={}){
+  if(recordingControlsLocked()){message('Detén la grabación para cambiar de modo digital.');return;}
   if(next&&!digimodesAvailable){message('Digimodos no están habilitados en este receptor.');return;}
   const selected=digitalMode===next?null:next;
   if(selected){
@@ -576,6 +580,7 @@ function ensureRttyExperimentalWorker(){
   worker.postMessage({...rttyConfiguration(),frequency,demodulation:mode});
 }
 function setRttyMode(enabled,{autoStartAudio=true,decoderType='classic'}={}){
+  if(recordingControlsLocked()){message('Detén la grabación para cambiar de modo digital.');return;}
   if(enabled&&rttyActive&&decoderType!==rttyDecoderType)setRttyMode(false);
   const selected=Boolean(enabled)&&!rttyActive;
   if(selected){
@@ -604,6 +609,7 @@ function setRttyMode(enabled,{autoStartAudio=true,decoderType='classic'}={}){
 }
 function updateCwPanel(){cwPanel.update({active:cwActive,audio:audioEnabled,compatible:cwCompatible,mode,frequency,low,high});}
 function setCwMode(enabled,{autoStartAudio=true}={}){
+  if(recordingControlsLocked()){message('Detén la grabación para cambiar de modo digital.');return;}
   const selected=Boolean(enabled)&&!cwActive;
   if(selected){
     if(!digimodesAvailable){message('Digimodos no están habilitados en este receptor.');return;}
@@ -634,7 +640,7 @@ function handleDigitalPacket(bytes){
   if(packetMode==='RTTY'||packetMode==='CW'){
     audioPackets++;$('audio-status').dataset.packets=String(audioPackets);
     const decoderPayload=payload.buffer.slice(0),playbackPayload=payload.buffer.slice(0);
-    if(recording)recordPCM(payload.buffer.slice(0));
+    if(recording)recordPCM(payload.buffer.slice(0),12000);
     if(packetMode==='RTTY'){
       if(rttyDecoderType==='fldigi'){
         if(rttyExperimentalReady&&rttyExperimentalPending<4){rttyExperimentalPending++;rttyExperimentalWorker.postMessage({type:'samples',sequence,payload:decoderPayload},[decoderPayload]);}
@@ -648,7 +654,7 @@ function handleDigitalPacket(bytes){
   if(audioProfile==='digiraw'){
     audioPackets++;$('audio-status').dataset.packets=String(audioPackets);
     const audioPayload=payload.buffer.slice(0);
-    if(recording)recordPCM(audioPayload.slice(0));
+    if(recording)recordPCM(audioPayload.slice(0),12000);
     if(node&&context?.state==='running')node.port.postMessage({codec:'pcm16',rate:12000,payload:audioPayload,record:false},[audioPayload]);
   }
   ensureDigitalWorker().postMessage({type:'samples',mode:packetMode,sequence,timestampUs,sampleCount,payload:payload.buffer},[payload.buffer]);
@@ -974,6 +980,8 @@ function connect(){
       }else if(msg.type==='stream-stats'){
         $('client-traffic').dataset.serverKbps=String(msg.kbps);
       }else if(msg.type==='audio-state'){
+        if(!msg.enabled)void stopRecording();
+        if(msg.profile)recordingProfileWillChange(msg.profile);
         audioEnabled=msg.enabled;if(msg.profile)audioProfile=msg.profile;showAudioProfile();showAudioState();
         if(!audioEnabled&&digitalMode){stopDigitalWorker();setDigitalProgress();$('digital-state').textContent='Recepción detenida; inicia audio para decodificar.';}
       }else if(msg.type==='audio-profile'){
@@ -989,6 +997,7 @@ function connect(){
         if(digitalMode&&msg.profile==='digiraw')digitalProfilePending=false;
         if(rttyActive&&msg.profile==='digiraw')rttyProfilePending=false;
         if(cwActive&&msg.profile==='digiraw')cwProfilePending=false;
+        recordingProfileWillChange(msg.profile);
         audioProfile=msg.profile;resetAudio();showAudioProfile();
         if(digitalMode&&audioProfile!=='digiraw'&&digitalAudioCompatible)setDigitalCompatibility(false);
         if(cwActive&&audioProfile!=='digiraw'){cwCompatible=false;updateCwPanel();}
@@ -1008,10 +1017,10 @@ function connect(){
     if(kind===2&&audioEnabled){
       audioPackets++;$('audio-status').dataset.packets=String(audioPackets);
       const payload=data.slice(1),rate=16000;
-      if(recording)recordPCM(payload.slice(0));
+      if(recording)recordPCM(payload.slice(0),rate);
       if(node&&context.state==='running')node.port.postMessage({codec:'pcm16',rate,payload,record:false},[payload]);
     }
-    if([10,11].includes(kind)&&audioEnabled){audioPackets++;$('audio-status').dataset.packets=String(audioPackets);decodeOpusPacket(bytes.subarray(1));}
+    if([10,11].includes(kind)&&audioEnabled){audioPackets++;$('audio-status').dataset.packets=String(audioPackets);decodeOpusPacket(bytes.subarray(1),kind===10?'balanced':'mobile');}
     if(kind===12)handleDigitalPacket(bytes.subarray(1));
     if(kind===3)updateMeter(Number(new TextDecoder().decode(bytes.subarray(1))));
   };
@@ -1051,7 +1060,7 @@ async function listen(){
         node=new window.ClassicRadioAudio(context);document.documentElement.dataset.audioEngine='classic';
       }
       gain=context.createGain();node.connect(gain).connect(context.destination);
-      node.port.onmessage=({data})=>{if(data.recording){if(recordBytes===0&&data.rate)recordingRate=data.rate;recordPCM(data.recording);}if(data.rms!==undefined)$('audio-status').dataset.rms=String(data.rms);if(data.underrun!==undefined&&audioEnabled)reportStreamInterruption('audio');};
+      node.port.onmessage=({data})=>{if(data.rms!==undefined)$('audio-status').dataset.rms=String(data.rms);if(data.underrun!==undefined&&audioEnabled)reportStreamInterruption('audio');};
       context.onstatechange=()=>{if(audioEnabled&&context.state!=='running')$('audio-status').textContent='Audio suspendido por el navegador. Pulsa Pausar y vuelve a iniciarlo.';};
     }
     await resumed;
@@ -1145,7 +1154,7 @@ $('labels').onchange=drawMarkers;
 $('waterfall-quality').value=waterfallPreference;
 $('waterfall-quality').addEventListener('change',()=>{waterfallPreference=$('waterfall-quality').value;if(digitalMode)digitalWaterfallManuallyChanged=true;try{localStorage.setItem('hamsdr-waterfall',waterfallPreference);}catch{}sendWaterfallPreference();});
 $('audio-quality').value=audioProfile;
-$('audio-quality').addEventListener('change',async()=>{if(recording)stopRecording();const requested=$('audio-quality').value;if(rttyActive&&requested!=='digiraw'){audioProfile='digiraw';showAudioProfile();message('RTTY utiliza el perfil interno digiraw PCM16 a 12 kHz.');return;}audioProfile=requested;if(digitalMode&&audioProfile!=='digiraw')setDigitalCompatibility(false);if(cwActive&&requested!=='digiraw'){cwCompatible=false;cwProfilePending=false;updateCwPanel();sendDigitalMode(null);}if(['balanced','mobile'].includes(audioProfile)&&!await browserSupportsOpus()){fallbackFromOpus('Este navegador no ofrece decodificación Opus mediante WebCodecs.');return;}if(audioProfile!=='digiraw'){try{localStorage.setItem('hamsdr-audio-profile',audioProfile);}catch{}}resetAudio();showAudioProfile();sendAudioProfile();});
+$('audio-quality').addEventListener('change',async()=>{if(recordingControlsLocked()){showAudioProfile();message('Detén la grabación para cambiar el perfil de audio.');return;}const requested=$('audio-quality').value;if(rttyActive&&requested!=='digiraw'){audioProfile='digiraw';showAudioProfile();message('RTTY utiliza el perfil interno digiraw PCM16 a 12 kHz.');return;}audioProfile=requested;if(digitalMode&&audioProfile!=='digiraw')setDigitalCompatibility(false);if(cwActive&&requested!=='digiraw'){cwCompatible=false;cwProfilePending=false;updateCwPanel();sendDigitalMode(null);}if(['balanced','mobile'].includes(audioProfile)&&!await browserSupportsOpus()){fallbackFromOpus('Este navegador no ofrece decodificación Opus mediante WebCodecs.');return;}if(audioProfile!=='digiraw'){try{localStorage.setItem('hamsdr-audio-profile',audioProfile);}catch{}}resetAudio();showAudioProfile();sendAudioProfile();});
 $('digital-clear').addEventListener('click',()=>{digitalRows=[];renderDigitalRows();});
 $('digital-message-limit').addEventListener('change',()=>{
   const input=$('digital-message-limit'),limit=Number(input.value);
@@ -1230,7 +1239,8 @@ function recall(){const m=memories[Number($('memories').value)];if($('memories')
 $('memories').addEventListener('change',recall);$('recall').onclick=recall;
 $('delete').addEventListener('click',()=>{if($('memories').value==='')return;memories.splice(Number($('memories').value),1);storeMemories();});
 window.addEventListener('pagehide',()=>{cwPanel.stop();stopRttyExperimentalWorker();stopRecording();clearTimeout(timer);clearInterval(smeterCalibrationTimer);socket.onclose=null;socket.close();});
-window.addEventListener('pageshow',e=>{if(e.persisted)connect();});
+window.addEventListener('pageshow',e=>{if(e.persisted){connect();void recorder?.refresh();}});
+document.addEventListener('visibilitychange',()=>{if(document.hidden)recorder?.checkpoint();});
 new ResizeObserver(()=>{const available=Math.max(1,Math.round($('panorama').getBoundingClientRect().width));if(canvas.width!==available){canvas.width=available;redrawHistory();}scale.width=available;drawScale();clearTimeout(profileTimer);profileTimer=setTimeout(()=>{if(waterfallPreference==='auto')sendWaterfallPreference();},500);}).observe($('panorama'));
 const digitalCanvas=$('digital-waterfall');
 new ResizeObserver(()=>{
@@ -1245,29 +1255,53 @@ const networkConnection=navigator.connection||navigator.mozConnection||navigator
 if(networkConnection?.addEventListener)networkConnection.addEventListener('change',()=>{if(waterfallPreference==='auto')sendWaterfallPreference();});
 setInterval(()=>{const now=performance.now(),elapsed=(now-trafficAt)/1000;$('client-traffic').textContent=`${(trafficBytes*8/elapsed/1000).toFixed(1)} kb/s`;trafficBytes=0;trafficAt=now;},1000);
 clearWaterfall();controls();renderMemories();showAudioProfile();showAudioState();setMuted($('mute').checked);updateSquelchControl();connect();
-let recording=false,recordChunks=[],recordBytes=0,recordingRate=16000,recordTimer,downloadURL;
-function recordPCM(pcm){
-  recordChunks.push(pcm);recordBytes+=pcm.byteLength;
-  $('record-status').textContent=`Grabando · ${Math.floor(recordBytes/(recordingRate*2))} s`;
-  if(recordBytes>=32*1024*1024)stopRecording();
+function recordingControlsLocked(){return recording||recordingFinishing||!!recorder?.busy;}
+function recordPCM(pcm,rate){if(recording)recorder.pcm(pcm,rate);}
+function renderRecorder(state){
+  recording=state.active;
+  const locked=state.active||state.busy||recordingFinishing;
+  $('record').disabled=state.busy;$('record').textContent=state.active?'detener':'iniciar';
+  $('audio-quality').disabled=locked;
+  document.querySelectorAll('[data-digital-mode],[data-cw-mode],[data-rtty-mode],[data-digital-menu]').forEach(control=>control.disabled=locked);
+  const meta=state.metadata,complete=meta&&state.records.some(record=>record.id===meta.id);
+  $('download').hidden=!complete||state.active||state.busy;
+  $('record-status').textContent=meta?`${Math.floor(meta.samples/meta.rate)} s`:'';
+  $('record-status').title=state.active?'Grabando':'Grabación detenida';
+  $('record-storage-status').textContent=state.error||(state.backend==='memory'?'La grabación está en memoria y no se recuperará al cerrar esta página.':'');
+  $('record-storage-status').dataset.storage=state.backend;
+  const available=state.recoveries,select=$('record-recovery-list'),previous=select.value,signature=available.map(record=>record.id+':'+record.bytes).join(',');
+  if(signature!==recoveryListSignature){
+    recoveryListSignature=signature;
+    select.replaceChildren(...available.map(record=>new Option(new Date(record.started).toLocaleString()+' · '+record.format.toUpperCase()+' · '+HamRecorderCore.counter(record.samples,record.rate,record.bytes),record.id)));
+    if(available.some(record=>record.id===previous))select.value=previous;
+  }
+  $('record-recovery').hidden=!available.length;
 }
-function stopRecording(){
-  if(!recording)return;recording=false;clearTimeout(recordTimer);
-  // Canonical PCM16 WAV works even when MediaRecorder/codecs are unavailable.
-  const header=new ArrayBuffer(44),v=new DataView(header);
-  const text=(offset,s)=>{for(let i=0;i<s.length;i++)v.setUint8(offset+i,s.charCodeAt(i));};
-  text(0,'RIFF');v.setUint32(4,36+recordBytes,true);text(8,'WAVE');text(12,'fmt ');
-  v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);v.setUint32(24,recordingRate,true);
-  v.setUint32(28,recordingRate*2,true);v.setUint16(32,2,true);v.setUint16(34,16,true);text(36,'data');v.setUint32(40,recordBytes,true);
-  const blob=new Blob([header,...recordChunks],{type:'audio/wav'});
-  if(downloadURL)URL.revokeObjectURL(downloadURL);downloadURL=URL.createObjectURL(blob);
-  $('download').href=downloadURL;$('download').download=`hamsdr-${new Date().toISOString().replaceAll(':','-')}.wav`;
-  $('download').hidden=false;$('record').textContent='iniciar';$('record-status').textContent=`${Math.round(recordBytes/(recordingRate*2))} s guardados`;
-  recordChunks=[];
+function recordingProfileWillChange(profile){
+  if(recording&&profile!==recorder.metadata?.profile){void stopRecording();message('El receptor cambió el perfil de audio; la grabación quedó guardada localmente.');}
 }
+async function stopRecording(){
+  if(!recording)return;
+  recording=false;recordingFinishing=true;
+  try{await recorder.stop();}
+  catch(error){message(`No se pudo finalizar la grabación: ${error.message}`);}
+  finally{recordingFinishing=false;recorder.state();}
+}
+async function saveRecording(id){
+  if(!id)return;
+  try{
+    const result=await recorder.export(id);
+    if(recordingDownloadURL)URL.revokeObjectURL(recordingDownloadURL);
+    recordingDownloadURL=URL.createObjectURL(result.blob);
+    const link=document.createElement('a');link.href=recordingDownloadURL;link.download=result.metadata.filename;document.body.append(link);link.click();link.remove();
+  }catch(error){message(`No se pudo guardar la grabación: ${error.message}`);}
+}
+recorder=new RadioRecorder(renderRecorder);
+$('download').onclick=()=>saveRecording(recorder.metadata?.id);
+$('record-recover').onclick=()=>saveRecording($('record-recovery-list').value);
+$('record-delete').onclick=async()=>{try{await recorder.remove($('record-recovery-list').value);}catch(error){message(error.message);}};
 $('record').onclick=async()=>{
-  if(recording){stopRecording();return;}
+  if(recording){await stopRecording();return;}if(recordingControlsLocked())return;
   await listen();if(!node||context.state!=='running')return;
-  recordChunks=[];recordBytes=0;recordingRate=audioProfile==='raw'?16000:audioProfile==='digiraw'?12000:48000;recording=true;$('record').textContent='detener';$('record-status').textContent='Grabando…';$('download').hidden=true;
-  recordTimer=setTimeout(stopRecording,30*60*1000);
+  try{await recorder.start(audioProfile);}catch(error){message(`No se pudo iniciar la grabación: ${error.message}`);}
 };
