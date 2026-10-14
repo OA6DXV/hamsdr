@@ -24,7 +24,7 @@ Audio is opt-in and starts only after the listener presses the audio button.
 Pausing audio tells the server to stop sending audio and removes queued audio
 packets; it does not merely mute playback locally. Waterfall and control remain
 on the connection. Binary data is not base64-encoded, JSON-wrapped, or carried
-in a WAV/MP3 container. WAV is assembled in the browser only when recording.
+in a WAV/MP3 container. Recording creates a local WAV or Ogg Opus container.
 
 The native engine writes frames to its stdout bridge as:
 
@@ -125,6 +125,54 @@ target browser/device rather than assuming that PCM itself keeps an app alive.
 or localhost for development). The current code has a `ScriptProcessorNode`
 fallback for insecure contexts, but that API is deprecated and should not be
 the basis of a new implementation. Prefer HTTPS/WSS and a user-initiated start.
+
+## Browser-local recording
+
+Recording branches off the transport before playback, mute, volume adjustment
+or browser output resampling:
+
+- Raw: copy received PCM16LE directly into mono 16 kHz WAV.
+- Digiraw: copy received PCM16LE directly into mono 12 kHz WAV.
+- Balanced / mobile: copy the original compressed Opus packets into Ogg
+  Opus (.opus). Do not record the 48 kHz WebCodecs output or encode again.
+
+Ogg uses CRC-protected pages, OpusHead/OpusTags, a 48 kHz granule clock and an
+EOS marker on finalization. Capture begins inside a running live stream, so
+Opus pre-skip is zero; brief decoder startup artifacts are possible. Duration
+counts received samples/packets, not connection gaps or time spent paused.
+WAV reserves a ds64 chunk and becomes RF64 if the file exceeds the RIFF 4 GiB
+limit. RF64 support varies between external players.
+
+recorder-worker.js keeps container and storage work off the playback thread.
+It detects OPFS synchronous access in a dedicated worker and atomic metadata
+writes. Fallbacks use IndexedDB chunk transactions, then memory. The memory
+fallback explicitly warns that navigation/closure loses the recording.
+Pending data is checkpointed every **5 seconds or 256 KiB**, whichever comes
+first. OPFS retains one data file plus small checkpoint metadata per recording;
+IndexedDB stores ordered binary chunks and metadata in the same transaction.
+The recording is not uploaded to HamSDR.
+
+After reload, navigation or reopening the site, **Recuperar y Guardar** exports
+the last durable checkpoint and repairs WAV sizes/Ogg EOS as necessary.
+Active recordings in other tabs are excluded through browser Web Locks.
+Without that API, a recent checkpoint is treated as active for 15 seconds.
+Local recordings are retained until the user selects **Eliminar**. Exporting
+does not delete them. Recovery is limited to the same origin/browser profile;
+clearing site data, private browsing or browser eviction can remove it.
+OPFS exports a file-backed Blob; IndexedDB/memory export assembles a Blob, so
+very large exports can still create browser memory pressure.
+
+There is no application time/size cap. Browser quota and device capacity still
+apply: storage failure stops capture and preserves the previous checkpoint.
+The display is MM:SS • MiB, changing to HH:MM:SS • MiB and blinking red
+above one hour. Audio profile and digital-mode transitions are blocked during
+capture; server-forced profile changes finalize the existing recording first.
+Muting remains independent, and pausing audio finishes capture.
+
+Validation: node tests/recorder_core_tests.mjs checks containers, CRC,
+timestamps and RF64; .venv/bin/python tests/recording_browser_test.py runs
+an isolated local demo and verifies Chromium/WebKit exports against the
+received payload, interrupted capture, tab isolation and storage fallbacks.
 
 ## Porting checklist
 

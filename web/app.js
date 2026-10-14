@@ -1265,7 +1265,8 @@ function renderRecorder(state){
   document.querySelectorAll('[data-digital-mode],[data-cw-mode],[data-rtty-mode],[data-digital-menu]').forEach(control=>control.disabled=locked);
   const meta=state.metadata,complete=meta&&state.records.some(record=>record.id===meta.id);
   $('download').hidden=!complete||state.active||state.busy;
-  $('record-status').textContent=meta?`${Math.floor(meta.samples/meta.rate)} s`:'';
+  $('record-status').textContent=meta?HamRecorderCore.counter(meta.samples,meta.rate,meta.bytes):'';
+  $('record-status').classList.toggle('record-long',!!meta&&meta.samples/meta.rate>3600);
   $('record-status').title=state.active?'Grabando':'Grabación detenida';
   $('record-storage-status').textContent=state.error||(state.backend==='memory'?'La grabación está en memoria y no se recuperará al cerrar esta página.':'');
   $('record-storage-status').dataset.storage=state.backend;
