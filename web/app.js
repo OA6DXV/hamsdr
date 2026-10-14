@@ -12,6 +12,7 @@ const siteConfig=window.hamSdrSiteConfig||{};
 const defaults = {LSB:[-2700,-300],USB:[300,2700],AM:[-4000,4000],CW:[450,950],NFM:[-5000,5000]};
 const narrowDefaults={LSB:[-2200,-500],USB:[500,2200],AM:[-2500,2500],CW:[600,800],NFM:[-3000,3000]};
 const digitalDefaults={LSB:[-3000,0],USB:[0,3000],AM:[-4000,4000],CW:[450,950],NFM:[-5000,5000]};
+const digitalModeFilterDefaults={FT8:[0,3000],FT4:[0,3000]};
 let narrow=false, peakPower=-120, lastPeak=0, lastGraph=0, lastDraw=0, occupants=[];
 let frequency=7100000, mode='LSB', low=-2700, high=-300, center=7100500, rate=1024000;
 let bandConfigured=false,sharedTuningApplied=false,sharedDigitalApplied=false,protocolReady=false,opusAvailable=true,currentResourcePolicy=null;
@@ -467,7 +468,7 @@ function setDigitalMode(next,{autoStartAudio=true}={}){
     digitalLogSized=false;$('digital-log').closest('.digital-log-wrap').style.height='264px';
     setDigitalDspState(true);
     resetDigitalSpectrum();
-    mode='USB';narrow=false;[low,high]=[0,3000];tune();
+    mode='USB';narrow=false;[low,high]=digitalModeFilterDefaults[selected];tune();
     $('audio-quality').querySelector('option[value="digiraw"]').hidden=false;
     audioProfile='digiraw';digitalProfilePending=true;resetAudio();showAudioProfile();
     waterfallPreference='slow';digitalWaterfallManuallyChanged=false;$('waterfall-quality').value='slow';

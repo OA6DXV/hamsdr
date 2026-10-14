@@ -9,6 +9,11 @@ The `unstable` branch is the active experimental development line. The `dev`
 branch tracks reviewed development releases, and `main` is reserved for stable
 releases.
 
+## 0.8.0-dev
+
+- Reconstruction baseline before the browser-local recorder update.
+- FT8 and FT4 explicitly start with a 0–3000 Hz passband.
+
 ## 0.7.4-dev
 
 - Removed CW Experimental/CWformer and its model/runtime assets; the classic
