@@ -271,6 +271,7 @@ Requirements are Linux, a C++20 compiler, CMake, pkg-config, FFTW3f, Python
 sudo apt install g++ cmake pkg-config libfftw3-dev libopus0 python3-venv
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
+ctest --test-dir build --output-on-failure
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 .venv/bin/python server.py --demo --database /tmp/hamsdr-demo.sqlite3
@@ -381,8 +382,8 @@ only for controlled diagnostics.
 
 ## Branch policy
 
-- `dev`: active implementation and integration work.
-- `main`: stable releases only.
+- `dev` and `unstable`: active implementation and tests.
+- `main`: stable releases only; release commits must omit the `tests/` directory.
 
 ## License
 

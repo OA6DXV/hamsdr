@@ -2,15 +2,15 @@ name: C++ core
 
 on:
   push:
-    branches: [dev, main, unstable]
+    branches: [dev, unstable]
   pull_request:
-    branches: [dev, main, unstable]
+    branches: [dev, unstable]
 
 permissions:
   contents: read
 
 jobs:
-  build:
+  build-and-test:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -20,6 +20,38 @@ jobs:
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
       - name: Build
         run: cmake --build build --parallel 2
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+      - name: CW decoder tests
+        run: cargo test --locked --manifest-path wasm/cw-decoder/Cargo.toml
+      - name: Install web test dependencies
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install -r requirements.txt playwright==1.62.0
+          .venv/bin/playwright install --with-deps chromium
+      - name: Protocol, community persistence, and recovery
+        run: |
+          .venv/bin/python tests/integration_test.py -v
+          .venv/bin/python tests/site_config_tests.py -v
+          .venv/bin/python tests/opus_codec_tests.py -v
+          .venv/bin/python tests/history_tests.py -v
+          .venv/bin/python tests/waterfall_codec_tests.py -v
+          .venv/bin/python tests/tls_tests.py -v
+          .venv/bin/python tests/smeter_calibration_tests.py -v
+      - name: Desktop and mobile browser
+        run: |
+          .venv/bin/python server.py --demo --port 18094 --database /tmp/hamsdr-ci.sqlite3 &
+          radio_pid=$!
+          trap 'kill "$radio_pid"; wait "$radio_pid" || true' EXIT
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:18094/health; then break; fi
+            sleep 1
+          done
+          .venv/bin/python tests/browser_test.py
+          .venv/bin/python tests/cw_browser_test.py
+          node tests/rtty_fldigi_tests.mjs
+          .venv/bin/python tests/rtty_fldigi_browser_test.py
+
   sanitizers:
     runs-on: ubuntu-24.04
     steps:
@@ -30,3 +62,5 @@ jobs:
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DHAMSDR_ENABLE_SANITIZERS=ON
       - name: Build
         run: cmake --build build --parallel 2
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
