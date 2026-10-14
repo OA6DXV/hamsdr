@@ -27,8 +27,6 @@ releases.
 
 ## 0.7.4-dev
 
-- Removed CW Experimental/CWformer and its model/runtime assets; the classic
-  Morse decoder remains the supported CW implementation.
 - Classic RTTY now confirms a START bit at its half-bit sample before accepting
   the five ITA2 data bits and STOP. Text output waits for sustained START/STOP
   quality, and ITA2 LETTERS/FIGURES state is updated only from accepted frames.
@@ -37,24 +35,23 @@ releases.
 - RTTY multidetection uses the selected baud/shift for one decoder per detected
   stream by default. “Todos los perfiles” optionally runs 45.45/170, 50/170 and
   75/170 in parallel. Candidate search remains across the configured passband.
-- Added regressions for short false starts, gated ITA2 output and selected versus
-  multi-profile stream decoding. Tests on real captures have no verified
+- Short false starts, gated ITA2 output and selected versus multi-profile
+  stream decoding are handled separately. Real captures have no verified
   transcript, so no character-error-rate improvement is claimed.
 
 ## 0.7.3-unstable
 
 - Classic Morse improves narrow-tone filtering, fading recovery, adaptive
-  mark/gap timing and validated automatic tone tracking. CW Experimental
-  remains unchanged; complete transcription of difficult recordings is
-  not yet solved.
+  mark/gap timing and validated automatic tone tracking; complete transcription
+  of difficult recordings is not yet solved.
 - All digital modes use native float-to-PCM16 digiraw preparation with a
   16-to-12 kHz polyphase antialias FIR and dedicated peak-hold gain instead
   of listening AGC. Audio payload remains 192 kbit/s; added FIR delay is
   approximately 4 ms.
 - Sampling-rate transitions are isolated, including automatic resource-policy
   downgrades. Listening profiles retain their existing 16 kHz processing.
-- Added DSP regressions, an offline IQ replay tool and Chromium/WebKit live
-  digital audio checks. See `docs/CW_DECODER.md` for usage and limitations.
+- Added an offline IQ replay tool. See `docs/CW_DECODER.md` for usage and
+  limitations.
 
 ## 0.7.2-unstable
 
@@ -64,7 +61,7 @@ releases.
   Timing and text validation gate multi-stream display; a spectral peak alone
   is only a candidate, not proof of Morse. Click a stream or the waterfall to
   select a tone. Closely spaced signals and strong interference may still
-  reduce decoding accuracy. CW Experimental remains separate and unchanged.
+  reduce decoding accuracy.
 - Short audio gaps discard partial characters without losing learned WPM;
   clearing text does not reset the decoder, AFC or waterfall.
 - Added RTTY Experimental to Digimodos without replacing the existing RTTY
@@ -74,18 +71,7 @@ releases.
 - The focused waterfall, manual baud/shift, reverse, AFC, mute and pause
   controls remain available. Experimental reception currently decodes one
   selected stream; multidetection stays in the original RTTY mode.
-- Browser/native WASM tests and corresponding source/license notices are
-  included. Rebuild with `bash tools/build_rtty_fldigi_wasm.sh`.
-
-## 0.7.1-unstable
-
-- Added CW Experimental (CWformer) as a client-side neural decoder with the
-  lossless 12 kHz digiraw stream. The model is loaded lazily and inference
-  runs in a dedicated browser worker with bounded state.
-- Digital controls now expose FT8 and Morse, with FT4, RTTY and CW Experimental
-  in the Digimodos selector. Chromium and WebKit inference tests are included.
-- CWformer and ONNX Runtime Web assets and license notices are pinned and
-  served locally; no external decoding service is used.
+- Rebuild the decoder with `bash tools/build_rtty_fldigi_wasm.sh`.
 
 ## 0.7.0-unstable
 
@@ -285,7 +271,6 @@ Requirements are Linux, a C++20 compiler, CMake, pkg-config, FFTW3f, Python
 sudo apt install g++ cmake pkg-config libfftw3-dev libopus0 python3-venv
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
-ctest --test-dir build --output-on-failure
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 .venv/bin/python server.py --demo --database /tmp/hamsdr-demo.sqlite3
@@ -394,25 +379,9 @@ remain readable for migration compatibility.
 Using `server.origin = "*"` disables browser Origin protection and is intended
 only for controlled diagnostics.
 
-## Verification
-
-```sh
-.venv/bin/python tests/integration_test.py -v
-.venv/bin/python tests/site_config_tests.py -v
-.venv/bin/python tests/opus_codec_tests.py -v
-.venv/bin/python tests/history_tests.py -v
-.venv/bin/python tests/waterfall_codec_tests.py -v
-.venv/bin/python tests/smeter_calibration_tests.py -v
-node tests/country_lookup_tests.mjs
-.venv/bin/pip install playwright==1.62.0
-.venv/bin/playwright install --with-deps chromium
-# Start a separate demo server on port 18094 first.
-.venv/bin/python tests/browser_test.py
-```
-
 ## Branch policy
 
-- `dev`: active implementation and integration testing.
+- `dev`: active implementation and integration work.
 - `main`: stable releases only.
 
 ## License

@@ -105,7 +105,7 @@ class OpusEncoder:
 
 
 class OpusDecoder:
-    """Reference decoder used only by tests and local diagnostics."""
+    """Reference decoder used for local diagnostics."""
     def __init__(self, sample_rate=16000):
         if not OPUS_AVAILABLE:
             raise RuntimeError("libopus is not installed")

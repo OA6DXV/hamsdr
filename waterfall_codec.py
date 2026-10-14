@@ -70,7 +70,7 @@ def encode(row: bytes, profile: str, sequence: int, start: int = 0, end: int | N
     return HEADER.pack(VERSION, spec["code"], bins, spec["bits"], sequence, lower_hz, span_hz) + payload
 
 def decode(packet: bytes):
-    """Reference decoder used by tests and offline format analysis."""
+    """Reference decoder for offline format analysis."""
     if len(packet) < HEADER.size:
         raise ValueError("truncated waterfall row")
     version, code, bins, bits, sequence, lower_hz, span_hz = HEADER.unpack_from(packet)

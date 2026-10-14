@@ -47,14 +47,8 @@ Use Emscripten 3.1.74 and run:
 
 ```sh
 bash tools/build_rtty_fldigi_wasm.sh
-node tests/rtty_fldigi_tests.mjs
-.venv/bin/python tests/rtty_fldigi_browser_test.py
-BROWSER=webkit .venv/bin/python tests/rtty_fldigi_browser_test.py
 ```
 
-`EMXX` may point to an absolute `em++` path. Tests exercise the actual browser
-module at 45.45/50/75 baud, shifts, reverse, frequency offset and asymmetric
-tone amplitude with noise. Browser tests cover stream sharing, the output
-gate, responsive layout, mute, pause, mode switching and shared links.
-Better real-world decoding than the original is not assumed until comparison
-against known-text recordings or manually verified transmissions.
+`EMXX` may point to an absolute `em++` path. Better real-world decoding than the
+original is not assumed until comparison against known-text recordings or
+manually verified transmissions.
