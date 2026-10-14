@@ -6,6 +6,7 @@
 <title>HamSDR</title>
 <!-- SITE_METADATA -->
 <link id="site-icon" rel="icon"><link id="site-touch-icon" rel="apple-touch-icon">
+<script src="./recorder-core.js" defer></script><script src="./recorder.js" defer></script>
 <link rel="stylesheet" href="./style.css"><link rel="stylesheet" href="./zoom.css"><script src="./site-config.js" defer></script><script src="./site.js" defer></script><script src="./palette.js" defer></script><script src="./waterfall-codec.js" defer></script><script src="./smeter-calibration.js" defer></script><script src="./classic-audio.js" defer></script><script src="./community.js" defer></script><script src="./cw-panel.js" defer></script><script src="./app.js" defer></script>
 </head>
 <body><main>
@@ -50,7 +51,8 @@ Filter: <b><output id="bandwidth">2.40</output> <span id="filter-unit">kHz</span
 <div class="filter-limits"><label>Inferior <span><input id="low" type="number" min="-6000" max="5900" step="50" value="-2700"> Hz</span></label><label>Superior <span><input id="high" type="number" min="-5900" max="6000" step="50" value="-300"> Hz</span></label></div><hr>
 <label><input id="squelch" type="checkbox"> squelch</label> <label><input id="notch" type="checkbox"> autonotch</label>
 <label id="squelch-threshold">Umbral squelch <input id="threshold" type="range" min="-110" max="-10" value="-70" aria-label="Umbral squelch" disabled> <output id="threshold-value">−70 dBFS</output></label><hr>
-Grabar audio<br><button id="record">iniciar</button> <span id="record-status" role="status"></span><a id="download" hidden>Descargar grabación</a></section></div></section>
+<div class="record-controls">Grabar audio<br><button id="record" type="button">iniciar</button> <span id="record-status" role="status"></span><button id="download" type="button" hidden>Guardar</button>
+<small id="record-storage-status" role="status"></small><div id="record-recovery" hidden><select id="record-recovery-list" aria-label="Grabaciones locales disponibles"></select><button id="record-recover" type="button">Recuperar y Guardar</button><button id="record-delete" type="button">Eliminar</button></div></div></section></div></section>
 <p id="message" role="alert"></p><hr>
 <section id="digital-panel" class="ctl digital-panel" aria-label="Decodificador digital" hidden>
 <div class="digital-header"><b><span id="digital-title">Digimodos</span></b><span id="digital-state">Inactivo</span><progress id="digital-progress" max="100" value="0" aria-label="Progreso del periodo de decodificación"></progress><button id="digital-mute" class="small digital-mute" type="button" aria-pressed="false">Silenciar</button><label for="digital-message-limit">Límite de mensajes: <input id="digital-message-limit" type="number" min="0" step="1" value="1000" title="0 conserva todos los mensajes"></label><button id="digital-download" class="small" type="button" disabled>Descargar log</button><button id="digital-clear" class="small" type="button">Limpiar</button></div>

@@ -13,12 +13,6 @@ class RadioAudio extends AudioWorkletProcessor {
       const floating=data.codec==='float32';
       for(let i=0;i<samples.length;i++)this.buffer[(this.write++)%this.buffer.length]=floating?samples[i]:samples[i]/32768;
       if(this.write-this.read>this.rate/2){this.read=this.write-this.rate/10;this.started=false;}
-      if(data.record){
-        const copy=new Int16Array(samples.length);
-        if(floating)for(let i=0;i<samples.length;i++)copy[i]=Math.max(-32768,Math.min(32767,Math.round(samples[i]*32767)));
-        else copy.set(samples);
-        this.port.postMessage({recording:copy.buffer,rate:this.rate},[copy.buffer]);
-      }
     };
   }
   decodePCM(payload){

@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
+.record-controls{margin-top:4px}.record-controls #download{display:inline-block;margin-left:4px}.record-controls small{display:block;font-size:11px;color:#a00000}.record-controls #record-recovery{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px}.record-controls #record-recovery-list{width:100%;min-width:0;font-size:12px}.record-long{color:#c40000;font-weight:bold;animation:record-alert 1s steps(2,start) infinite}@keyframes record-alert{50%{opacity:.35}}
 #cw-stream-markers{position:absolute;inset:0;overflow:hidden;pointer-events:none}#cw-stream-markers span{position:absolute;top:0;bottom:0;border-left:1px dashed #ffe350}
 :root{font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;color:#080808;background:#c0c0c0;color-scheme:light}
 .flag{object-fit:fill;flex-shrink:0;width:148px;height:84px}@media(max-width:650px){.flag{width:65px;height:40px}}

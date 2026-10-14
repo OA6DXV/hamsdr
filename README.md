@@ -9,6 +9,20 @@ The `unstable` branch is the active experimental development line. The `dev`
 branch tracks reviewed development releases, and `main` is reserved for stable
 releases.
 
+## 0.8.0-dev
+
+- Recording preserves raw/digiraw PCM in WAV and received Opus packets in
+  Ogg Opus, without decoding/re-encoding them for storage.
+- Browser-local autosave uses OPFS, then IndexedDB, then a clearly identified
+  memory fallback. Checkpoints run every 5 seconds or 256 KiB.
+- Saved checkpoints can be recovered after navigation, reload or closing a
+  tab in the same browser/origin. Recordings remain local until explicitly
+  deleted; the server does not store them.
+- Recording has no HamSDR time/size cap. The counter displays duration and MiB,
+  and blinks red above one hour. WAV switches to RF64 above 4 GiB.
+- Profile and digital-mode changes are blocked while recording. A forced
+  server profile change closes the recording for recovery.
+
 ## 0.7.4-dev
 
 - Removed CW Experimental/CWformer and its model/runtime assets; the classic
@@ -235,8 +249,9 @@ Audio and waterfall quality are selected independently. Audio offers:
 Balanced Opus is the default for a new browser. Opus is encoded by system
 `libopus`, decoded through browser WebCodecs and passed into the same
 AudioWorklet. Unsupported clients fall back to raw PCM16. Audio is opt-in: pausing
-it stops its network frames instead of applying only a local mute. WAV
-recording follows the decoded audio sample rate. Raw 16 kHz PCM uses 256 kbit/s
+it stops its network frames instead of applying only a local mute. Recording
+copies raw/digiraw PCM into WAV or received compressed packets into Ogg Opus.
+Raw 16 kHz PCM uses 256 kbit/s
 of audio payload; `digiraw` at 12 kHz uses 192 kbit/s. These figures exclude
 WebSocket/TCP/TLS framing and waterfall traffic. See
 [`docs/AUDIO_TRANSPORT.md`](docs/AUDIO_TRANSPORT.md) for the wire format,

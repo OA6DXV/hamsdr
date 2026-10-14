@@ -137,6 +137,8 @@ async def main():
                 await expect(page.locator('[data-digital-menu]')).to_be_enabled()
                 await page.locator('[data-digital-mode="FT8"]').click()
                 await expect(page.locator('#mode-display')).to_have_text('USB')
+                await expect(page.locator('#low')).to_have_value('0')
+                await expect(page.locator('#high')).to_have_value('3000')
                 await expect(page.locator('#audio-quality')).to_have_value('digiraw')
                 await expect(page.locator('#audio-profile-status')).to_contain_text('PCM16 · 12 kHz')
                 await expect(page.locator('#waterfall-quality')).to_have_value('slow')
@@ -279,6 +281,9 @@ async def main():
                 await expect(page.locator('#digital-panel')).to_be_hidden()
                 await page.locator('[data-digital-menu]').select_option('FT4')
                 await expect(page.locator('#digital-panel')).to_be_visible()
+                await expect(page.locator('#mode-display')).to_have_text('USB')
+                await expect(page.locator('#low')).to_have_value('0')
+                await expect(page.locator('#high')).to_have_value('3000')
                 assert await page.locator('.digital-log-wrap').evaluate("element=>parseInt(element.style.height,10)")==264
                 await page.evaluate('sizeDigitalLog(1)')
                 assert await page.locator('.digital-log-wrap').evaluate("element=>parseInt(element.style.height,10)")==264
@@ -290,6 +295,8 @@ async def main():
                     await page.goto(url+'?digital=FT8&mute=1')
                     await expect(page.locator('#digital-panel')).to_be_visible()
                     await expect(page.locator('#mode-display')).to_have_text('USB')
+                    await expect(page.locator('#low')).to_have_value('0')
+                    await expect(page.locator('#high')).to_have_value('3000')
                     await expect(page.locator('#mute')).to_be_checked()
                     await expect(page.locator('#listen')).to_have_text('Iniciar audio')
                     await expect(page.locator('#digital-audio-start')).to_be_visible()
@@ -518,7 +525,7 @@ async def main():
             await page.locator('#notch').uncheck()
             await page.locator('#nr').select_option('0')
             recording_profile=await page.locator('#audio-quality').input_value()
-            recording_rate=16000 if recording_profile=='raw' else 48000
+            recording_rate=12000 if recording_profile=='digiraw' else 16000
             await page.locator('#record').click()
             await page.wait_for_timeout(2000)
             await page.locator('#record').click()
@@ -530,10 +537,14 @@ async def main():
             recording=Path('test-results')/download.suggested_filename
             await download.save_as(recording)
             assert recording.stat().st_size>500
-            with wave.open(str(recording)) as wav:
-                assert wav.getframerate()==recording_rate and wav.getnchannels()==1 and wav.getsampwidth()==2
-                samples=wav.readframes(wav.getnframes())
-                assert max(abs(x[0]) for x in struct.iter_unpack('<h',samples))>100
+            if recording_profile in ('raw','digiraw'):
+                with wave.open(str(recording)) as wav:
+                    assert wav.getframerate()==recording_rate and wav.getnchannels()==1 and wav.getsampwidth()==2
+                    samples=wav.readframes(wav.getnframes())
+                    assert max(abs(x[0]) for x in struct.iter_unpack('<h',samples))>100
+            else:
+                content=recording.read_bytes()
+                assert recording.suffix=='.opus' and content.startswith(b'OggS') and b'OpusHead' in content[:64]
             await expect(page.locator('#audio-status')).to_have_attribute('data-rms',re.compile(r'^0\.(?:[1-9]|0[1-9]|00[1-9])'),timeout=15000)
             if local and viewport['width']==1440:
                 # Two independent browsers demonstrate live identity and safe chat text.
