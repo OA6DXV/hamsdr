@@ -121,10 +121,6 @@ async def main():
                     await expect(page.locator('#cw-afc')).not_to_be_checked()
                     await expect(page.locator('#cw-multi')).to_be_checked()
                     assert await page.evaluate('cwPanel.worker===null')
-                    # Neural inference remains opt-in; do not download/run the model during this test.
-                    await page.locator('[data-digital-menu]').select_option('CWFORMER')
-                    await expect(page.locator('#cw-multi')).to_be_disabled()
-                    await expect(page.locator('#cw-multi-panel')).to_be_hidden()
                     assert not errors,errors
                     await page.close()
                 await browser.close()

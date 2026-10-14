@@ -14,21 +14,15 @@ window.CWDecodePanel=class {
     };
     this.$('cw-streams').onkeydown=event=>{if(event.key==='Enter'||event.key===' '){const row=event.target.closest('tr[data-tone]');if(row){event.preventDefault();row.click();}}};
     this.$('cw-waterfall').onclick=event=>{
-      if(this.decoderType==='cwformer')return;
       const rect=event.currentTarget.getBoundingClientRect(),{minimum,maximum}=this.configuration;
       this.$('cw-tone').value=String(Math.round(minimum+(maximum-minimum)*Math.max(0,Math.min(1,(event.clientX-rect.left)/rect.width))));configure();
     };
   }
-  update({active,audio,compatible=true,decoderType='morse',mode,frequency,low,high}){
-    if(decoderType!==this.decoderType){this.stop();this.decoderType=decoderType;this.text='';this.$('cw-terminal').textContent='';}
+  update({active,audio,compatible=true,mode,frequency,low,high}){
     this.active=active;this.audio=audio;this.compatible=compatible;this.$('cw-panel').hidden=!active;
-    this.$('cw-title').textContent=`${decoderType==='cwformer'?'CW Experimental':'Morse'} · ${mode} · ${(frequency/1000).toFixed(3)} kHz`;
-    this.$('cw-tone').disabled=decoderType==='cwformer';this.$('cw-wpm').disabled=decoderType==='cwformer';
-    for(const id of ['cw-auto','cw-afc','cw-multi'])this.$(id).disabled=decoderType==='cwformer';
-    this.$('cw-multi-panel').hidden=decoderType==='cwformer'||!this.$('cw-multi').checked;
-    if(decoderType==='cwformer'||!this.$('cw-multi').checked){this.streams=[];this.drawStreams();}
-    this.$('cw-tracking').hidden=decoderType==='cwformer';
-    this.$('cw-tone-marker').hidden=decoderType==='cwformer';
+    this.$('cw-title').textContent=`Morse · ${mode} · ${(frequency/1000).toFixed(3)} kHz`;
+    this.$('cw-multi-panel').hidden=!this.$('cw-multi').checked;
+    if(!this.$('cw-multi').checked){this.streams=[];this.drawStreams();}
     this.$('cw-audio-start').hidden=!(active&&!audio&&compatible);
     this.$('cw-waterfall-message').hidden=compatible;
     this.$('cw-waterfall-message').textContent=compatible?'':'Perfil de audio incompatible, reinicie el modo digital';
@@ -52,7 +46,7 @@ window.CWDecodePanel=class {
   }
   start(){
     this.$('cw-state').textContent='Preparando decoder…';this.ready=false;this.pending=0;
-    const worker=this.worker=new Worker(new URL(this.decoderType==='cwformer'?'./cwformer-worker.mjs':'./cw-worker.js',location.href),{type:'module'});
+    const worker=this.worker=new Worker(new URL('./cw-worker.js',location.href),{type:'module'});
     worker.onmessage=({data})=>{
       if(worker!==this.worker)return;
       if(data.type==='ready'){this.ready=true;this.$('cw-state').textContent='Buscando señal CW…';}

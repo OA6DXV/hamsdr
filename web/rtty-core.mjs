@@ -101,7 +101,7 @@ export class RttyDecoder{
     if(discriminator>.06)decided=!this.reverse;else if(discriminator<-.06)decided=this.reverse;
     this.previousSymbol=this.symbol;this.symbol=decided;
     if(this.state==='idle'){
-      if(this.previousSymbol&&!this.symbol){this.state='data';this.bitIndex=0;this.word=0;this.nextSample=this.sampleIndex+this.samplesPerBit*1.5;}
+      if(this.previousSymbol&&!this.symbol){this.state='start';this.nextSample=this.sampleIndex+this.samplesPerBit*.5;}
     }else{
       // Transitions belong near bit boundaries. Correct only a small portion
       // of the phase error, keeping the clock stable in noise.
@@ -113,12 +113,17 @@ export class RttyDecoder{
         }
       }
       if(this.sampleIndex>=this.nextSample){
-        if(this.state==='data'){
+        if(this.state==='start'){
+          // A falling tone edge alone is not enough to identify a start bit.
+          // Confirm space at the half-bit point before accepting a frame.
+          if(!this.symbol){this.state='data';this.bitIndex=0;this.word=0;this.nextSample+=this.samplesPerBit;}
+          else{this.onFrame({valid:false,startValid:false,word:0,value:'',baud:this.baud,shift:this.shift});this.state='idle';}
+        }else if(this.state==='data'){
           if(this.symbol)this.word|=1<<this.bitIndex;
           this.bitIndex++;this.nextSample+=this.samplesPerBit;
           if(this.bitIndex===5)this.state='stop';
-        }else{
-          let value='';if(this.symbol){value=this.ita2.decode(this.word);if(value)this.onCharacter(value);}this.onFrame({valid:this.symbol,word:this.word,value,baud:this.baud,shift:this.shift});
+        }else if(this.state==='stop'){
+          let value='';if(this.symbol){value=this.ita2.decode(this.word);if(value)this.onCharacter(value);}this.onFrame({valid:this.symbol,startValid:true,word:this.word,value,baud:this.baud,shift:this.shift});
           this.state='idle';
         }
       }

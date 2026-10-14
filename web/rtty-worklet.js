@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-import {findRttyCandidates,RttyDecoder} from './rtty-core.mjs';
+import {findRttyCandidates,Ita2Decoder,RttyDecoder} from './rtty-core.mjs';
 
 export const MULTI_PROFILES=Object.freeze([
   Object.freeze({id:'45',label:'45.45/170',baud:45.45,shift:170}),
@@ -7,29 +7,51 @@ export const MULTI_PROFILES=Object.freeze([
   Object.freeze({id:'75',label:'75/170',baud:75,shift:170})
 ]);
 
+export class RttyFrameGate{
+  constructor(emit){this.emit=emit;this.ita2=new Ita2Decoder();this.reset();}
+  reset(){this.starts=[];this.frames=[];this.words=[];this.open=false;this.ita2.reset();}
+  metrics(){
+    const startQuality=this.starts.length?this.starts.filter(Boolean).length/this.starts.length:0;
+    const frameQuality=this.frames.length?this.frames.filter(Boolean).length/this.frames.length:0;
+    return{startQuality,frameQuality};
+  }
+  frame(frame,evidence=true){
+    if(!evidence){this.words=[];if(this.open){this.open=false;this.ita2.reset();}}
+    this.starts.push(frame.startValid!==false);if(this.starts.length>24)this.starts.shift();
+    if(frame.startValid===false){
+      const{startQuality}=this.metrics();
+      if(this.open&&this.starts.length>=12&&startQuality<.35){this.open=false;this.words=[];this.ita2.reset();}
+      return;
+    }
+    this.frames.push(Boolean(frame.valid));if(this.frames.length>24)this.frames.shift();
+    const{startQuality,frameQuality}=this.metrics();
+    if(frame.valid&&evidence){
+      if(this.open){const value=this.ita2.decode(frame.word);if(value)this.emit(value);}
+      else{this.words.push(frame.word);if(this.words.length>32)this.words.shift();}
+    }
+    const strongShortWindow=this.starts.length>=6&&this.frames.length>=6&&startQuality>=.8&&frameQuality>=.9&&evidence;
+    const stableWindow=this.starts.length>=12&&this.frames.length>=12&&startQuality>=.55&&frameQuality>=.72&&evidence;
+    if(!this.open&&(strongShortWindow||stableWindow)){
+      this.open=true;this.ita2.reset();for(const word of this.words){const value=this.ita2.decode(word);if(value)this.emit(value);}this.words=[];
+    }
+    if(this.open&&((this.frames.length>=12&&frameQuality<.42)||(this.starts.length>=12&&startQuality<.35)||!evidence)){this.open=false;this.words=[];this.ita2.reset();}
+  }
+}
+
 export class RttyOutputGate{
-  constructor(post){this.post=post;this.configure({});this.reset();}
-  configure(options){const center=Number(options.centerFrequency??this.center??1000),shift=Number(options.shift??this.shift??170),changed=center!==this.center||shift!==this.shift;this.center=center;this.shift=shift;this.low=Number(options.low??this.low??0);this.high=Number(options.high??this.high??3000);if(changed&&this.frames)this.reset();}
-  reset(){this.present=0;this.missing=0;this.frames=[];this.buffer='';this.open=false;this.signalScore=0;}
+  constructor(post){this.post=post;this.frameGate=new RttyFrameGate(value=>this.post({type:'character',value}));this.configure({});this.reset();}
+  configure(options){const center=Number(options.centerFrequency??this.center??1000),shift=Number(options.shift??this.shift??170),baud=Number(options.baud??this.baud??45.45),reverse=Boolean(options.reverse??this.reverse??false),sampleRate=Number(options.sampleRate??this.sampleRate??12000),low=Number(options.low??this.low??0),high=Number(options.high??this.high??3000),changed=center!==this.center||shift!==this.shift||baud!==this.baud||reverse!==this.reverse||sampleRate!==this.sampleRate||low!==this.low||high!==this.high;this.center=center;this.shift=shift;this.baud=baud;this.reverse=reverse;this.sampleRate=sampleRate;this.low=low;this.high=high;if(changed&&this.frameGate)this.reset();}
+  reset(){this.present=0;this.missing=0;this.signalScore=0;this.frameGate.reset();}
   updateSpectrum(message){
     const candidates=findRttyCandidates(message.levels,message.sampleRate,message.fftSize,{low:this.low,high:this.high,shift:this.shift,thresholdDb:6,maxCandidates:8});
     const candidate=candidates.reduce((best,item)=>Math.abs(item.centerFrequency-this.center)<Math.abs((best?.centerFrequency??Infinity)-this.center)?item:best,null);
     if(candidate&&Math.abs(candidate.centerFrequency-this.center)<=Math.max(70,this.shift*.35)){this.present=Math.min(12,this.present+1);this.missing=0;this.signalScore=candidate.score;}
-    else{this.present=Math.max(0,this.present-1);this.missing++;if(this.missing>=8){this.open=false;this.buffer='';this.frames=[];}}
+    else{this.present=Math.max(0,this.present-1);this.missing++;if(this.missing===8)this.frameGate.reset();}
   }
-  frame(frame){
-    this.frames.push(frame.valid);if(this.frames.length>24)this.frames.shift();
-    const valid=this.frames.filter(Boolean).length,ratio=valid/Math.max(1,this.frames.length);
-    if(frame.valid&&frame.value){
-      if(this.open)this.post({type:'character',value:frame.value});
-      else this.buffer=(this.buffer+frame.value).slice(-32);
-    }
-    if(!this.open&&this.present>=3&&this.frames.length>=6&&ratio>=.72){this.open=true;if(this.buffer)this.post({type:'character',value:this.buffer});this.buffer='';}
-    if(this.open&&this.frames.length>=12&&ratio<.42){this.open=false;this.buffer='';}
-  }
+  frame(frame){this.frameGate.frame(frame,this.present>=3);}
   status(status){
-    const ratio=this.frames.filter(Boolean).length/Math.max(1,this.frames.length),spectral=Math.min(1,this.signalScore/14),confidence=this.present?Math.min(1,spectral*.45+ratio*.55):0;
-    this.post({type:'status',...status,confidence,validation:this.open?'locked':this.present?'candidate':'idle'});
+    const{startQuality,frameQuality}=this.frameGate.metrics(),spectral=Math.min(1,this.signalScore/14),confidence=this.present?Math.min(1,spectral*.35+frameQuality*.4+startQuality*.25):0;
+    this.post({type:'status',...status,confidence,validation:this.frameGate.open?'locked':this.present?'candidate':'idle'});
   }
 }
 
@@ -38,7 +60,7 @@ export class RttyProfileScout{
   configure(options){const rate=Number(options.sampleRate??this.sampleRate),reverse=Boolean(options.reverse??this.reverse??false),selectedBaud=Number(options.baud??this.selectedBaud??45.45),selectedShift=Number(options.shift??this.selectedShift??170),rebuild=rate!==this.sampleRate||reverse!==this.reverse||selectedBaud!==this.selectedBaud||selectedShift!==this.selectedShift;this.sampleRate=rate;this.enabled=!Boolean(options.multi);this.low=Number(options.low??this.low??0);this.high=Number(options.high??this.high??3000);this.selectedBaud=selectedBaud;this.selectedShift=selectedShift;this.reverse=reverse;if(!this.enabled||(rebuild&&this.entries?.length))this.reset();}
   reset(){this.center=null;this.lastSeen=0;this.frames=0;this.entries=[];this.notified=null;this.ignored=null;}
   build(center){
-    this.center=center;this.frames=0;this.entries=MULTI_PROFILES.map(profile=>{const stats={valid:0,total:0,center};const decoder=new RttyDecoder({sampleRate:this.sampleRate,baud:profile.baud,shift:profile.shift,centerFrequency:center,reverse:this.reverse,afc:true,afcRange:45,onFrame:frame=>{stats.total++;if(frame.valid)stats.valid++;if(stats.total>80){stats.total=Math.ceil(stats.total/2);stats.valid=Math.ceil(stats.valid/2);}},onStatus:status=>{stats.center=(status.markFrequency+status.spaceFrequency)/2;}});return{profile,stats,decoder};});
+    this.center=center;this.frames=0;this.entries=MULTI_PROFILES.map(profile=>{const stats={valid:0,total:0,startPass:0,startFail:0,center};const decoder=new RttyDecoder({sampleRate:this.sampleRate,baud:profile.baud,shift:profile.shift,centerFrequency:center,reverse:this.reverse,afc:true,afcRange:45,onFrame:frame=>{if(frame.startValid===false)stats.startFail++;else{stats.startPass++;stats.total++;if(frame.valid)stats.valid++;}if(stats.total+stats.startFail>80){stats.total=Math.ceil(stats.total/2);stats.valid=Math.ceil(stats.valid/2);stats.startPass=Math.ceil(stats.startPass/2);stats.startFail=Math.ceil(stats.startFail/2);}},onStatus:status=>{stats.center=(status.markFrequency+status.spaceFrequency)/2;}});return{profile,stats,decoder};});
   }
   updateSpectrum(message){
     if(!this.enabled)return;
@@ -47,7 +69,7 @@ export class RttyProfileScout{
     if(!candidate){if(++this.lastSeen>18)this.reset();return;}this.lastSeen=0;
     if(this.center===null||Math.abs(this.center-candidate.centerFrequency)>70)this.build(candidate.centerFrequency);
     if(++this.frames<18)return;
-    const ranked=this.entries.map(entry=>({...entry,quality:entry.stats.total>=8?entry.stats.valid/entry.stats.total:0})).sort((a,b)=>b.quality-a.quality),winner=ranked[0],runner=ranked[1];
+    const ranked=this.entries.map(entry=>{const{stats}=entry,startEvents=stats.startPass+stats.startFail,startAcceptance=startEvents?stats.startPass/startEvents:0,stopValidity=stats.total>=8?stats.valid/stats.total:0;return{...entry,startAcceptance,quality:startEvents>=12?stopValidity*startAcceptance:0};}).sort((a,b)=>b.quality-a.quality),winner=ranked[0],runner=ranked[1];
     const same=Math.abs(winner.profile.baud-this.selectedBaud)<.1&&winner.profile.shift===this.selectedShift;
     if(!same&&winner.quality>=.78&&winner.quality-(runner?.quality??0)>=.10&&this.notified!==winner.profile.id&&this.ignored!==winner.profile.id){this.notified=winner.profile.id;this.post({type:'profile-detected',profile:winner.profile.id,label:winner.profile.label,baud:winner.profile.baud,shift:winner.profile.shift,centerFrequency:Math.round(winner.stats.center),confidence:winner.quality});}
   }
@@ -55,21 +77,23 @@ export class RttyProfileScout{
   ignore(profile){this.ignored=profile;}
 }
 
-class RttyMultiDetector{
-  constructor(post,rate){this.post=post;this.sampleRate=rate;this.enabled=false;this.streams=[];this.pending=[];this.nextId=1;this.scanNumber=0;this.average=null;this.configure({});}
+export class RttyMultiDetector{
+  constructor(post,rate){this.post=post;this.sampleRate=rate;this.enabled=false;this.streams=[];this.pending=[];this.nextId=1;this.scanNumber=0;this.average=null;this.profileKey=null;this.configure({});}
   configure(options){
     const wasEnabled=this.enabled;
     this.sampleRate=Number(options.sampleRate??this.sampleRate);
     this.enabled=Boolean(options.multi??this.enabled);this.low=Number(options.low??this.low??0);this.high=Number(options.high??this.high??3000);
-    this.reverse=Boolean(options.reverse??this.reverse??false);
+    this.reverse=Boolean(options.reverse??this.reverse??false);this.selectedBaud=Number(options.baud??this.selectedBaud??45.45);this.selectedShift=Number(options.shift??this.selectedShift??170);this.allProfiles=Boolean(options.multiProfiles??this.allProfiles??false);
+    const profileKey=this.allProfiles?'all-standard':`selected:${this.selectedBaud}/${this.selectedShift}`,profilesChanged=this.profileKey!==profileKey;this.profileKey=profileKey;
     if(!this.enabled){if(wasEnabled)this.clear();return;}
-    for(const stream of this.streams)for(const entry of stream.decoders)entry.decoder.configure({sampleRate:this.sampleRate,centerFrequency:stream.centerFrequency,reverse:this.reverse,afc:true});
+    if(!wasEnabled||profilesChanged){this.clear();return;}
+    for(const stream of this.streams)for(const entry of stream.decoders){entry.decoder.configure({sampleRate:this.sampleRate,centerFrequency:stream.centerFrequency,reverse:this.reverse,afc:true});entry.gate.reset();}
   }
   clear(){this.streams=[];this.pending=[];this.average=null;this.post({type:'multi-streams',streams:[]});}
+  profilesToDecode(){return this.allProfiles?MULTI_PROFILES:[{id:'selected',label:`${this.selectedBaud}/${this.selectedShift}`,baud:this.selectedBaud,shift:this.selectedShift}];}
   createStream(candidate){
     const stream={id:this.nextId++,centerFrequency:candidate.centerFrequency,score:candidate.score,lastSeen:this.scanNumber,decoders:[]};
-    stream.decoders=MULTI_PROFILES.map(profile=>({profile,decoder:new RttyDecoder({sampleRate:this.sampleRate,baud:profile.baud,shift:profile.shift,centerFrequency:stream.centerFrequency,reverse:this.reverse,afc:true,afcRange:45,filterBandwidth:Math.max(250,profile.shift+100),
-      onCharacter:value=>this.post({type:'multi-character',id:stream.id,centerFrequency:stream.centerFrequency,profile:profile.id,profileLabel:profile.label,value})})}));
+    stream.decoders=this.profilesToDecode().map(profile=>{const gate=new RttyFrameGate(value=>this.post({type:'multi-character',id:stream.id,centerFrequency:stream.centerFrequency,profile:profile.id,profileLabel:profile.label,value}));const decoder=new RttyDecoder({sampleRate:this.sampleRate,baud:profile.baud,shift:profile.shift,centerFrequency:stream.centerFrequency,reverse:this.reverse,afc:true,afcRange:45,filterBandwidth:Math.max(250,profile.shift+100),onFrame:frame=>gate.frame(frame)});return{profile,decoder,gate};});
     this.streams.push(stream);
   }
   updateSpectrum(message){
@@ -78,7 +102,15 @@ class RttyMultiDetector{
     if(!this.average||this.average.length!==levels.length)this.average=Float32Array.from(levels);
     else for(let index=0;index<levels.length;index++)this.average[index]=this.average[index]*.78+levels[index]*.22;
     if(++this.scanNumber%3)return;
-    const found=findRttyCandidates(this.average,message.sampleRate,message.fftSize,{low:this.low,high:this.high,shift:170,thresholdDb:7,maxCandidates:8});
+    const shifts=this.allProfiles?[...new Set(MULTI_PROFILES.map(profile=>profile.shift))]:[this.selectedShift],found=[];
+    for(const shift of shifts){
+      for(const candidate of findRttyCandidates(this.average,message.sampleRate,message.fftSize,{low:this.low,high:this.high,shift,thresholdDb:7,maxCandidates:8}).sort((a,b)=>b.score-a.score)){
+        const duplicate=found.find(item=>Math.abs(item.centerFrequency-candidate.centerFrequency)<Math.max(55,shift*.45));
+        if(duplicate){if(candidate.score>duplicate.score)Object.assign(duplicate,candidate);continue;}
+        found.push(candidate);
+      }
+    }
+    found.sort((a,b)=>b.score-a.score);
     for(const candidate of found){
       const stream=this.streams.find(item=>Math.abs(item.centerFrequency-candidate.centerFrequency)<70);
       if(stream){stream.lastSeen=this.scanNumber;stream.score=candidate.score;continue;}
@@ -89,7 +121,7 @@ class RttyMultiDetector{
     }
     this.pending=this.pending.filter(item=>this.scanNumber-item.lastSeen<=9);
     this.streams=this.streams.filter(stream=>this.scanNumber-stream.lastSeen<=60);
-    this.post({type:'multi-streams',streams:this.streams.map(({id,centerFrequency,score})=>({id,centerFrequency,score,profiles:MULTI_PROFILES.map(({id,label})=>({id,label}))}))});
+    this.post({type:'multi-streams',streams:this.streams.map(({id,centerFrequency,score,decoders})=>({id,centerFrequency,score,profiles:decoders.map(({profile})=>({id:profile.id,label:profile.label}))}))});
   }
   process(input){if(this.enabled)for(const stream of this.streams)for(const entry of stream.decoders)entry.decoder.process(input);}
 }

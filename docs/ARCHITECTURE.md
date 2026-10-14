@@ -70,6 +70,17 @@ so slower display settings reduce transport instead of discarding browser frames
 Browsers without a
 compatible WebCodecs Opus decoder fall back to raw PCM16.
 
+Raw audio kind 2 is demodulated mono signed PCM16LE at 16 kHz (256 kbit/s
+payload); it is not RF/IQ and has no WAV/container or base64 layer. Digital kind
+12 carries lossless mono PCM16LE at 12 kHz (192 kbit/s), preceded by mode,
+sequence, microsecond timestamp and sample count. The 12 kHz stream is prepared
+by a native causal 3:4 polyphase antialias FIR before one PCM16 quantization.
+Balanced and mobile profiles instead use 20 ms server-encoded Opus frames at
+32 and 12 kbit/s. The browser routes PCM or WebCodecs-decoded Opus through one
+bounded AudioWorklet ring buffer. See
+[`AUDIO_TRANSPORT.md`](AUDIO_TRANSPORT.md) for framing, bandwidth,
+buffering, iOS caveats and a porting checklist.
+
 Client-side diagnostics observe AudioWorklet underruns, gaps or large delays
 in waterfall sequence numbers, and unexpected WebSocket reconnects while the
 page is visible. They recommend lower-bandwidth profiles without overriding

@@ -6,7 +6,7 @@ const protocolVersion=1,waterfallProtocolVersion=2;
 const sharedParams=new URLSearchParams(location.search);
 const sharedDigitalMode=(()=>{const value=(sharedParams.get('digital')||'').toUpperCase();return ['FT8','FT4'].includes(value)?value:(sharedParams.get('ft8')==='1'?'FT8':null);})();
 const sharedRtty=['RTTY','RTTY-EXPERIMENTAL'].includes((sharedParams.get('digital')||'').toUpperCase());
-const sharedCw=['CW','CW-DECODE','MORSE','CWFORMER'].includes((sharedParams.get('digital')||'').toUpperCase());
+const sharedCw=['CW','CW-DECODE','MORSE'].includes((sharedParams.get('digital')||'').toUpperCase());
 const sharedMuted=sharedParams.get('mute')==='1';
 const siteConfig=window.hamSdrSiteConfig||{};
 const defaults = {LSB:[-2700,-300],USB:[300,2700],AM:[-4000,4000],CW:[450,950],NFM:[-5000,5000]};
@@ -21,12 +21,12 @@ let context, node, gain, audioStarting=false, audioEnabled=false, audioEverStart
 let digimodesAvailable=!!siteConfig.digimodes,digitalMode=null,digitalWorker=null,digitalRows=[],digitalDownloadUrl=null,digitalDecoderNotice=false,digitalAudioCompatible=true,digitalPreviousAudioProfile=null,digitalPreviousWaterfallPreference=null,digitalWaterfallManuallyChanged=false,digitalProfilePending=false,digitalLogSized=false;
 let digitalSort=null;
 let rttyActive=false,rttyNode=null,rttySink=null,rttyModuleLoaded=false,rttyText='';
-let rttyDecoderType='classic',rttyExperimentalWorker=null,rttyExperimentalReady=false,rttyExperimentalPending=0,rttySavedMulti=false;
+let rttyDecoderType='classic',rttyExperimentalWorker=null,rttyExperimentalReady=false,rttyExperimentalPending=0,rttySavedMulti=false,rttySavedMultiProfiles=false;
 let rttyNoiseFloor=null,rttyColorCeiling=null,rttySpectrumFrames=0;
 let rttyStreams=new Map();
 let rttyPreviousAudioProfile=null,rttyProfilePending=false;
 let rttyProfileSuggestion=null;
-let cwActive=false,cwCompatible=true,cwPreviousAudioProfile=null,cwProfilePending=false,cwDecoderType='morse';
+let cwActive=false,cwCompatible=true,cwPreviousAudioProfile=null,cwProfilePending=false;
 const cwPanel=new window.CWDecodePanel({listen:()=>listen(),mute:()=>setMuted(!muted),configure:()=>{updateCwPanel();updateSharedUrl();}});
 let spectrumHistory=[],waterfallNavigationHistory=[];
 let waterfallPreference='balanced',waterfallProfile='balanced',waterfallSpeed=1,drawAverage=0,lastProfileRequest=0,profileTimer,pendingRow,waterfallFrame;
@@ -501,7 +501,7 @@ function setDigitalMode(next,{autoStartAudio=true}={}){
   showDigitalAudioStarter();
   updateSharedUrl();
 }
-function rttyConfiguration(){const shift=Number($('rtty-shift').value),display=digitalDisplayRange();return{type:'config',sampleRate:12000,externalPcm:true,baud:Number($('rtty-baud').value),shift,centerFrequency:Number($('rtty-center').value),reverse:$('rtty-reverse').checked,afc:$('rtty-afc').checked,afcRange:50,filterBandwidth:Math.max(250,shift+100),stopBits:1.5,multi:$('rtty-multi').checked,low:display.minimum,high:display.maximum};}
+function rttyConfiguration(){const shift=Number($('rtty-shift').value),display=digitalDisplayRange();return{type:'config',sampleRate:12000,externalPcm:true,baud:Number($('rtty-baud').value),shift,centerFrequency:Number($('rtty-center').value),reverse:$('rtty-reverse').checked,afc:$('rtty-afc').checked,afcRange:50,filterBandwidth:Math.max(250,shift+100),stopBits:1.5,multi:$('rtty-multi').checked,multiProfiles:$('rtty-multi-profiles').checked,low:display.minimum,high:display.maximum};}
 function sendRttyConfiguration(){
   if(rttyDecoderType==='fldigi')rttyExperimentalWorker?.postMessage({...rttyConfiguration(),frequency,demodulation:mode});
   else if(rttyNode)rttyNode.port.postMessage(rttyConfiguration());
@@ -512,7 +512,7 @@ function renderRttyStreams(){
   const body=$('rtty-multi-table').tBodies[0],markers=$('rtty-markers');body.replaceChildren();markers.replaceChildren();
   const display=digitalDisplayRange();
   const streams=[...rttyStreams.values()].sort((a,b)=>a.centerFrequency-b.centerFrequency);$('rtty-multi-count').value=String(streams.length);
-  if(!streams.length){const row=document.createElement('tr'),cell=document.createElement('td');row.className='rtty-multi-empty';cell.colSpan=3;cell.textContent='Buscando transmisiones RTTY 45.45/170, 50/170 y 75/170…';row.append(cell);body.append(row);return;}
+  if(!streams.length){const row=document.createElement('tr'),cell=document.createElement('td');row.className='rtty-multi-empty';cell.colSpan=3;cell.textContent=$('rtty-multi-profiles').checked?'Buscando streams RTTY con perfiles 45.45/170, 50/170 y 75/170…':`Buscando streams RTTY ${$('rtty-baud').value}/${$('rtty-shift').value}…`;row.append(cell);body.append(row);return;}
   for(const stream of streams){
     for(const profile of stream.profiles||[]){
       const row=document.createElement('tr'),frequencyCell=document.createElement('td'),profileCell=document.createElement('td'),textCell=document.createElement('td'),decoded=document.createElement('pre');
@@ -583,8 +583,9 @@ function setRttyMode(enabled,{autoStartAudio=true,decoderType='classic'}={}){
     if(cwActive)setCwMode(false);
     rttyPreviousAudioProfile=audioProfile;
     rttyDecoderType=decoderType;
-    if(decoderType==='fldigi'){rttySavedMulti=$('rtty-multi').checked;$('rtty-multi').checked=false;}
+    if(decoderType==='fldigi'){rttySavedMulti=$('rtty-multi').checked;rttySavedMultiProfiles=$('rtty-multi-profiles').checked;$('rtty-multi').checked=false;}
     $('rtty-multi').disabled=decoderType==='fldigi';$('rtty-multi').title=decoderType==='fldigi'?'Multidetección disponible en RTTY':'';
+    $('rtty-multi-profiles').disabled=decoderType==='fldigi'||!$('rtty-multi').checked;$('rtty-multi-profiles').title=decoderType==='fldigi'?'Disponible en RTTY clásico':'Desactivado: usa el baud/shift elegido. Activado: prueba los tres perfiles estándar por stream.';
     rttyActive=true;mode='LSB';narrow=false;[low,high]=digitalDefaults.LSB;$('rtty-reverse').checked=false;setDigitalDspState(true);updateRttySpectrumRange(true);tune();
     $('audio-quality').querySelector('option[value="digiraw"]').hidden=false;audioProfile='digiraw';rttyProfilePending=true;resetAudio();showAudioProfile();sendDigitalMode('RTTY');sendAudioProfile();
     $('rtty-panel').hidden=false;$('digital-separator').hidden=false;$('rtty-multi-panel').hidden=!$('rtty-multi').checked;$('rtty-waterfall').dataset.multi=String($('rtty-multi').checked);
@@ -592,22 +593,21 @@ function setRttyMode(enabled,{autoStartAudio=true,decoderType='classic'}={}){
     if(audioEnabled)void ensureRttyNode();else if(autoStartAudio)void listen();
   }else{
     stopRttyExperimentalWorker();
-    if(rttyDecoderType==='fldigi')$('rtty-multi').checked=rttySavedMulti;
-    $('rtty-multi').disabled=false;$('rtty-multi').title='';
+    if(rttyDecoderType==='fldigi'){$('rtty-multi').checked=rttySavedMulti;$('rtty-multi-profiles').checked=rttySavedMultiProfiles;}
+    $('rtty-multi').disabled=false;$('rtty-multi').title='';$('rtty-multi-profiles').disabled=!$('rtty-multi').checked;$('rtty-multi-profiles').title='Desactivado: usa el baud/shift elegido. Activado: prueba los tres perfiles estándar por stream.';
     rttyActive=false;$('rtty-panel').hidden=true;$('digital-separator').hidden=!(digitalMode||cwActive);hideRttyProfileSuggestion();if(!digitalMode&&!cwActive)setDigitalDspState(false);
     if(rttyNode)rttyNode.port.postMessage({type:'enabled',enabled:false});
     sendDigitalMode(null);if(rttyPreviousAudioProfile){audioProfile=rttyPreviousAudioProfile;resetAudio();showAudioProfile();sendAudioProfile();}rttyPreviousAudioProfile=null;rttyProfilePending=false;$('audio-quality').querySelector('option[value="digiraw"]').hidden=true;
   }
   updateSharedUrl();
 }
-function updateCwPanel(){cwPanel.update({active:cwActive,audio:audioEnabled,compatible:cwCompatible,decoderType:cwDecoderType,mode,frequency,low,high});}
-function setCwMode(enabled,{autoStartAudio=true,decoderType='morse'}={}){
-  if(enabled&&cwActive&&decoderType!==cwDecoderType){setCwMode(false);}
+function updateCwPanel(){cwPanel.update({active:cwActive,audio:audioEnabled,compatible:cwCompatible,mode,frequency,low,high});}
+function setCwMode(enabled,{autoStartAudio=true}={}){
   const selected=Boolean(enabled)&&!cwActive;
   if(selected){
     if(!digimodesAvailable){message('Digimodos no están habilitados en este receptor.');return;}
     if(digitalMode)setDigitalMode(null);if(rttyActive)setRttyMode(false);
-    cwPreviousAudioProfile=audioProfile;cwActive=true;cwCompatible=true;cwProfilePending=true;cwDecoderType=decoderType;
+    cwPreviousAudioProfile=audioProfile;cwActive=true;cwCompatible=true;cwProfilePending=true;
     mode='CW';narrow=false;[low,high]=digitalDefaults.CW;setDigitalDspState(true);
     $('audio-quality').querySelector('option[value="digiraw"]').hidden=false;
     audioProfile='digiraw';resetAudio();showAudioProfile();tune();sendDigitalMode('CW');sendAudioProfile();
@@ -618,7 +618,7 @@ function setCwMode(enabled,{autoStartAudio=true,decoderType='morse'}={}){
     if(cwPreviousAudioProfile){audioProfile=cwPreviousAudioProfile;resetAudio();showAudioProfile();sendAudioProfile();}
     cwPreviousAudioProfile=null;$('audio-quality').querySelector('option[value="digiraw"]').hidden=true;
   }
-  document.querySelector('[data-cw-mode]').setAttribute('aria-pressed',String(cwActive&&cwDecoderType==='morse'));
+  document.querySelector('[data-cw-mode]').setAttribute('aria-pressed',String(cwActive));
   $('digital-separator').hidden=!(digitalMode||rttyActive||cwActive);updateCwPanel();updateSharedUrl();
 }
 function handleDigitalPacket(bytes){
@@ -730,13 +730,13 @@ function sharedUrl(){
   url.searchParams.set('mode',mode);
   if(low!==base[0]||high!==base[1]){url.searchParams.set('low',String(low));url.searchParams.set('high',String(high));}
   if(Math.abs(zoom-1)>.001)url.searchParams.set('zoom',String(Number(zoom.toFixed(2))));
-  if(digitalMode)url.searchParams.set('digital',digitalMode);else if(rttyActive){url.searchParams.set('digital',rttyDecoderType==='fldigi'?'RTTY-EXPERIMENTAL':'RTTY');const baud=Number($('rtty-baud').value),shift=Number($('rtty-shift').value),rttyCenter=Number($('rtty-center').value);if(baud!==45.45)url.searchParams.set('baud',String(baud));if(shift!==170)url.searchParams.set('shift',String(shift));if(rttyCenter!==1000)url.searchParams.set('center',String(rttyCenter));url.searchParams.set('reverse',$('rtty-reverse').checked?'1':'0');if(!$('rtty-afc').checked)url.searchParams.set('afc','0');if($('rtty-multi').checked)url.searchParams.set('multi','1');}
-  if(cwActive){url.searchParams.set('digital',cwDecoderType==='cwformer'?'CWFORMER':'CW');url.searchParams.set('tone',$('cw-tone').value);url.searchParams.set('wpm',$('cw-wpm').value);if(cwDecoderType==='morse'){if(!$('cw-auto').checked)url.searchParams.set('auto','0');if(!$('cw-afc').checked)url.searchParams.set('afc','0');if($('cw-multi').checked)url.searchParams.set('multi','1');}}
+  if(digitalMode)url.searchParams.set('digital',digitalMode);else if(rttyActive){url.searchParams.set('digital',rttyDecoderType==='fldigi'?'RTTY-EXPERIMENTAL':'RTTY');const baud=Number($('rtty-baud').value),shift=Number($('rtty-shift').value),rttyCenter=Number($('rtty-center').value);if(baud!==45.45)url.searchParams.set('baud',String(baud));if(shift!==170)url.searchParams.set('shift',String(shift));if(rttyCenter!==1000)url.searchParams.set('center',String(rttyCenter));url.searchParams.set('reverse',$('rtty-reverse').checked?'1':'0');if(!$('rtty-afc').checked)url.searchParams.set('afc','0');if($('rtty-multi').checked){url.searchParams.set('multi','1');if($('rtty-multi-profiles').checked)url.searchParams.set('multiprofiles','1');}}
+  if(cwActive){url.searchParams.set('digital','CW');url.searchParams.set('tone',$('cw-tone').value);url.searchParams.set('wpm',$('cw-wpm').value);if(!$('cw-auto').checked)url.searchParams.set('auto','0');if(!$('cw-afc').checked)url.searchParams.set('afc','0');if($('cw-multi').checked)url.searchParams.set('multi','1');}
   if(muted)url.searchParams.set('mute','1');
   return url;
 }
 function updateSharedUrl(){
-  document.querySelector('[data-digital-menu]').value=digitalMode==='FT4'?'FT4':rttyActive?(rttyDecoderType==='fldigi'?'RTTY-EXPERIMENTAL':'RTTY'):cwActive&&cwDecoderType==='cwformer'?'CWFORMER':'';
+  document.querySelector('[data-digital-menu]').value=digitalMode==='FT4'?'FT4':rttyActive?(rttyDecoderType==='fldigi'?'RTTY-EXPERIMENTAL':'RTTY'):'';
   if(bandConfigured&&sharedTuningApplied)history.replaceState(null,'',sharedUrl());
 }
 function applySharedTuning(){
@@ -766,13 +766,13 @@ function applySharedDigitalState(){
     for(const [id,key,min,max] of [['cw-tone','tone',100,5000],['cw-wpm','wpm',5,60]]){
       const value=Number(sharedParams.get(key));if(sharedParams.has(key)&&Number.isFinite(value)&&value>=min&&value<=max)$(id).value=String(value);
     }
-    setCwMode(true,{autoStartAudio:false,decoderType:sharedParams.get('digital')?.toUpperCase()==='CWFORMER'?'cwformer':'morse'});
+    setCwMode(true,{autoStartAudio:false});
     const requestedMode=(sharedParams.get('mode')||'').toUpperCase();if(digitalDefaults[requestedMode]){mode=requestedMode;[low,high]=digitalDefaults[mode];}
     const requestedLow=Number(sharedParams.get('low')),requestedHigh=Number(sharedParams.get('high'));
     if(sharedParams.has('low')&&sharedParams.has('high')&&Number.isFinite(requestedLow)&&Number.isFinite(requestedHigh)&&requestedLow>=-digitalFilterMaximum&&requestedHigh<=digitalFilterMaximum&&requestedHigh-requestedLow>=100){low=requestedLow;high=requestedHigh;}tune();
   }else if(sharedRtty&&digimodesAvailable){
     for(const [id,key,minimum,maximum] of [['rtty-baud','baud',30,300],['rtty-shift','shift',50,1000],['rtty-center','center',100,5000]]){const value=Number(sharedParams.get(key));if(sharedParams.has(key)&&Number.isFinite(value)&&value>=minimum&&value<=maximum){const control=$(id);if(control.tagName==='SELECT'&&!Array.from(control.options).some(option=>Number(option.value)===value))control.add(new Option(String(value),String(value)));control.value=String(value);}}
-    $('rtty-afc').checked=sharedParams.get('afc')!=='0';$('rtty-multi').checked=sharedParams.get('multi')==='1';$('rtty-multi-panel').hidden=!$('rtty-multi').checked;setRttyMode(true,{autoStartAudio:false,decoderType:sharedParams.get('digital')?.toUpperCase()==='RTTY-EXPERIMENTAL'?'fldigi':'classic'});
+    $('rtty-afc').checked=sharedParams.get('afc')!=='0';$('rtty-multi').checked=sharedParams.get('multi')==='1';$('rtty-multi-profiles').checked=sharedParams.get('multiprofiles')==='1';$('rtty-multi-panel').hidden=!$('rtty-multi').checked;setRttyMode(true,{autoStartAudio:false,decoderType:sharedParams.get('digital')?.toUpperCase()==='RTTY-EXPERIMENTAL'?'fldigi':'classic'});
     const requestedMode=(sharedParams.get('mode')||'').toUpperCase();if(digitalDefaults[requestedMode]){mode=requestedMode;narrow=false;[low,high]=digitalDefaults[mode];}
     $('rtty-reverse').checked=sharedParams.has('reverse')?sharedParams.get('reverse')==='1':mode==='USB';
     const requestedLow=Number(sharedParams.get('low')),requestedHigh=Number(sharedParams.get('high'));
@@ -1112,7 +1112,6 @@ document.querySelector('[data-digital-menu]').addEventListener('change',event=>{
   if(selected==='FT4')setDigitalMode('FT4');
   else if(selected==='RTTY')setRttyMode(true);
   else if(selected==='RTTY-EXPERIMENTAL')setRttyMode(true,{decoderType:'fldigi'});
-  else if(selected==='CWFORMER')setCwMode(true,{decoderType:'cwformer'});
   else {if(digitalMode)setDigitalMode(null);if(rttyActive)setRttyMode(false);if(cwActive)setCwMode(false);}
 });
 document.querySelector('[data-cw-mode]').addEventListener('click',()=>setCwMode(true));
@@ -1120,7 +1119,8 @@ $('rtty-clear').addEventListener('click',()=>{rttyText='';rttyStreams.clear();$(
 for(const id of ['rtty-baud','rtty-shift','rtty-center','rtty-reverse','rtty-afc'])$(id).addEventListener('change',()=>{hideRttyProfileSuggestion();sendRttyConfiguration();});
 $('rtty-profile-tune').addEventListener('click',()=>{if(!rttyProfileSuggestion)return;$('rtty-baud').value=String(rttyProfileSuggestion.baud);$('rtty-shift').value=String(rttyProfileSuggestion.shift);$('rtty-center').value=String(rttyProfileSuggestion.centerFrequency);$('rtty-afc').checked=true;hideRttyProfileSuggestion();sendRttyConfiguration();if(rttyNode)rttyNode.port.postMessage({type:'reset'});});
 $('rtty-profile-ignore').addEventListener('click',()=>{if(rttyNode&&rttyProfileSuggestion)rttyNode.port.postMessage({type:'ignore-profile',profile:rttyProfileSuggestion.profile});hideRttyProfileSuggestion();});
-$('rtty-multi').addEventListener('change',()=>{const active=$('rtty-multi').checked;$('rtty-multi-panel').hidden=!active;$('rtty-waterfall').dataset.multi=String(active);hideRttyProfileSuggestion();if(!active){rttyStreams.clear();renderRttyStreams();}sendRttyConfiguration();});
+$('rtty-multi').addEventListener('change',()=>{const active=$('rtty-multi').checked;$('rtty-multi-panel').hidden=!active;$('rtty-waterfall').dataset.multi=String(active);$('rtty-multi-profiles').disabled=!active;$('rtty-multi-profiles').title='Desactivado: usa el baud/shift elegido. Activado: prueba los tres perfiles estándar por stream.';hideRttyProfileSuggestion();if(!active){rttyStreams.clear();renderRttyStreams();}sendRttyConfiguration();});
+$('rtty-multi-profiles').addEventListener('change',()=>{hideRttyProfileSuggestion();rttyStreams.clear();renderRttyStreams();sendRttyConfiguration();});
 function updateSquelchControl(){const active=$('squelch').checked&&!digitalMode&&!rttyActive&&!cwActive;$('threshold').disabled=!active;$('squelch-threshold').dataset.active=String(active);$('threshold-value').value=`${String($('threshold').value).replace('-', '−')} dBFS`;}
 for(const id of ['low','high','threshold','notch','nr'])$(id).addEventListener('change',()=>{low=Number($('low').value);high=Number($('high').value);tune();});
 $('threshold').addEventListener('input',updateSquelchControl);

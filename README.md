@@ -9,6 +9,22 @@ The `unstable` branch is the active experimental development line. The `dev`
 branch tracks reviewed development releases, and `main` is reserved for stable
 releases.
 
+## 0.7.4-dev
+
+- Removed CW Experimental/CWformer and its model/runtime assets; the classic
+  Morse decoder remains the supported CW implementation.
+- Classic RTTY now confirms a START bit at its half-bit sample before accepting
+  the five ITA2 data bits and STOP. Text output waits for sustained START/STOP
+  quality, and ITA2 LETTERS/FIGURES state is updated only from accepted frames.
+  Automatic profile suggestions consider both start acceptance and valid stop
+  bits; these are framing-quality measures, not a guarantee of correct text.
+- RTTY multidetection uses the selected baud/shift for one decoder per detected
+  stream by default. “Todos los perfiles” optionally runs 45.45/170, 50/170 and
+  75/170 in parallel. Candidate search remains across the configured passband.
+- Added regressions for short false starts, gated ITA2 output and selected versus
+  multi-profile stream decoding. Tests on real captures have no verified
+  transcript, so no character-error-rate improvement is claimed.
+
 ## 0.7.3-unstable
 
 - Classic Morse improves narrow-tone filtering, fading recovery, adaptive
@@ -213,12 +229,18 @@ Audio and waterfall quality are selected independently. Audio offers:
 - Raw: PCM16 mono at 16 kHz.
 - Balanced: Opus at 32 kbit/s, wideband mono input at 16 kHz.
 - Low bandwidth: Opus at 12 kbit/s, narrowband mono input at 16 kHz.
+- Digital modes: uncompressed `digiraw` PCM16 mono at 12 kHz, selected
+  automatically for decoder fidelity (192 kbit/s payload).
 
 Balanced Opus is the default for a new browser. Opus is encoded by system
 `libopus`, decoded through browser WebCodecs and passed into the same
 AudioWorklet. Unsupported clients fall back to raw PCM16. Audio is opt-in: pausing
 it stops its network frames instead of applying only a local mute. WAV
-recording follows the decoded audio sample rate.
+recording follows the decoded audio sample rate. Raw 16 kHz PCM uses 256 kbit/s
+of audio payload; `digiraw` at 12 kHz uses 192 kbit/s. These figures exclude
+WebSocket/TCP/TLS framing and waterfall traffic. See
+[`docs/AUDIO_TRANSPORT.md`](docs/AUDIO_TRANSPORT.md) for the wire format,
+buffering/latency behavior, iOS caveats and guidance for reusing this design.
 
 The current tuning state is reflected in a shareable URL. `freq` is expressed
 in kHz; `mode` accepts `LSB`, `USB`, `AM`, `CW` or `NFM`; optional `low` and

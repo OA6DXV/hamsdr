@@ -31,6 +31,7 @@ async def main():
                     await expect(page.locator('#mode-display')).to_have_text('LSB')
                     await expect(page.locator('#audio-quality')).to_have_value('digiraw')
                     await expect(page.locator('#rtty-multi')).to_be_disabled()
+                    await expect(page.locator('#rtty-multi-profiles')).to_be_disabled()
                     await expect(page.locator('#rtty-audio-start')).to_be_visible()
                     assert await page.evaluate('rttyExperimentalWorker===null')
                     await page.locator('#rtty-audio-start').click()

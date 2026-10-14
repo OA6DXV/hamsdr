@@ -45,6 +45,10 @@ for(const options of [
   {text:'THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG ',baud:45.5},
   ...[0,5,-5,15,-15,30,-30].map(frequencyOffset=>({text:'CQ CQ TEST ',frequencyOffset,noise:.03,afc:true}))
 ])assert.equal(decode(options).text,options.text,JSON.stringify(options));
+const falseStartSamples=new Float32Array(12000),falseStartFrames=[];let falseStartPhase=0;
+for(let index=0;index<falseStartSamples.length;index++){const frequency=index>=500&&index<552?1085:915;falseStartPhase+=2*Math.PI*frequency/12000;falseStartSamples[index]=Math.sin(falseStartPhase)*.8;}
+new RttyDecoder({sampleRate:12000,centerFrequency:1000,shift:170,onFrame:frame=>falseStartFrames.push(frame)}).process(falseStartSamples);
+assert.ok(falseStartFrames.some(frame=>frame.startValid===false));assert.ok(falseStartFrames.every(frame=>!frame.valid));
 const spectrum=new Float32Array(1025).fill(-100),sampleRate=48000,fftSize=2048;
 for(const center of [900,2100])for(const tone of [center-85,center+85])spectrum[Math.round(tone*fftSize/sampleRate)]=-45;
 const candidates=findRttyCandidates(spectrum,sampleRate,fftSize,{low:0,high:3000});
@@ -58,17 +62,27 @@ assert.equal(firstText,'CQ TEST ');assert.equal(secondText,'DE RADIO ');
 
 globalThis.AudioWorkletProcessor=class{constructor(){this.port={postMessage(){},onmessage:null};}};
 globalThis.registerProcessor=()=>{};
-const {MULTI_PROFILES,RttyOutputGate,RttyProfileScout}=await import('../web/rtty-worklet.js');
+const {MULTI_PROFILES,RttyOutputGate,RttyProfileScout,RttyMultiDetector,RttyFrameGate}=await import('../web/rtty-worklet.js');
 assert.deepEqual(MULTI_PROFILES.map(profile=>[profile.baud,profile.shift]),[[45.45,170],[50,170],[75,170]]);
 const gated=[];const gate=new RttyOutputGate(message=>gated.push(message));
 gate.configure({centerFrequency:1000,shift:170,low:0,high:3000});
 const gateSpectrum=new Float32Array(1025).fill(-100);
 for(const tone of [915,1085])gateSpectrum[Math.round(tone*2048/12000)]=-40;
 for(let scan=0;scan<3;scan++)gate.updateSpectrum({levels:gateSpectrum,sampleRate:12000,fftSize:2048});
-for(const value of 'CQ TES')gate.frame({valid:true,value});
-assert.equal(gated.filter(message=>message.type==='character').map(message=>message.value).join(''),'CQ TES');
-gate.reset();for(const value of 'NOISE')gate.frame({valid:value!=='I',value});
-assert.equal(gated.filter(message=>message.type==='character').map(message=>message.value).join(''),'CQ TES');
+for(const value of 'CQ TEST CQ TEST')gate.frame({valid:true,startValid:true,word:letterCodes.get(value)});
+assert.equal(gated.filter(message=>message.type==='character').map(message=>message.value).join(''),'CQ TEST CQ TEST');
+gate.reset();for(const value of 'NOISE')gate.frame({valid:value!=='I',startValid:true,word:letterCodes.get(value)});
+assert.equal(gated.filter(message=>message.type==='character').map(message=>message.value).join(''),'CQ TEST CQ TEST');
+const frameGateOutput=[],frameGate=new RttyFrameGate(value=>frameGateOutput.push(value));
+for(let i=0;i<8;i++)frameGate.frame({valid:false,startValid:false,word:0});
+for(let i=0;i<12;i++)frameGate.frame({valid:true,startValid:true,word:i===11?letterCodes.get('Q'):0});
+assert.equal(frameGate.open,true);assert.deepEqual(frameGateOutput,['Q']);
+const noiseGate=new RttyFrameGate(value=>frameGateOutput.push(value));
+for(let i=0;i<20;i++)noiseGate.frame({valid:true,startValid:false,word:letterCodes.get('X')});
+assert.equal(noiseGate.open,false);assert.deepEqual(frameGateOutput,['Q']);
+let gatedSynthetic='';const cleanFrameGate=new RttyFrameGate(value=>gatedSynthetic+=value),gatedText='CQ TEST DE TEST CQ TEST DE TEST ';
+new RttyDecoder({sampleRate:12000,centerFrequency:1000,onFrame:frame=>cleanFrameGate.frame(frame,true)}).process(generateRtty({text:gatedText,sampleRate:12000,centerFrequency:1000}));
+assert.equal(gatedSynthetic,gatedText);assert.equal(cleanFrameGate.open,true);
 const suggestions=[];const scout=new RttyProfileScout(message=>suggestions.push(message),12000);
 scout.configure({sampleRate:12000,multi:false,baud:45.45,shift:170,low:0,high:3000});
 scout.updateSpectrum({levels:gateSpectrum,sampleRate:12000,fftSize:2048});
@@ -76,4 +90,17 @@ scout.process(generateRtty({text:'CQ CQ TEST CQ CQ TEST CQ CQ TEST ',sampleRate:
 for(let scan=1;scan<18;scan++)scout.updateSpectrum({levels:gateSpectrum,sampleRate:12000,fftSize:2048});
 assert.equal(suggestions.at(-1)?.baud,75);
 scout.configure({multi:true});assert.equal(scout.enabled,false);
+function multiSpectrum(center,shift){const levels=new Float32Array(1025).fill(-100);for(const tone of [center-shift/2,center+shift/2])levels[Math.round(tone*2048/12000)]=-40;return{levels,sampleRate:12000,fftSize:2048};}
+const multiMessages=[],multi=new RttyMultiDetector(message=>multiMessages.push(message),12000),selectedSpectrum=multiSpectrum(900,450);
+multi.configure({multi:true,multiProfiles:false,baud:50,shift:450,low:0,high:3000});
+for(let scan=0;scan<6;scan++)multi.updateSpectrum(selectedSpectrum);
+let detected=multiMessages.filter(message=>message.type==='multi-streams').at(-1)?.streams||[];
+assert.equal(detected.length,1);assert.deepEqual(detected[0].profiles,[{id:'selected',label:'50/450'}]);assert.ok(Math.abs(detected[0].centerFrequency-900)<30);
+const multiText='CQ TEST DE RADIO CQ TEST DE RADIO ';
+multi.process(generateRtty({text:multiText,sampleRate:12000,baud:50,shift:450,centerFrequency:900}));
+assert.equal(multiMessages.filter(message=>message.type==='multi-character'&&message.profile==='selected').map(message=>message.value).join(''),multiText);
+multi.configure({multi:true,multiProfiles:true,baud:50,shift:450,low:0,high:3000});
+const standardSpectrum=multiSpectrum(1200,170);for(let scan=0;scan<6;scan++)multi.updateSpectrum(standardSpectrum);
+detected=multiMessages.filter(message=>message.type==='multi-streams').at(-1)?.streams||[];
+assert.equal(detected.length,1);assert.deepEqual(detected[0].profiles.map(profile=>profile.label),['45.45/170','50/170','75/170']);assert.ok(Math.abs(detected[0].centerFrequency-1200)<30);
 console.log('RTTY core tests passed');

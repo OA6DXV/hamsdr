@@ -355,8 +355,15 @@ async def main():
                 await expect(page.locator('#rtty-waterfall')).to_have_attribute('data-multi','true')
                 await expect(page.locator('#rtty-multi-count')).to_have_text('0')
                 await expect(page.locator('#rtty-multi-table thead')).to_contain_text('Perfil')
-                await expect(page.locator('.rtty-multi-empty')).to_contain_text('45.45/170, 50/170 y 75/170')
+                await expect(page.locator('#rtty-multi-profiles')).to_be_disabled()
+                await expect(page.locator('.rtty-multi-empty')).to_contain_text('45.45/170')
                 assert 'multi=1' in page.url
+                await expect(page.locator('#rtty-multi-profiles')).to_be_enabled()
+                await page.locator('#rtty-multi-profiles').check()
+                await expect(page.locator('.rtty-multi-empty')).to_contain_text('45.45/170, 50/170 y 75/170')
+                assert 'multiprofiles=1' in page.url
+                await page.locator('#rtty-multi-profiles').uncheck()
+                await expect(page.locator('.rtty-multi-empty')).to_contain_text('45.45/170')
                 await page.locator('#filter-wide').click()
                 await expect(page.locator('#high')).to_have_value('3100')
                 await expect(page.locator('#rtty-waterfall')).to_have_attribute('data-frequency-range','0:3100')
