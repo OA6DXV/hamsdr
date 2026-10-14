@@ -9,6 +9,11 @@ The `unstable` branch is the active experimental development line. The `dev`
 branch tracks reviewed development releases, and `main` is reserved for stable
 releases.
 
+## 0.8.5-dev
+
+- FT8/FT4 messages have no fixed row cap. The page shows the decoded-message
+  count and retains the complete log in browser memory until it is cleared.
+
 ## 0.8.4-dev
 
 - Recording preserves raw/digiraw PCM in WAV and received Opus packets in
