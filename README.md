@@ -9,6 +9,11 @@ The `unstable` branch is the active experimental development line. The `dev`
 branch tracks reviewed development releases, and `main` is reserved for stable
 releases.
 
+## 0.8.1-dev
+
+- Add PCM16 WAV/RF64 and Ogg Opus recording containers, with checksum and
+  duration checks. These are the recording foundations for browser integration.
+
 ## 0.8.0-dev
 
 - Reconstruction baseline before the browser-local recorder update.
