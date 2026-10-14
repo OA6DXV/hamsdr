@@ -25,12 +25,17 @@ from opus_codec import OPUS_AVAILABLE, OpusEncoder
 from waterfall_codec import VERSION as WATERFALL_PROTOCOL_VERSION, encode as encode_waterfall
 
 ROOT = Path(__file__).resolve().parent
-VERSION = "0.8.6-dev"
+VERSION = "0.9.0-dev"
 PROTOCOL_VERSION = 1
 MODES = {"USB": (300, 2700), "LSB": (-2700, -300), "AM": (-4000, 4000),
          "CW": (450, 950), "NFM": (-5000, 5000)}
 DIGITAL_AUDIO_RATE = 12000
 DIGITAL_PACKET_KIND = 12
+BINARY_QUEUE_MAX_BYTES = 4 * 1024 * 1024
+RELIABLE_QUEUE_MAX_BYTES = 3 * 1024 * 1024
+SNAPSHOT_CACHE_MAX_BYTES = 16 * 1024 * 1024
+SNAPSHOT_CACHE_TTL = 5.0
+SNAPSHOT_DEBOUNCE = 0.5
 
 def render_index_html(site_config, public_origin, request_target, receiverbook_tag="", logo_path=None):
     """Render crawlable station metadata in the initial HTML response."""
@@ -451,8 +456,27 @@ class Gateway:
                                getattr(args, "max_size_mb", 50))
         self.community_lock = asyncio.Lock()
         self.community_tokens, self.community_last = 30.0, time.monotonic()
+        self.history_tokens, self.history_last = 8.0, time.monotonic()
+        self.recent_history = {}
+        self.snapshot_lock = asyncio.Lock()
+        self.snapshot_next_at = 0.0
+        self.snapshot_address_next = {}
+        self.snapshot_cache = OrderedDict()
+        self.snapshot_cache_bytes = 0
         self.sent_bytes = 0
         self.metrics = {"cpu_percent": 0, "kbps": 0}
+        self.resource_metrics = {
+            "snapshot_requests": 0, "snapshot_coalesced": 0,
+            "snapshot_cache_hits": 0, "snapshot_cache_misses": 0,
+            "snapshot_encode_ms_last": 0.0, "snapshot_encode_ms_max": 0.0,
+            "snapshot_rows_encoded": 0, "snapshot_bytes_encoded": 0,
+            "snapshot_bytes_last": 0, "snapshot_bytes_max": 0,
+            "binary_queue_peak_bytes": 0, "reliable_queue_peak_bytes": 0,
+            "inflight_peak_bytes": 0, "output_peak_bytes": 0,
+            "snapshot_ip_delays": 0, "snapshot_ip_delay_ms_max": 0.0,
+            "history_cache_hits": 0, "history_cache_misses": 0,
+            "history_rate_limited": 0,
+        }
         self.stats_task = None
         self.stopping = False
         self.waterfall_sequence = 0
@@ -494,7 +518,9 @@ class Gateway:
                                    "digiraw": DIGITAL_AUDIO_RATE},
                 "opus_available": OPUS_AVAILABLE,
                 "fft_size": 65536, "demo": getattr(self.args, "demo", False), "restarts": self.restarts,
-                "dropped": self.dropped, **self.metrics}
+                "dropped": self.dropped, "resource_metrics": {
+                    **self.resource_metrics, "snapshot_cache_bytes": self.snapshot_cache_bytes,
+                }, **self.metrics}
 
     def receiverbook_status(self):
         """Return the legacy receiver-directory station discovery document."""
@@ -523,23 +549,45 @@ class Gateway:
                         self.process.kill()
 
     def publish(self, packet, target=0):
+        packet_bytes = len(packet.encode("utf-8")) if isinstance(packet, str) else len(packet)
         for ident, client in tuple(self.clients.items()):
             if target and target != ident:
                 continue
             if not isinstance(packet, str) and not client.get("protocol_ready", False):
                 continue
-            queue = client["reliable"] if isinstance(packet, str) else client["queue"]
-            if queue.full():
-                if isinstance(packet, str):
-                    if not client["closing"]:
-                        client["closing"] = True
-                        asyncio.create_task(client["ws"].close(code=1013, message=b"Reconnect to recover history"))
-                    continue
-                queue.get_nowait()
+            reliable = isinstance(packet, str)
+            queue = client["reliable"] if reliable else client["queue"]
+            byte_key = "reliable_bytes" if reliable else "queue_bytes"
+            maximum = RELIABLE_QUEUE_MAX_BYTES if reliable else BINARY_QUEUE_MAX_BYTES
+            if reliable and (queue.full() or client[byte_key] + packet_bytes > maximum):
+                if not client["closing"]:
+                    client["closing"] = True
+                    asyncio.create_task(client["ws"].close(code=1013, message=b"Reconnect to recover history"))
+                continue
+            while not reliable and not queue.empty() and (queue.full() or client[byte_key] + packet_bytes > maximum):
+                previous = queue.get_nowait()
+                client[byte_key] -= len(previous)
                 self.dropped += 1
                 client["congestion"] += 1
+            if packet_bytes > maximum:
+                self.dropped += 1
+                client["congestion"] += 1
+                continue
             queue.put_nowait(packet)
+            client[byte_key] += packet_bytes
+            peak_key = "reliable_queue_peak_bytes" if reliable else "binary_queue_peak_bytes"
+            self.resource_metrics[peak_key] = max(self.resource_metrics[peak_key], client[byte_key])
+            self._measure_client_output(client)
             client["wake"].set()
+
+    def _measure_client_output(self, client):
+        """Record queued plus currently-writing bytes for slow-client diagnosis."""
+        self.resource_metrics["inflight_peak_bytes"] = max(
+            self.resource_metrics["inflight_peak_bytes"], client.get("inflight_bytes", 0))
+        pending = (client["queue_bytes"] + client["reliable_bytes"] +
+                   client.get("inflight_bytes", 0))
+        self.resource_metrics["output_peak_bytes"] = max(
+            self.resource_metrics["output_peak_bytes"], pending)
 
     def waterfall_profile(self, ident, profile, preference=None, ceiling=None):
         client = self.clients.get(ident)
@@ -669,12 +717,8 @@ class Gateway:
         if not enabled:
             self.reset_audio_codec(client)
             self.reset_digital_audio(client)
-            retained = []
-            while not client["queue"].empty():
-                packet = client["queue"].get_nowait()
-                if not isinstance(packet, bytes) or not packet or packet[0] not in (2, 10, 11, DIGITAL_PACKET_KIND):
-                    retained.append(packet)
-            for packet in retained: client["queue"].put_nowait(packet)
+            self.filter_binary_queue(client, lambda packet: not isinstance(packet, bytes) or
+                                     not packet or packet[0] not in (2, 10, 11, DIGITAL_PACKET_KIND))
         self.publish(json.dumps({"type":"audio-state", "enabled":enabled,
             "profile":client["audio_profile"]}), ident)
 
@@ -688,12 +732,8 @@ class Gateway:
         client["audio_profile"] = profile
         self.receiver_dirty.add(ident)
         self.reset_audio_codec(client)
-        retained = []
-        while not client["queue"].empty():
-            packet = client["queue"].get_nowait()
-            if not isinstance(packet, bytes) or not packet or packet[0] not in (2, 10, 11, DIGITAL_PACKET_KIND):
-                retained.append(packet)
-        for packet in retained: client["queue"].put_nowait(packet)
+        self.filter_binary_queue(client, lambda packet: not isinstance(packet, bytes) or
+                                 not packet or packet[0] not in (2, 10, 11, DIGITAL_PACKET_KIND))
         details = {"raw":("pcm16",16000,256000), "balanced":("opus",16000,32000),
                    "mobile":("opus",16000,12000),
                    "digiraw":("pcm16",DIGITAL_AUDIO_RATE,DIGITAL_AUDIO_RATE*16)}[profile]
@@ -712,6 +752,20 @@ class Gateway:
     @staticmethod
     def reset_digital_audio(client):
         client["digital_sequence"] = 0
+
+    @staticmethod
+    def filter_binary_queue(client, keep):
+        """Discard obsolete frames while keeping the queue's byte count exact."""
+        queue = client["queue"]
+        retained = []
+        while not queue.empty():
+            packet = queue.get_nowait()
+            if keep(packet):
+                retained.append(packet)
+            else:
+                client["queue_bytes"] -= len(packet)
+        for packet in retained:
+            queue.put_nowait(packet)
 
     def digital_mode(self, ident, mode):
         client = self.clients.get(ident)
@@ -733,13 +787,8 @@ class Gateway:
         if mode and client["audio_profile"] != "digiraw":
             self.audio_profile(ident, "digiraw")
         if mode is None:
-            retained = []
-            while not client["queue"].empty():
-                packet = client["queue"].get_nowait()
-                if not isinstance(packet, bytes) or not packet or packet[0] != DIGITAL_PACKET_KIND:
-                    retained.append(packet)
-            for packet in retained:
-                client["queue"].put_nowait(packet)
+            self.filter_binary_queue(client, lambda packet: not isinstance(packet, bytes) or
+                                     not packet or packet[0] != DIGITAL_PACKET_KIND)
         self.publish(json.dumps({"type":"digital-mode", "mode":mode,
             "enabled":bool(mode), "rate":DIGITAL_AUDIO_RATE}), ident)
 
@@ -815,16 +864,33 @@ class Gateway:
                 compressed[key] = bytes([7])+encode_waterfall(data, profile, sequence, start, end, lower, span)
             self.publish(compressed[key], ident)
 
-    async def publish_waterfall_history(self, ident, revision, requested_rows):
+    async def publish_waterfall_history(self, ident, revision, requested_rows, view=None):
         """Send one atomic, view-specific snapshot from the shared full-band ring."""
         client = self.clients.get(ident)
-        if not client or not self.waterfall_history:
+        if not client or not (view[0] if view else self.waterfall_history):
             return
-        profile, speed = client["waterfall_profile"], client["waterfall_speed"]
+        history, profile, speed, zoom, view_center = (view if view else
+            (list(self.waterfall_history), client["waterfall_profile"], client["waterfall_speed"],
+             client["waterfall_zoom"], client["waterfall_center"]))
+        # Reuse is safe only while the view ends at the same source row.
+        # Otherwise a new listener could receive up to one cache TTL of stale
+        # waterfall data even though newer rows already exist.
+        generation = history[-1][0]
+        cache_key = (generation, profile, speed, zoom, view_center, requested_rows)
+        now = time.monotonic()
+        cached = self.snapshot_cache.get(cache_key)
+        if cached and now-cached[0] <= SNAPSHOT_CACHE_TTL:
+            self.resource_metrics["snapshot_cache_hits"] += 1
+            self.snapshot_cache.move_to_end(cache_key)
+            self.publish(bytes([13])+struct.pack("<I", revision)+cached[1], ident)
+            return
+        self.resource_metrics["snapshot_cache_misses"] += 1
+        if cached:
+            self.snapshot_cache_bytes -= len(cached[1])
+            del self.snapshot_cache[cache_key]
         fps = (11.71875 if speed == "high" else
                (5 if profile == "slow" else 7.8125) / speed)
         gap = 15.625 / fps
-        history = list(self.waterfall_history)
         selected = []
         offset = 0.0
         while len(selected) < requested_rows:
@@ -834,10 +900,10 @@ class Gateway:
             selected.append(history[index])
             offset += gap
         selected.reverse()
-        zoom, view_center = client["waterfall_zoom"], client["waterfall_center"]
         span = round(self.sample_rate/zoom)
         lower = round(view_center-span/2)
         encoded = []
+        encode_started = time.monotonic()
         for index, (sequence, row) in enumerate(selected):
             start = max(0, min(len(row)-1, round((lower-self.band_lower)/self.sample_rate*len(row))))
             end = max(start+1, min(len(row), round((lower+span-self.band_lower)/self.sample_rate*len(row))))
@@ -846,12 +912,114 @@ class Gateway:
             # request must not pause live audio, waterfall or other clients.
             if index % 4 == 3:
                 await asyncio.sleep(0)
-        packet = bytearray([13])
-        packet.extend(struct.pack("<IH", revision, len(encoded)))
+        encode_ms = (time.monotonic()-encode_started)*1000
+        self.resource_metrics["snapshot_encode_ms_last"] = round(encode_ms, 1)
+        self.resource_metrics["snapshot_encode_ms_max"] = max(
+            self.resource_metrics["snapshot_encode_ms_max"], round(encode_ms, 1))
+        body = bytearray(struct.pack("<H", len(encoded)))
         for row in encoded:
-            packet.extend(struct.pack("<I", len(row)))
-            packet.extend(row)
-        self.publish(bytes(packet), ident)
+            body.extend(struct.pack("<I", len(row)))
+            body.extend(row)
+        body = bytes(body)
+        self.resource_metrics["snapshot_rows_encoded"] += len(encoded)
+        self.resource_metrics["snapshot_bytes_encoded"] += len(body)
+        self.resource_metrics["snapshot_bytes_last"] = len(body)
+        self.resource_metrics["snapshot_bytes_max"] = max(
+            self.resource_metrics["snapshot_bytes_max"], len(body))
+        if len(body) <= SNAPSHOT_CACHE_MAX_BYTES:
+            self.snapshot_cache[cache_key] = (time.monotonic(), body)
+            self.snapshot_cache_bytes += len(body)
+            while self.snapshot_cache and self.snapshot_cache_bytes > SNAPSHOT_CACHE_MAX_BYTES:
+                _, (_, evicted) = self.snapshot_cache.popitem(last=False)
+                self.snapshot_cache_bytes -= len(evicted)
+        self.publish(bytes([13])+struct.pack("<I", revision)+body, ident)
+
+    async def snapshot_request(self, ident, revision, rows, view):
+        """Only the latest view per listener may consume snapshot work."""
+        try:
+            # Let rapid gestures replace one another before encoding begins.
+            await asyncio.sleep(SNAPSHOT_DEBOUNCE)
+            client = self.clients.get(ident)
+            if not client or client["snapshot_revision"] != revision:
+                return
+            # Aggregate expensive work per address, but delay rather than
+            # reject listeners behind CGNAT. One address admits at most four
+            # new snapshot encodes per second. A cancelled task may leave one
+            # reservation behind, so cap the future horizon to the number of
+            # sessions that this address is allowed to hold; cancellation can
+            # never push legitimate CGNAT listeners arbitrarily far ahead.
+            address = client["address"]
+            now = time.monotonic()
+            address_slots = max(1, getattr(self.args, "max_clients_per_ip", 3))
+            horizon = (address_slots - 1) * 0.25
+            reserved = min(self.snapshot_address_next.get(address, now), now + horizon)
+            due = max(now, reserved)
+            self.snapshot_address_next[address] = due + 0.25
+            delay = due - now
+            if delay > 0:
+                self.resource_metrics["snapshot_ip_delays"] += 1
+                self.resource_metrics["snapshot_ip_delay_ms_max"] = max(
+                    self.resource_metrics["snapshot_ip_delay_ms_max"], round(delay * 1000, 1))
+                await asyncio.sleep(delay)
+            async with self.snapshot_lock:
+                client = self.clients.get(ident)
+                if not client or client["snapshot_revision"] != revision:
+                    return
+                await asyncio.sleep(max(0, self.snapshot_next_at - time.monotonic(),
+                                        client["snapshot_last_at"] + 0.5 - time.monotonic()))
+                started = time.monotonic()
+                try:
+                    await self.publish_waterfall_history(ident, revision, rows, view)
+                finally:
+                    elapsed = time.monotonic() - started
+                    self.snapshot_next_at = time.monotonic() + min(1.0, max(0.1, elapsed * 0.5))
+                    client["snapshot_last_at"] = time.monotonic()
+        except asyncio.CancelledError:
+            return
+        except Exception:
+            logging.exception("Waterfall snapshot failed")
+
+    def request_snapshot(self, ident, revision, rows, include_history):
+        client = self.clients[ident]
+        self.resource_metrics["snapshot_requests"] += 1
+        previous = client["snapshot_task"]
+        if previous:
+            if not previous.done():
+                self.resource_metrics["snapshot_coalesced"] += 1
+            previous.cancel()
+        # A queued snapshot for an older revision is useless once the view
+        # changes; keep live rows in their original order.
+        self.filter_binary_queue(client, lambda packet: not packet or packet[0] != 13)
+        client["snapshot_revision"] = revision
+        if include_history:
+            view = (list(self.waterfall_history), client["waterfall_profile"], client["waterfall_speed"],
+                    client["waterfall_zoom"], client["waterfall_center"])
+            client["snapshot_task"] = asyncio.create_task(self.snapshot_request(ident, revision, rows, view))
+        else:
+            client["snapshot_task"] = None
+
+    def allow_history_read(self):
+        now = time.monotonic()
+        self.history_tokens = min(8.0, self.history_tokens + (now - self.history_last) * 4)
+        self.history_last = now
+        if self.history_tokens < 1:
+            self.resource_metrics["history_rate_limited"] += 1
+            return False
+        self.history_tokens -= 1
+        return True
+
+    async def history_packet(self, category, before=0):
+        if not before:
+            cached = self.recent_history.get(category)
+            if cached is not None:
+                self.resource_metrics["history_cache_hits"] += 1
+                return cached
+        self.resource_metrics["history_cache_misses"] += 1
+        packet = json.dumps(await self.history.history(category, before), ensure_ascii=False)
+        if not before:
+            # This process owns history writes and invalidates on every append.
+            self.recent_history[category] = packet
+        return packet
 
     def status(self):
         self.publish(json.dumps(self.info()))
@@ -935,10 +1103,13 @@ class Gateway:
                 raise ValueError("Sesión inválida")
             if client["key"] and client["key"] != key:
                 raise ValueError("La sesión no puede cambiar")
-            client["name"] = plain_text(update.get("name", ""), 32, allow_empty=True)
+            name = plain_text(update.get("name", ""), 32, allow_empty=True)
+            changed = client["name"] != name
+            client["name"] = name
             client["key"] = key
             self.publish(json.dumps({"type": "identified", "id": ident, "name": client["name"]}), ident)
-            self.presence()
+            if changed:
+                self.presence()
             return
         if kind == "history":
             category, before = update.get("kind", "chat"), update.get("before", 0)
@@ -946,9 +1117,11 @@ class Gateway:
                 raise ValueError("Historial inválido")
             if time.monotonic()-client["history_last"] < .5:
                 raise ValueError("Espera antes de cargar más historial")
+            if not self.allow_history_read():
+                raise ValueError("Hay muchas solicitudes de historial; vuelve a intentar en unos segundos")
             client["history_last"] = time.monotonic()
             async with self.community_lock:
-                self.publish(json.dumps(await self.history.history(category, before)), ident)
+                self.publish(await self.history_packet(category, before), ident)
             return
         if not client["key"]:
             raise ValueError("Identifica primero tu sesión")
@@ -972,6 +1145,7 @@ class Gateway:
         async with self.community_lock:
             saved, created = await self.history.append(event)
             if created:
+                self.recent_history.pop(kind, None)
                 self.publish(json.dumps({"type": "event", "event": saved}))
             self.publish(json.dumps({"type": "ack", "request_id": request_id, "event": saved}), ident)
 
@@ -1105,9 +1279,12 @@ class Gateway:
         self.next_id += 1
         settings = {"frequency": self.initial_frequency, "mode": "LSB", "low": -2700, "high": -300, "squelch": -150, "notch": False, "nr": 0}
         queue = asyncio.Queue(maxsize=32)
-        client = {"queue": queue, "reliable": asyncio.Queue(maxsize=64), "wake": asyncio.Event(),
+        client = {"queue": queue, "queue_bytes": 0,
+                  "reliable": asyncio.Queue(maxsize=64), "reliable_bytes": 0, "wake": asyncio.Event(),
+                  "inflight_bytes": 0,
                   "closing": False, "settings": settings, "ws": ws, "name": "", "key": "", "address": address,
                   "chat_tokens": 4.0, "chat_last": time.monotonic(), "history_last": 0,
+                  "snapshot_task": None, "snapshot_revision": 0, "snapshot_last_at": 0.0,
                   "waterfall_profile": "balanced", "waterfall_preference": "balanced", "waterfall_ceiling": "balanced",
                   "waterfall_zoom": 1.0, "waterfall_center": self.center_frequency,
                   "waterfall_speed": 1, "waterfall_phase": 0, "waterfall_emitted": 0,
@@ -1129,14 +1306,22 @@ class Gateway:
                         if client["reliable"].empty() and queue.empty():
                             client["wake"].clear()
                             await client["wake"].wait()
-                        packet = (client["reliable"] if not client["reliable"].empty() else queue).get_nowait()
-                        async with asyncio.timeout(3):
-                            if isinstance(packet, str):
-                                await ws.send_str(packet)
-                            else:
-                                await ws.send_bytes(packet)
-                            self.sent_bytes += len(packet.encode("utf-8") if isinstance(packet, str) else packet)
-                            client["sent_bytes"] += len(packet.encode("utf-8") if isinstance(packet, str) else packet)
+                        reliable = not client["reliable"].empty()
+                        packet = (client["reliable"] if reliable else queue).get_nowait()
+                        packet_bytes = len(packet.encode("utf-8")) if isinstance(packet, str) else len(packet)
+                        client["reliable_bytes" if reliable else "queue_bytes"] -= packet_bytes
+                        client["inflight_bytes"] = packet_bytes
+                        self._measure_client_output(client)
+                        try:
+                            async with asyncio.timeout(3):
+                                if isinstance(packet, str):
+                                    await ws.send_str(packet)
+                                else:
+                                    await ws.send_bytes(packet)
+                                self.sent_bytes += packet_bytes
+                                client["sent_bytes"] += packet_bytes
+                        finally:
+                            client["inflight_bytes"] = 0
                 except (ConnectionError, asyncio.TimeoutError):
                     await ws.close()
             sender = asyncio.create_task(send())
@@ -1174,8 +1359,8 @@ class Gateway:
                         self.status()
                         self.presence()
                         async with self.community_lock:
-                            self.publish(json.dumps(await self.history.history("chat")), ident)
-                            self.publish(json.dumps(await self.history.history("log")), ident)
+                            self.publish(await self.history_packet("chat"), ident)
+                            self.publish(await self.history_packet("log"), ident)
                         continue
                     if not client["protocol_ready"]:
                         await ws.close(code=1002, message=b"Protocol negotiation required")
@@ -1203,15 +1388,14 @@ class Gateway:
                         span = self.sample_rate/zoom
                         if not self.band_lower+span/2 <= view_center <= self.band_upper-span/2:
                             raise ValueError("Ventana de cascada fuera de banda")
-                        client["waterfall_zoom"], client["waterfall_center"] = float(zoom), round(view_center)
                         revision, rows = update.get("revision", 0), update.get("rows", 100)
                         include_history = update.get("history", True)
                         if type(revision) is not int or not 0 <= revision <= 0xffffffff or type(rows) is not int or not 1 <= rows <= 600:
                             raise ValueError("Solicitud de historial de cascada inválida")
                         if type(include_history) is not bool:
                             raise ValueError("Solicitud de historial de cascada inválida")
-                        if include_history:
-                            await self.publish_waterfall_history(ident, revision, rows)
+                        client["waterfall_zoom"], client["waterfall_center"] = float(zoom), round(view_center)
+                        self.request_snapshot(ident, revision, rows, include_history)
                         continue
                     if update.get("type") == "waterfall-speed":
                         speed = update.get("divisor")
@@ -1278,6 +1462,9 @@ class Gateway:
                     if not (self.band_lower <= new["frequency"] <= self.band_upper and filter_valid
                             and new["high"]-new["low"] >= 100 and -150 <= new["squelch"] <= 0):
                         raise ValueError("Control fuera de rango")
+                    if new == settings:
+                        self.publish(json.dumps({"type": "tuned", **new}), ident)
+                        continue
                     client["settings"] = settings = new
                     await self.command(self.settings_command(ident, new))
                     self.publish(json.dumps({"type": "tuned", **new}), ident)
@@ -1288,11 +1475,17 @@ class Gateway:
                     logging.exception("History write failed")
                     self.publish(json.dumps({"type": "error", "message": "No se pudo guardar. Tu texto sigue en el formulario; vuelve a intentar."}), ident)
         finally:
+            snapshot_task = client["snapshot_task"]
+            if snapshot_task:
+                snapshot_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await snapshot_task
             self.clients.pop(ident, None)
             self.receiver_dirty.discard(ident)
             if not self.address_clients(address):
                 self.address_limit_stage.pop(address, None)
                 self.address_bandwidth_samples.pop(address, None)
+                self.snapshot_address_next.pop(address, None)
             else:
                 self.enforce_address_limits(address, notify=False)
             if sender:

@@ -9,6 +9,13 @@ The `unstable` branch is the active experimental development line. The `dev`
 branch tracks reviewed development releases, and `main` is reserved for stable
 releases.
 
+## 0.9.0-dev
+
+- Bound WebSocket output by queued bytes as well as item count, coalesce and
+  pace expensive waterfall snapshots, and cache bounded snapshots/history.
+- Render live chat/log events incrementally to avoid rebuilding the full DOM
+  for every message. Added resource, rendering and latest-view regressions.
+
 ## 0.8.6-dev
 
 - Keep the regression suite and CI checks while removing stale CWformer

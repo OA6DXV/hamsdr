@@ -324,6 +324,28 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
         error=await self.event(ws,'error')
         self.assertIn('historial',error['message'])
 
+    async def test_rapid_waterfall_views_keep_only_latest_snapshot(self):
+        ws=await self.connect()
+        gateway=self.app[GATEWAY]
+        gateway.waterfall_history.clear()
+        row=bytes(range(256))*256
+        for sequence in range(600):
+            gateway.waterfall_history.append((sequence,row))
+        ident=next(iter(gateway.clients))
+        gateway.clients[ident]['waterfall_profile']='high'
+        gateway.clients[ident]['waterfall_speed']='high'
+        for revision in (101,102,103):
+            await ws.send_json({'type':'waterfall-view','zoom':1,'center':gateway.center_frequency,
+                                'revision':revision,'rows':600,'history':True})
+        snapshots=[]
+        async with asyncio.timeout(8):
+            while not snapshots:
+                message=await ws.receive()
+                if message.type==WSMsgType.BINARY and message.data[0]==13:
+                    snapshots.append(struct.unpack_from('<I',message.data,1)[0])
+        self.assertEqual(snapshots,[103])
+        self.assertLessEqual(gateway.clients[ident]['queue_bytes'],4*1024*1024)
+
     async def test_origins_controls_and_assets(self):
         for origin in ['null','https://untrusted.example']:
             with self.assertRaises(WSServerHandshakeError) as caught:

@@ -27,24 +27,49 @@
   });
   window.addEventListener('radio-open',()=>{ready=false;availability();identify();});
   window.addEventListener('radio-close',()=>{ready=false;availability();el('chat-status').textContent='Desconectado · recuperando conexión e historial…';});
+  function eventRow(kind,e){
+    const row=document.createElement('div');row.className='chat-entry';row.dataset.id=e.id;
+    const stamp=document.createElement('span');stamp.className='chat-time';stamp.textContent=new Date(e.time*1000).toISOString().replace('T',' ').slice(0,19)+' UTC ';
+    const name=document.createElement('span');name.className='chat-name';name.textContent=e.name+': ';
+    row.append(stamp,name,document.createTextNode(kind==='log'?`${e.call} · ${(e.frequency/1000).toFixed(2)} kHz ${e.mode} · ${e.text}`:e.text));
+    return row;
+  }
   function render(kind,older=false){
     const target=el(kind==='chat'?'chatbox':'logbook');
     const bottom=target.scrollHeight-target.scrollTop-target.clientHeight<35,position=target.scrollTop,height=target.scrollHeight;
     const fragment=document.createDocumentFragment();
     for(const e of [...events[kind].values()].sort((a,b)=>a.id-b.id)){
-      const row=document.createElement('div');row.className='chat-entry';row.dataset.id=e.id;
-      const stamp=document.createElement('span');stamp.className='chat-time';stamp.textContent=new Date(e.time*1000).toISOString().replace('T',' ').slice(0,19)+' UTC ';
-      const name=document.createElement('span');name.className='chat-name';name.textContent=e.name+': ';
-      row.append(stamp,name,document.createTextNode(kind==='log'?`${e.call} · ${(e.frequency/1000).toFixed(2)} kHz ${e.mode} · ${e.text}`:e.text));
-      fragment.append(row);
+      fragment.append(eventRow(kind,e));
     }
     target.replaceChildren(fragment);
     if(older)target.scrollTop=position+target.scrollHeight-height;else if(bottom)target.scrollTop=target.scrollHeight;else target.scrollTop=position;
   }
   function add(event){
     const rows=events[event.kind];if(!rows)return;
+    const existed=rows.has(event.id);
     rows.set(event.id,event);
-    if(rows.size>10000)rows.delete(Math.min(...rows.keys()));
+    let evicted=null;
+    if(rows.size>10000){evicted=Math.min(...rows.keys());rows.delete(evicted);}
+    return{existed,evicted};
+  }
+  function renderEvent(event){
+    const change=add(event);if(!change)return;
+    const target=el(event.kind==='chat'?'chatbox':'logbook');
+    const bottom=target.scrollHeight-target.scrollTop-target.clientHeight<35,position=target.scrollTop;
+    if(change.evicted!==null){
+      const first=target.firstElementChild;
+      if(first&&Number(first.dataset.id)===change.evicted)first.remove();
+    }
+    // An idempotent acknowledgement may refer to an event older than the
+    // retained window. Do not render a row that the in-memory window evicted.
+    if(!events[event.kind].has(event.id))return;
+    if(!change.existed){
+      const row=eventRow(event.kind,event);
+      let previous=target.lastElementChild;
+      while(previous&&Number(previous.dataset.id)>event.id)previous=previous.previousElementSibling;
+      if(previous)previous.after(row);else target.prepend(row);
+    }
+    if(bottom)target.scrollTop=target.scrollHeight;else target.scrollTop=position;
   }
   function resend(kind){
     if(!pending[kind]||!ready)return;
@@ -61,9 +86,9 @@
       // through the explicit cursor, including a long offline interval.
       if(!m.before)events[m.kind].clear();
       m.events.forEach(add);el('older-'+m.kind).hidden=!m.more;render(m.kind,!!m.before);
-    }else if(m.type==='event'){add(m.event);render(m.event.kind);}
+    }else if(m.type==='event'){renderEvent(m.event);}
     else if(m.type==='ack'){
-      add(m.event);render(m.event.kind);
+      renderEvent(m.event);
       for(const kind of ['chat','log'])if(pending[kind]?.request_id===m.request_id){
         if(el(kind+'-text').value===pending[kind].text)el(kind+'-text').value='';
         delete pending[kind];savePending();el('send-'+kind).disabled=!ready;
