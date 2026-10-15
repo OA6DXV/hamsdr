@@ -13,17 +13,18 @@
     return /^[\x00-\x7F]*$/.test(trimmed)?trimmed.toUpperCase():trimmed;
   };
   const events={chat:new Map(),log:new Map()}, pending={};
-  let key=random(),ready=false,identifyTimer=0;
+  let ready=false,identifyTimer=0,acknowledgedName='';
   try{
-    const stored=sessionStorage.getItem('hamsdr-session');
-    if(stored&&/^[a-f0-9]{32}$/.test(stored))key=stored;
-    sessionStorage.setItem('hamsdr-session',key);
     const name=localStorage.getItem('hamsdr-name')||'';
     const normalized=normalizeCallsign(name);
     el('username').value=Array.from(normalized).length<=10?normalized:'';
+  }catch{}
+  try{
     const saved=JSON.parse(sessionStorage.getItem('hamsdr-pending')||'{}');
-    for(const kind of ['chat','log'])if(saved[kind]?.type===kind&&typeof saved[kind].text==='string'&&/^[a-f0-9]{32}$/.test(saved[kind].request_id)){
-      pending[kind]={type:kind,text:saved[kind].text,request_id:saved[kind].request_id};
+    for(const kind of ['chat','log'])if(saved[kind]?.type===kind&&typeof saved[kind].text==='string'&&saved[kind].text.length<=500&&/^[a-f0-9]{32}$/.test(saved[kind].request_id)){
+      pending[kind]={type:kind,text:saved[kind].text,request_id:saved[kind].request_id,
+        identity:saved[kind].identity,name:saved[kind].name,
+        review:saved[kind].review===true||!/^[a-f0-9]{32}$/.test(saved[kind].identity)||!callsignPattern.test(saved[kind].name)};
       el(kind+'-text').value=saved[kind].text;
     }
   }catch{}
@@ -38,7 +39,7 @@
       return false;
     }
     field.setCustomValidity('');
-    return window.radioSend({type:'identify',name,key});
+    return window.radioSend({type:'identify',name});
   }
   function scheduleIdentify(){
     clearTimeout(identifyTimer);
@@ -122,14 +123,26 @@
   }
   function resend(kind){
     if(!pending[kind]||!ready)return;
-    window.radioSend(pending[kind]);el('send-'+kind).disabled=true;
-    setTimeout(()=>{if(pending[kind]){el('send-'+kind).disabled=!ready;el('chat-status').textContent='Sin confirmación todavía. Puedes volver a enviar; no se duplicará el mensaje.';}},10000);
+    if(pending[kind].review||pending[kind].identity!==window.radioIdentity?.id||pending[kind].name!==acknowledgedName){
+      // Retain held drafts across reloads, but never retry them automatically.
+      pending[kind].review=true;savePending();
+      el('chat-status').textContent='Borrador recuperado: revisa el texto y pulsa Enviar para publicarlo con tu identidad actual.';
+      return;
+    }
+    const {type,text,request_id}=pending[kind];
+    window.radioSend({type,text,request_id});el('send-'+kind).disabled=true;
+    setTimeout(()=>{if(pending[kind]?.request_id===request_id&&!pending[kind].review){el('send-'+kind).disabled=!ready;el('chat-status').textContent='Sin confirmación todavía. Puedes volver a enviar; no se duplicará el mensaje.';}},10000);
   }
   window.addEventListener('radio-event',({detail:m})=>{
     if(m.type==='identified'){
+      // An acknowledgement for earlier input must not enable posting while
+      // the user is still editing a newer callsign.
+      if(m.name!==normalizeCallsign(el('username').value))return;
+      acknowledgedName=m.name;
       const wasReady=ready;ready=!!m.name?.trim()&&callsignPattern.test(m.name);availability();
       el('chat-status').textContent=ready?'Chat en vivo conectado · historial guardado':'Configura un indicativo válido (máximo 10 caracteres) para publicar';
       if(ready&&!wasReady)for(const kind of ['chat','log'])resend(kind);
+      if(ready&&Object.values(pending).some(item=>item.review))el('chat-status').textContent='Borrador recuperado: revisa el texto y pulsa Enviar para publicarlo con tu identidad actual.';
     }else if(m.type==='history'){
       if(!events[m.kind])return;
       // A reconnect starts with the latest window; older entries remain accessible
@@ -152,8 +165,8 @@
       const text=el(kind+'-text').value.trim();
       if(!text)return;
       // Keep the id on retry of the exact same submission, including reconnects.
-      if(!pending[kind]||pending[kind].text!==text)
-        pending[kind]={type:kind,text,request_id:random()};
+      if(!pending[kind]||pending[kind].review||pending[kind].text!==text||pending[kind].identity!==window.radioIdentity?.id||pending[kind].name!==acknowledgedName)
+        pending[kind]={type:kind,text,request_id:random(),identity:window.radioIdentity?.id,name:acknowledgedName};
       savePending();resend(kind);
     });
     el('older-'+kind).onclick=()=>{

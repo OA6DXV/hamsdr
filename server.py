@@ -20,13 +20,13 @@ import tomllib
 from urllib.parse import urlsplit
 
 from aiohttp import web, WSMsgType
-from community import History, normalize_callsign, plain_text
+from community import History, IdentityError, normalize_callsign, plain_text
 from opus_codec import OPUS_AVAILABLE, OpusEncoder
 from waterfall_codec import VERSION as WATERFALL_PROTOCOL_VERSION, encode as encode_waterfall
 
 ROOT = Path(__file__).resolve().parent
-VERSION = "0.9.1-dev"
-PROTOCOL_VERSION = 1
+VERSION = "0.9.2-dev"
+PROTOCOL_VERSION = 2
 MODES = {"USB": (300, 2700), "LSB": (-2700, -300), "AM": (-4000, 4000),
          "CW": (450, 950), "NFM": (-5000, 5000)}
 DIGITAL_AUDIO_RATE = 12000
@@ -245,6 +245,7 @@ def load_runtime_config(requested=None, allow_unconfigured=False):
     trusted_proxy = server.get("trusted_proxy", "")
     max_clients = server.get("max_clients", 10)
     max_clients_per_ip = server.get("max_clients_per_ip", 3)
+    max_connections_per_identity = server.get("max_connections_per_identity", 1)
     full_quality_sessions_per_ip = server.get("full_quality_sessions_per_ip", 2)
     max_bandwidth_kbps_per_ip = server.get("max_bandwidth_kbps_per_ip", 1000)
     digimodes = server.get("digimodes", False)
@@ -272,6 +273,8 @@ def load_runtime_config(requested=None, allow_unconfigured=False):
             not isinstance(full_quality_sessions_per_ip, int) or
             not 1 <= full_quality_sessions_per_ip <= max_clients_per_ip):
         raise ValueError("site config: full-quality sessions must be 1..max_clients_per_ip")
+    if type(max_connections_per_identity) is not int or not 1 <= max_connections_per_identity <= max_clients:
+        raise ValueError("site config: connections per identity must be 1..max_clients")
     if (isinstance(max_bandwidth_kbps_per_ip, bool) or
             not isinstance(max_bandwidth_kbps_per_ip, int) or
             not 1 <= max_bandwidth_kbps_per_ip <= 1000000):
@@ -347,6 +350,7 @@ def load_runtime_config(requested=None, allow_unconfigured=False):
         "bind": bind, "port": port, "origin": secure_origin if security_mode != "insecure" else "",
         "trusted_proxy": trusted_proxy,
         "max_clients": max_clients, "max_clients_per_ip": max_clients_per_ip,
+        "max_connections_per_identity": max_connections_per_identity,
         "full_quality_sessions_per_ip": full_quality_sessions_per_ip,
         "max_bandwidth_kbps_per_ip": max_bandwidth_kbps_per_ip,
         "digimodes": digimodes,
@@ -482,6 +486,12 @@ class Gateway:
         self.waterfall_sequence = 0
         self.waterfall_history = deque(maxlen=600)
         self.connection_attempts = OrderedDict()
+        self.identity_issuance = OrderedDict()
+        self.identity_tokens, self.identity_last = 30.0, time.monotonic()
+        self.identity_owners = {}
+        self.session_requests = 0
+        self.session_transfer_lock = asyncio.Lock()
+        self.session_transfers = OrderedDict()
         self.address_limit_stage = {}
         self.address_bandwidth_samples = {}
         (self.site_config, self.site_logo, self.station,
@@ -508,8 +518,24 @@ class Gateway:
             self.connection_attempts.popitem(last=False)
         return allowed
 
+    def check_identity_issuance(self, address):
+        """Limit new credentials without tying an existing identity to an IP."""
+        now = time.monotonic()
+        self.identity_tokens = min(30.0, self.identity_tokens + now - self.identity_last)
+        self.identity_last = now
+        tokens, previous = self.identity_issuance.pop(address, (6.0, now))
+        tokens = min(6.0, tokens + (now - previous) / 10)
+        allowed = tokens >= 1 and self.identity_tokens >= 1
+        self.identity_issuance[address] = (tokens - 1 if allowed else tokens, now)
+        while len(self.identity_issuance) > 4096:
+            self.identity_issuance.popitem(last=False)
+        if not allowed:
+            raise IdentityError("identity-rate", "Demasiadas identidades nuevas; espera antes de reintentar")
+        self.identity_tokens -= 1
+
     def info(self):
-        return {"type": "status", "version": VERSION, "source": self.source, "users": len(self.clients),
+        return {"type": "status", "version": VERSION, "source": self.source,
+                "users": sum(c["protocol_ready"] for c in self.clients.values()),
                 "center": self.center_frequency, "sample_rate": self.sample_rate,
                 "initial_frequency": self.initial_frequency, "audio_rate": 16000,
                 "digital_audio_rate": DIGITAL_AUDIO_RATE,
@@ -529,7 +555,7 @@ class Gateway:
             f"Description: {self.station['description']}",
             f"Email: {self.station['email']}",
             f"Qth: {self.station['qth']}",
-            f"Users: {len(self.clients)}",
+            f"Users: {sum(c['protocol_ready'] for c in self.clients.values())}",
             f"Bands: {len(bands)}",
         ]
         for position, band in enumerate(bands):
@@ -553,7 +579,11 @@ class Gateway:
         for ident, client in tuple(self.clients.items()):
             if target and target != ident:
                 continue
+            if not target and not client.get("protocol_ready", False):
+                continue
             if not isinstance(packet, str) and not client.get("protocol_ready", False):
+                continue
+            if not isinstance(packet, str) and client.get("transferred", False):
                 continue
             reliable = isinstance(packet, str)
             queue = client["reliable"] if reliable else client["queue"]
@@ -607,7 +637,7 @@ class Gateway:
 
     def address_clients(self, address):
         return [(ident, client) for ident, client in self.clients.items()
-                if client["address"] == address]
+                if client["address"] == address and client["protocol_ready"]]
 
     def address_profile_limits(self, address):
         """Return the highest profiles currently allowed for one public address."""
@@ -841,6 +871,8 @@ class Gateway:
         self.waterfall_history.append((sequence, bytes(data)))
         compressed = {}
         for ident, client in tuple(self.clients.items()):
+            if not client["protocol_ready"] or client.get("transferred", False):
+                continue
             profile = client["waterfall_profile"]
             speed = client["waterfall_speed"]
             # Source cadence is exactly 15.625 fps. Fractional accumulators
@@ -1042,7 +1074,7 @@ class Gateway:
         self.publish(json.dumps({"type": "presence", "users": [
             {"id": ident, "name": c["name"] or "Anónimo", "frequency": c["settings"]["frequency"],
              "mode": c["settings"]["mode"], "color": colors[(ident-1) % len(colors)]}
-            for ident, c in self.clients.items() if c["ws"].prepared]}))
+            for ident, c in self.clients.items() if c["protocol_ready"]]}))
 
     async def stats(self):
         def cpu():
@@ -1068,6 +1100,8 @@ class Gateway:
             levels = ["slow", "low", "balanced", "high"]
             address_rates = {}
             for ident, client in tuple(self.clients.items()):
+                if not client["protocol_ready"]:
+                    continue
                 rate = round((client["sent_bytes"]-client["last_sent"])*8/elapsed/1000, 1)
                 client["last_sent"] = client["sent_bytes"]
                 address_rates[client["address"]] = address_rates.get(client["address"], 0.0) + rate
@@ -1098,15 +1132,11 @@ class Gateway:
         client = self.clients[ident]
         kind = update["type"]
         if kind == "identify":
-            key = update.get("key", "")
-            if not isinstance(key, str) or not re.fullmatch(r"[a-f0-9]{32}", key):
-                raise ValueError("Sesión inválida")
-            if client["key"] and client["key"] != key:
-                raise ValueError("La sesión no puede cambiar")
+            if "key" in update or "token" in update:
+                raise ValueError("La identidad de la conexión no puede cambiar")
             name = normalize_callsign(update.get("name", ""), allow_empty=True)
             changed = client["name"] != name
             client["name"] = name
-            client["key"] = key
             self.publish(json.dumps({"type": "identified", "id": ident, "name": client["name"]}), ident)
             if changed:
                 self.presence()
@@ -1167,7 +1197,8 @@ class Gateway:
                 self.process = process
                 self.receiver_dirty.clear()
                 for ident, client in tuple(self.clients.items()):
-                    await self.command(self.settings_command(ident, client["settings"]))
+                    if client["protocol_ready"] and not client.get("transferred", False):
+                        await self.command(self.settings_command(ident, client["settings"]))
                 started = time.monotonic()
                 while True:
                     # Coalesce synchronous profile/resource-policy changes.
@@ -1176,7 +1207,7 @@ class Gateway:
                     self.receiver_dirty.clear()
                     for cid in dirty:
                         client = self.clients.get(cid)
-                        if client:
+                        if client and client["protocol_ready"] and not client.get("transferred", False):
                             await self.command(self.settings_command(cid, client["settings"]))
                     try:
                         header = await asyncio.wait_for(process.stdout.readexactly(9), 20)
@@ -1193,7 +1224,8 @@ class Gateway:
                         self.status()
                         if self.source == "streaming":
                             for cid, client in tuple(self.clients.items()):
-                                await self.command(self.settings_command(cid, client["settings"]))
+                                if client["protocol_ready"] and not client.get("transferred", False):
+                                    await self.command(self.settings_command(cid, client["settings"]))
                     elif kind == 1:
                         self.last_data = time.monotonic()
                         self.publish_spectrum(data)
@@ -1254,7 +1286,7 @@ class Gateway:
         healthy = self.source in ("streaming", "demo") and recent and self.task and not self.task.done()
         return web.json_response(self.info(), status=200 if healthy else 503)
 
-    async def websocket(self, request):
+    def require_origin(self, request):
         origin = request.headers.get("Origin", "")
         parsed = urlsplit(origin)
         # Explicit optional origin for proxy deployments; never rewrite Origin.
@@ -1263,6 +1295,79 @@ class Gateway:
         )
         if not allowed:
             raise web.HTTPForbidden(text="Origin not allowed")
+
+    async def session_action(self, request):
+        """Inspect/transfer only a proven browser identity, even at full capacity."""
+        self.require_origin(request)
+        address = self.client_address(request)
+        if not self.allow_connection_attempt(address):
+            return web.json_response({"message":"Demasiados intentos; espera unos segundos"}, status=429)
+        if self.session_requests >= 8:
+            return web.json_response({"message":"Hay muchas solicitudes; intenta más tarde"}, status=503)
+        self.session_requests += 1
+        try:
+            async with asyncio.timeout(5):
+                if request.content_type != "application/json":
+                    return web.json_response({"message":"Solicitud inválida"}, status=400)
+                update = await request.json()
+                if (not isinstance(update, dict) or update.get("action") not in ("status", "transfer") or
+                        not isinstance(update.get("token"), str) or
+                        not re.fullmatch(r"[a-f0-9]{64}", update["token"])):
+                    return web.json_response({"message":"Solicitud inválida"}, status=400)
+                identity, _ = await self.history.identity(update["token"])
+                if update["action"] == "status":
+                    return web.json_response({"active":bool(self.identity_owners.get(identity))})
+                async with self.session_transfer_lock:
+                    now = time.monotonic()
+                    if now - self.session_transfers.get(identity, -float("inf")) < 1:
+                        return web.json_response({"message":"Espera un segundo antes de volver a trasladar la sesión"}, status=429)
+                    self.session_transfers.pop(identity, None)
+                    self.session_transfers[identity] = now
+                    while len(self.session_transfers) > 4096:
+                        self.session_transfers.popitem(last=False)
+                    targets = [self.clients[owner] for owner in tuple(self.identity_owners.get(identity, ()))
+                               if owner in self.clients]
+                    for client in targets:
+                        client["transferred"] = True
+                        client["audio_enabled"] = False
+                    if targets:
+                        # Stop queued AV and its writer before delivering the
+                        # private notice directly. Some proxies normalize close
+                        # codes, so the application notice is authoritative too.
+                        for client in targets:
+                            client["sender"].cancel()
+                        await asyncio.gather(*(client["sender"] for client in targets), return_exceptions=True)
+                        async def notify(client):
+                            try:
+                                async with asyncio.timeout(.5):
+                                    await client["ws"].send_json({"type":"session-error", "code":"identity-replaced",
+                                        "message":"La sesión se trasladó a otra pestaña."})
+                                    await client["ws"].send_json({"type":"audio-state", "enabled":False,
+                                                                "profile":client["audio_profile"]})
+                            except (ConnectionError, RuntimeError, asyncio.TimeoutError):
+                                pass
+                        await asyncio.gather(*(notify(client) for client in targets))
+                        await asyncio.wait_for(asyncio.gather(*(
+                            client["ws"].close(code=4410, message=b"Session moved to another tab")
+                            for client in targets)), 2)
+                        # Do not acknowledge transfer until the old DSP receivers
+                        # have been deleted, including their sender/snapshot tasks.
+                        await asyncio.wait_for(asyncio.gather(*(
+                            client["retired"].wait() for client in targets)), 2)
+                    return web.json_response({"transferred":True})
+        except IdentityError:
+            return web.json_response({"message":"El identificador no es válido; vuelve a conectar"}, status=401)
+        except (ValueError, TypeError, RecursionError):
+            return web.json_response({"message":"Solicitud inválida"}, status=400)
+        except asyncio.TimeoutError:
+            return web.json_response({"message":"La sesión anterior aún se está cerrando; vuelve a intentar"}, status=503)
+        except sqlite3.Error:
+            return web.json_response({"message":"No se pudo validar la identidad; intenta más tarde"}, status=503)
+        finally:
+            self.session_requests -= 1
+
+    async def websocket(self, request):
+        self.require_origin(request)
         address = self.client_address(request)
         if not self.allow_connection_attempt(address):
             raise web.HTTPTooManyRequests(text="Demasiados intentos de conexión. Espera unos segundos.")
@@ -1292,14 +1397,13 @@ class Gateway:
                   "audio_enabled": False, "audio_profile": "balanced",
                   "opus_encoder": None, "opus_pending": bytearray(), "opus_sequence": 0,
                   "digital_mode": None, "digital_sequence": 0,
-                  "protocol_ready": False, "resource_policy": None}
+                  "protocol_ready": False, "resource_policy": None,
+                  "transferred": False, "retired": asyncio.Event()}
         self.clients[ident] = client
-        self.enforce_address_limits(address)
         sender = None
         protocol_timer = None
         try:
             await ws.prepare(request)
-            await self.command(self.settings_command(ident, settings))
             async def send():
                 try:
                     while True:
@@ -1325,6 +1429,7 @@ class Gateway:
                 except (ConnectionError, asyncio.TimeoutError):
                     await ws.close()
             sender = asyncio.create_task(send())
+            client["sender"] = sender
             async def require_protocol():
                 await asyncio.sleep(5)
                 if not client["protocol_ready"]:
@@ -1332,6 +1437,9 @@ class Gateway:
             protocol_timer = asyncio.create_task(require_protocol())
             tokens, last = 30.0, time.monotonic()
             async for message in ws:
+                if client["transferred"]:
+                    await ws.close(code=4410, message=b"Session moved to another tab")
+                    break
                 if message.type != WSMsgType.TEXT:
                     continue
                 now = time.monotonic()
@@ -1352,10 +1460,34 @@ class Gateway:
                                 update.get("waterfall") != WATERFALL_PROTOCOL_VERSION):
                             await ws.close(code=1002, message=b"Incompatible protocol")
                             break
+                        token = update.get("token")
+                        # A missing token explicitly requests issuance. Empty,
+                        # malformed and unknown credentials never become one.
+                        if "token" in update and token is None:
+                            raise IdentityError("identity-invalid", "Identificador inválido")
+                        if token is None:
+                            self.check_identity_issuance(address)
+                        identity, issued = await self.history.identity(token)
+                        # Give orderly reloads up to two seconds to retire the
+                        # previous socket; never take it over or drop its audio.
+                        deadline = time.monotonic() + 2
+                        limit = getattr(self.args, "max_connections_per_identity", 1)
+                        while len(self.identity_owners.get(identity, ())) >= limit:
+                            if time.monotonic() >= deadline:
+                                raise IdentityError("identity-active", "Este navegador ya tiene una sesión activa en otra pestaña. Ciérrala y pulsa Reintentar.")
+                            await asyncio.sleep(.05)
+                        if ws.closed:
+                            break
+                        # Reservation and readiness are atomic on this loop.
+                        self.identity_owners.setdefault(identity, set()).add(ident)
+                        client["key"] = identity
                         client["protocol_ready"] = True
                         protocol_timer.cancel()
                         self.publish(json.dumps({"type":"hello", "protocol":PROTOCOL_VERSION,
-                            "waterfall":WATERFALL_PROTOCOL_VERSION}), ident)
+                            "waterfall":WATERFALL_PROTOCOL_VERSION, "identity":identity,
+                            **({"token":issued} if issued else {})}), ident)
+                        self.enforce_address_limits(address)
+                        await self.command(self.settings_command(ident, settings))
                         self.status()
                         self.presence()
                         async with self.community_lock:
@@ -1469,10 +1601,22 @@ class Gateway:
                     await self.command(self.settings_command(ident, new))
                     self.publish(json.dumps({"type": "tuned", **new}), ident)
                     self.presence()
+                except IdentityError as error:
+                    # Admission failures go directly to this socket; never
+                    # publish bearer credentials or exception input elsewhere.
+                    await ws.send_json({"type":"session-error", "code":error.code, "message":str(error)})
+                    await ws.close(code=4409 if error.code == "identity-active" else 4401,
+                                   message=b"Identity admission rejected")
+                    break
                 except (TypeError, ValueError, OverflowError, RecursionError) as error:
                     self.publish(json.dumps({"type": "error", "message": str(error) or "Parámetros inválidos"}), ident)
                 except sqlite3.Error:
                     logging.exception("History write failed")
+                    if not client["protocol_ready"]:
+                        await ws.send_json({"type":"session-error", "code":"identity-unavailable",
+                                            "message":"No se pudo validar la identidad; intenta más tarde"})
+                        await ws.close(code=1013, message=b"Identity storage unavailable")
+                        break
                     self.publish(json.dumps({"type": "error", "message": "No se pudo guardar. Tu texto sigue en el formulario; vuelve a intentar."}), ident)
         finally:
             snapshot_task = client["snapshot_task"]
@@ -1481,6 +1625,11 @@ class Gateway:
                 with contextlib.suppress(asyncio.CancelledError):
                     await snapshot_task
             self.clients.pop(ident, None)
+            owners = self.identity_owners.get(client["key"])
+            if owners is not None:
+                owners.discard(ident)
+                if not owners:
+                    self.identity_owners.pop(client["key"], None)
             self.receiver_dirty.discard(ident)
             if not self.address_clients(address):
                 self.address_limit_stage.pop(address, None)
@@ -1496,10 +1645,13 @@ class Gateway:
                 protocol_timer.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await protocol_timer
-            if not self.stopping:
-                await self.command(f"del {ident}")
-            self.status()
-            self.presence()
+            try:
+                if not self.stopping and client["protocol_ready"]:
+                    await self.command(f"del {ident}")
+                self.status()
+                self.presence()
+            finally:
+                client["retired"].set()
         return ws
 
 @web.middleware
@@ -1521,6 +1673,7 @@ def application(args):
     app[GATEWAY] = gateway
     app.cleanup_ctx.append(gateway.lifecycle)
     app.router.add_get("/ws", gateway.websocket)
+    app.router.add_post("/session", gateway.session_action)
     app.router.add_get("/health", gateway.health)
     async def site_config(request):
         payload = json.dumps(gateway.site_config, ensure_ascii=True, separators=(",", ":"))
@@ -1539,7 +1692,7 @@ def application(args):
     async def asset(request):
         name = request.match_info.get("name", "index.html")
         if name in {"rtty-fldigi-worker.mjs", "rtty-fldigi.mjs", "rtty-fldigi.wasm",
-                    "recorder-core.js", "recorder.js", "recorder-worker.js"}:
+                    "recorder-core.js", "recorder.js", "recorder-worker.js", "identity.js"}:
             return web.FileResponse(ROOT / "web" / name)
         if name not in {"index.html", "style.css", "zoom.css", "site.js", "app.js", "audio-worklet.js", "classic-audio.js", "digital-worker.js", "rtty-core.mjs", "rtty-worklet.js", "mfsk-decoder.js", "mfsk-decoder_bg.wasm", "cw-panel.js", "cw-worker.js", "cw-spectrum.mjs", "cw-detector.mjs", "cw-decoder.js", "cw-decoder_bg.wasm", "cty.dat", "waterfall-codec.js", "smeter-calibration.js", "community.js", "palette.js"}:
             raise web.HTTPNotFound()
@@ -1572,6 +1725,7 @@ if __name__ == "__main__":
     parser.add_argument("--source-port", type=int, help="Receiver port (overrides site config)")
     parser.add_argument("--max-clients", type=int, help="Global connection limit (overrides site config)")
     parser.add_argument("--max-clients-per-ip", type=int, help="Per-IP limit (overrides site config)")
+    parser.add_argument("--max-connections-per-identity", type=int, help="Concurrent streams per browser identity")
     parser.add_argument("--full-quality-sessions-per-ip", type=int,
                         help="Sessions allowed premium profiles per IP")
     parser.add_argument("--max-bandwidth-kbps-per-ip", type=int,
@@ -1612,6 +1766,7 @@ if __name__ == "__main__":
             parser.error("origin must be an exact http(s) origin, or *")
     if (not 1 <= args.source_port <= 65535 or not 1 <= args.port <= 65535 or
             not 1 <= args.max_clients <= 20 or not 1 <= args.max_clients_per_ip <= args.max_clients or
+            not 1 <= args.max_connections_per_identity <= args.max_clients or
             not 1 <= args.full_quality_sessions_per_ip <= args.max_clients_per_ip or
             not 1 <= args.max_bandwidth_kbps_per_ip <= 1000000 or
             not 1 <= args.max_size_mb <= 1048576):

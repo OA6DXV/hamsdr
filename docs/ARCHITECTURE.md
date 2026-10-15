@@ -62,7 +62,7 @@ protocol v2 carries every profile with its frequency window and sequence. A shar
 4096 directly drawable bins without increasing packet size. Audio delivery is separately
 negotiated and defaults off; disabling it purges queued PCM or Opus before the server
 acknowledges the state. The private protocol is versioned. The client must
-negotiate application protocol version 1 and waterfall protocol version 2
+negotiate application protocol version 2 and waterfall protocol version 2
 before sending controls;
 waterfall cadence is negotiated per client from a 15.625 rows/s source. High
 definition can use 11.7 rows/s; normal, slow and very slow use 7.8, 3.9 or 1.3,
@@ -115,16 +115,73 @@ Responsive CSS reflows these same controls into a mobile column.
 
 ## Community persistence
 
-Each WebSocket has an ephemeral public listener ID and a private random
-browser session key (not an authentication credential). Callsigns are
-self-declared; no password, verified identity, or IP address is broadcast.
+Each WebSocket has an ephemeral public listener ID. Application protocol 2
+also requires a server-issued browser credential: `hello` carries `protocol:2`,
+`waterfall:2` and an optional 64-character hex `token`. Omitting the token
+requests issuance; malformed, unknown, expired or revoked tokens are rejected.
+The admitted `hello` returns a 32-character internal `identity` and includes
+`token` only for a new issuance. Tokens never appear in URLs, presence,
+community events or health. They are bearer credentials, not proof of callsign
+ownership. Callsigns are self-declared; no IP address is broadcast.
+
+Admission reserves an identity slot before creating a DSP receiver. The default
+is one socket per identity, configurable with `max_connections_per_identity`.
+Pending sockets count against the existing total/per-IP connection ceilings,
+time out after five seconds, and receive no AV or broadcast status/history.
+Orderly reconnects may wait up to two seconds for the old socket to close;
+duplicates receive `session-error` / `identity-active`, close code 4409, and
+explicit Retry. Other identity failures report a generic code, never a token.
+Duplicate admission now opens a centered modal with a dimmed/blurred backdrop.
+The listener can explicitly close the other session and continue here. The
+authenticated `POST /session` route accepts `action: status|transfer` plus the
+existing token in the JSON body (never the URL), and requires the same Origin
+policy as WebSockets. It never issues credentials or targets a callsign/IP.
+Transfer notifies only the validated identity's sockets with `session-error` /
+`identity-replaced`, closes them with code 4410, and waits for sender/snapshot
+cleanup and DSP deletion before acknowledging. The application notice also
+works through proxies that normalize WebSocket close codes. The old page
+pauses audio/recording and shows a moved-session modal without reconnecting.
+Taking it back always requires another explicit click.
+
+The control route remains available when receiver slots are full, without
+relaxing WebSocket/DSP caps. It shares the connection-attempt limiter, allows
+at most eight concurrent requests, has a five-second timeout, and serializes
+transfers with a one-second per-identity cooldown (4096 retained entries).
+Status only reports whether that authenticated identity is active, so CGNAT
+neighbours and different browser identities cannot disconnect one another.
+HTTP upgrade rejection on a new page (including total/per-IP capacity) also
+offers explicit Retry because browser WebSockets do not expose the HTTP status.
+An established session retains automatic backoff across transient upgrade
+failures after interruption; explicit identity rejection still stops retries.
+Cleanup removes only the departing socket's reservation. The existing 20-second
+server heartbeat detects dead peers; background audio timing is unchanged.
+
+The browser stores the token in localStorage and serializes initial issuance
+with Web Locks, or an IndexedDB transactional lease on insecure/older clients.
+Permission denial or an unusable Web Locks API falls back to IndexedDB too;
+a lock-wait timeout does not bypass coordination.
+Leases expire and release on admission, error, navigation or timeout. Storage
+denial falls back to a page-local token and a persistence warning. Same-origin
+tabs share credentials; different origins/profiles/devices do not. HTTP works
+but exposes bearer credentials to network interception. Identity/issuance
+limits supplement rather than replace existing IP and global controls.
 Presence includes name, frequency, mode and color, updated after a tune,
 rename, connection or disconnection.
 
-History is SQLite schema version 2, PERSIST journal + synchronous FULL. A single executor
+History is SQLite schema version 3, PERSIST journal + synchronous FULL. A single executor
 thread owns the database connection, keeping fsync and queries off the audio
 event loop. Chat/log events are committed before acknowledgement; the unique
-(client_key, request_id) pair deduplicates reconnect retries. Snapshot delivery
+(client_key, request_id) pair deduplicates reconnect retries. New `client_key`
+values are server-assigned internal identity IDs; historical rows remain intact.
+`browser_identities` stores SHA-256 token hashes, independent IDs, timestamps,
+expiry and revocation, never raw tokens. The registry expires after 90 days
+without a successful token lookup, and caps at 10,000 rows (or one row per
+2 KiB of the database budget, whichever is smaller). It shares the SQLite
+size ceiling and rejects issuance if full instead of evicting valid identities.
+Issuance uses a global 30-token bucket refilling at one per second, plus a
+per-IP six-token bucket refilling at one per ten seconds; its IP map caps at
+4096 addresses. Existing token lookups do not consume issuance allowance.
+Database errors fail admission closed. Snapshot delivery
 and inserts share an async lock so a live event cannot race ahead of a stale
 history snapshot. History pages have 200 entries and a before-ID cursor.
 
@@ -134,8 +191,13 @@ queue closes the connection and the browser reloads persisted history. Chat
 allows one new message per second per browser session, plus the global publication
 bucket. Logbook submissions allow two entries per normalized callsign per UTC day.
 SQLite persists these limits across reloads, reconnects and server restarts;
-idempotent retries do not consume additional allowance. Session keys and callsigns
-are self-declared, so these limits are not verified-person authentication.
+idempotent retries do not consume additional allowance. Callsign changes retain
+the same identity/cooldown; old messages keep their original authors. Pending
+messages retain identity and author metadata: only matching, acknowledged
+identity/name pairs are retried. Legacy/mismatching submissions become drafts
+for explicit review. Held drafts retain a persistent `review` marker in
+sessionStorage across reloads, and explicit Send creates a fresh request ID.
+These limits are not verified-person authentication.
 Publishing requires a nonempty callsign of at most 10 ASCII characters,
 containing only letters, digits, or `\ | / @ - _`; it is normalized to
 uppercase. Anonymous listeners can still receive streams and read history.

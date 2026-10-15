@@ -111,7 +111,7 @@ def percentile(values, percent):
 async def listener(url, duration, churn, settle, index, read_delay, origin):
     ws, handshake_ms = await WebSocket.connect(url, origin)
     revision = 100000 + index * 10000
-    await ws.json({"type": "hello", "protocol": 1, "waterfall": 2})
+    await ws.json({"type": "hello", "protocol": 2, "waterfall": 2})
     await ws.json({"type": "waterfall", "preference": "high", "profile": "high"})
     await ws.json({"type": "waterfall-speed", "divisor": "high"})
     await ws.json({"type": "audio-profile", "profile": "raw"})

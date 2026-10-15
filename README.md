@@ -9,6 +9,17 @@ The `unstable` branch is the active experimental development line. The `dev`
 branch tracks reviewed development releases, and `main` is reserved for stable
 releases.
 
+## 0.9.2-dev (local development)
+
+- Add [cookie-free server-issued browser identities](docs/SESSION_IDENTITY_PLAN.md),
+  persisted across reloads and shared by tabs of the same browser and origin.
+- Admit one active connection per identity by default, before allocating DSP;
+  additional tabs show a focused modal with retry or an explicit action to close
+  the previous session and continue in the current tab. The old tab stops audio
+  and recording without automatically taking the session back.
+- Preserve chat cooldowns when changing callsign or reconnecting. Keep legacy
+  pending submissions as drafts rather than replaying them under a new identity.
+
 ## 0.9.1-dev
 
 - Enforce one chat message per second per browser session, including reloads
@@ -358,9 +369,15 @@ network shaper. The connection ceiling remains an independent last-resort
 control.
 
 Each WebSocket starts with an explicit protocol handshake. The current
-application protocol is version 1 and negotiates waterfall protocol version 2
+application protocol is version 2 and negotiates waterfall protocol version 2
 before the server accepts tuning, profile, chat or logbook controls. An
 incompatible or silent client is closed rather than receiving binary streams.
+The server issues an opaque identity token stored in browser localStorage,
+without cookies. `[server].max_connections_per_identity` defaults to 1. Existing
+tokens work across IP changes; different browser profiles/origins have separate
+identities. Clearing browser storage creates a new identity, so the global and
+per-IP resource limits still apply. HTTP supports this flow but does not encrypt
+the credential. See the identity document for limits, migration and testing.
 
 ## Site customization
 

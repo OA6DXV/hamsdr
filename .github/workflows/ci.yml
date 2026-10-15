@@ -32,6 +32,7 @@ jobs:
       - name: Protocol, community persistence, and recovery
         run: |
           .venv/bin/python tests/integration_test.py -v
+          .venv/bin/python tests/identity_tests.py -v
           .venv/bin/python tests/security_resource_tests.py -v
           node tests/community_render_tests.mjs
           .venv/bin/python tests/site_config_tests.py -v

@@ -2,7 +2,7 @@
 'use strict';
 const $ = id => document.getElementById(id);
 const utf8Encoder=new TextEncoder();
-const protocolVersion=1,waterfallProtocolVersion=2;
+const protocolVersion=2,waterfallProtocolVersion=2;
 const sharedParams=new URLSearchParams(location.search);
 const sharedDigitalMode=(()=>{const value=(sharedParams.get('digital')||'').toUpperCase();return ['FT8','FT4'].includes(value)?value:(sharedParams.get('ft8')==='1'?'FT8':null);})();
 const sharedRtty=['RTTY','RTTY-EXPERIMENTAL'].includes((sharedParams.get('digital')||'').toUpperCase());
@@ -942,20 +942,66 @@ function applyWaterfallSnapshot(bytes){
   };
   scheduleWaterfallSnapshotStep(step);
 }
-function connect(){
+let connectionGeneration=0;
+let releaseAdmission=()=>{};
+let sessionWasAdmitted=false;
+function showSessionDialog(kind,description){
+  const duplicate=kind==='duplicate',replaced=kind==='replaced';
+  $('session-dialog-title').textContent=duplicate?'Ya hay una sesión abierta':replaced?'La sesión se trasladó a otra pestaña':'No se pudo conectar al receptor';
+  $('session-dialog-description').textContent=duplicate?'Este navegador ya está escuchando HamSDR en otra pestaña. Puedes cerrar esa sesión y continuar en esta. La otra pestaña dejará de recibir audio y cascada.':replaced?'El receptor continúa en otra pestaña de este navegador. Esta sesión se ha detenido. Puedes volver a usar esta pestaña si lo prefieres.':description;
+  $('session-transfer').hidden=!(duplicate||replaced);
+  $('session-transfer').textContent=replaced?'Volver a usar esta pestaña':'Cerrar la otra sesión y continuar aquí';
+  $('session-dialog-retry').textContent=duplicate||replaced?'Reintentar sin cerrar':'Reintentar';
+  $('session-dialog-status').textContent='';
+  if(!$('session-dialog').open)$('session-dialog').showModal();
+}
+function retrySession(){message('');$('session-dialog').close();void connect();}
+$('session-dialog-retry').onclick=retrySession;
+$('session-transfer').onclick=async()=>{
+  if($('session-transfer').disabled)return;
+  $('session-transfer').disabled=true;$('session-dialog-retry').disabled=true;
+  $('session-dialog-status').textContent='Cerrando la otra sesión…';
+  try{await window.radioIdentity.session('transfer');retrySession();}
+  catch(error){$('session-dialog-status').textContent=error.message;}
+  finally{$('session-transfer').disabled=false;$('session-dialog-retry').disabled=false;}
+};
+async function connect(){
   clearTimeout(timer);
+  const generation=++connectionGeneration;
+  $('session-retry').hidden=true;
+  let admission;
+  try{admission=await window.radioIdentity.prepare();}
+  catch{if(generation===connectionGeneration){$('connection').textContent='No se pudo preparar la identidad del navegador.';$('session-retry').hidden=false;}return;}
+  if(generation!==connectionGeneration){admission.release();return;}
+  releaseAdmission=admission.release;
   const address=new URL('./ws',location.href);address.protocol=location.protocol==='https:'?'wss:':'ws:';
+  if(socket&&socket.readyState<WebSocket.CLOSING)socket.close();
   socket=new WebSocket(address);
+  const current=socket;
+  let admissionError=null;
+  let sessionDialogKind='unavailable';
   socket.binaryType='arraybuffer';
-  socket.onopen=()=>{retry=500;socketOpenedAt=performance.now();lastWaterfallSequence=null;lastWaterfallAt=0;protocolReady=false;socket.send(JSON.stringify({type:'hello',protocol:protocolVersion,waterfall:waterfallProtocolVersion}));};
+  socket.onopen=()=>{socketOpenedAt=performance.now();lastWaterfallSequence=null;lastWaterfallAt=0;protocolReady=false;current.send(JSON.stringify({type:'hello',protocol:protocolVersion,waterfall:waterfallProtocolVersion,...(admission.token?{token:admission.token}:{})}));};
   socket.onmessage=({data})=>{
+    if(current!==socket)return;
     trafficBytes+=typeof data==='string'?utf8Encoder.encode(data).byteLength:data.byteLength;
     if(typeof data==='string'){
       const msg=JSON.parse(data);
       window.dispatchEvent(new CustomEvent('radio-event',{detail:msg}));
       if(msg.type==='hello'){
         if(msg.protocol!==protocolVersion||msg.waterfall!==waterfallProtocolVersion){message('El servidor usa un protocolo incompatible.');socket.close(1002,'Incompatible protocol');return;}
+        try{const persistent=window.radioIdentity.accept(msg);$('identity-storage').hidden=persistent;}
+        catch(error){admissionError=error.message;current.close(1002,'Invalid identity acknowledgement');return;}
+        admission.release();retry=500;sessionWasAdmitted=true;
+        $('session-dialog').close();
         protocolReady=true;if(bandConfigured){tune();sendWaterfallView(false);}sendWaterfallPreference();sendWaterfallSpeed();sendDigitalMode();sendAudioProfile();window.radioSend({type:'audio',enabled:audioEnabled});window.dispatchEvent(new Event('radio-open'));
+      }else if(msg.type==='session-error'){
+        admissionError=msg.message;
+        if(msg.code==='identity-active')sessionDialogKind='duplicate';
+        if(msg.code==='identity-replaced'){sessionDialogKind='replaced';void pauseAudio();}
+        if(msg.code==='identity-invalid')window.radioIdentity.forget();
+        message(admissionError);
+        $('connection').textContent=admissionError;
       }else if(msg.type==='status'){
         center=msg.center;rate=msg.sample_rate;$('listeners').textContent=msg.users;
         digimodesAvailable=msg.digimodes!==false&&!!siteConfig.digimodes;setDigitalControlsVisible(digimodesAvailable);
@@ -1026,9 +1072,35 @@ function connect(){
     if(kind===12)handleDigitalPacket(bytes.subarray(1));
     if(kind===3)updateMeter(Number(new TextDecoder().decode(bytes.subarray(1))));
   };
-  socket.onclose=()=>{if(socketOpenedAt&&performance.now()-socketOpenedAt>3000)reportStreamInterruption('websocket');socketOpenedAt=0;protocolReady=false;lastWaterfallSequence=null;lastWaterfallAt=0;resetAudio();cwPanel.stop();occupants=[];drawUsers();window.dispatchEvent(new Event('radio-close'));$('connection').textContent='Conexión interrumpida · reintentando…';timer=setTimeout(connect,retry);retry=Math.min(retry*2,10000);};
-  socket.onerror=()=>socket.close();
+  socket.onclose=event=>{
+    admission.release();if(current!==socket)return;
+    if(event.code===4410){
+      sessionDialogKind='replaced';admissionError='La sesión se trasladó a otra pestaña.';
+      void pauseAudio();
+    }
+    if(socketOpenedAt&&performance.now()-socketOpenedAt>3000&&!admissionError)reportStreamInterruption('websocket');
+    socketOpenedAt=0;protocolReady=false;lastWaterfallSequence=null;lastWaterfallAt=0;resetAudio();cwPanel.stop();occupants=[];drawUsers();window.dispatchEvent(new Event('radio-close'));
+    // Browsers hide HTTP handshake status codes (including capacity 429/503).
+    // A new page needs explicit retry. An established session retains backoff
+    // through transient upgrade failures while the server/network recovers.
+    if(!sessionWasAdmitted&&!admissionError)admissionError='No se pudo iniciar la sesión. El receptor puede estar completo o no disponible. Pulsa Reintentar.';
+    if(admissionError){
+      message(admissionError);$('connection').textContent=admissionError;$('session-retry').hidden=false;
+      showSessionDialog(sessionDialogKind,admissionError);
+      // A capacity rejection happens before the WebSocket can identify us.
+      // Check privately through HTTP; never infer identity from a shared IP.
+      if(sessionDialogKind==='unavailable'&&admission.token){
+        void window.radioIdentity.session('status').then(result=>{
+          if(result.active&&generation===connectionGeneration&&!protocolReady&&$('session-dialog').open)showSessionDialog('duplicate');
+        }).catch(()=>{});
+      }
+      return;
+    }
+    $('connection').textContent='Conexión interrumpida · reintentando…';timer=setTimeout(connect,retry);retry=Math.min(retry*2,10000);
+  };
+  socket.onerror=()=>current.close();
 }
+$('session-retry').onclick=retrySession;
 window.radioSend=data=>{if(socket?.readyState!==WebSocket.OPEN)return false;socket.send(JSON.stringify(data));return true;};
 function updateMeter(power){
   if(!Number.isFinite(power))return;
@@ -1235,7 +1307,7 @@ $('save').addEventListener('click',()=>{if(memories.length>=30){message('Máximo
 function recall(){const m=memories[Number($('memories').value)];if($('memories').value===''||!m||!defaults[m.mode])return;({frequency,mode,low,high}=m);narrow=!!m.narrow;$('memory-name').value=m.name;tune();}
 $('memories').addEventListener('change',recall);$('recall').onclick=recall;
 $('delete').addEventListener('click',()=>{if($('memories').value==='')return;memories.splice(Number($('memories').value),1);storeMemories();});
-window.addEventListener('pagehide',()=>{cwPanel.stop();stopRttyExperimentalWorker();stopRecording();clearTimeout(timer);clearInterval(smeterCalibrationTimer);socket.onclose=null;socket.close();});
+window.addEventListener('pagehide',()=>{++connectionGeneration;releaseAdmission();cwPanel.stop();stopRttyExperimentalWorker();stopRecording();clearTimeout(timer);clearInterval(smeterCalibrationTimer);if(socket){socket.onclose=null;socket.close();}});
 window.addEventListener('pageshow',e=>{if(e.persisted){connect();void recorder?.refresh();}});
 document.addEventListener('visibilitychange',()=>{if(document.hidden)recorder?.checkpoint();});
 new ResizeObserver(()=>{const available=Math.max(1,Math.round($('panorama').getBoundingClientRect().width));if(canvas.width!==available){canvas.width=available;redrawHistory();}scale.width=available;drawScale();clearTimeout(profileTimer);profileTimer=setTimeout(()=>{if(waterfallPreference==='auto')sendWaterfallPreference();},500);}).observe($('panorama'));

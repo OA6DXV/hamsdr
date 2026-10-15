@@ -9,6 +9,8 @@ port = 18093
 trusted_proxy = ""
 max_clients = 10
 max_clients_per_ip = 3
+# Tabs sharing the server-issued browser identity share this stream allowance.
+max_connections_per_identity = 1
 full_quality_sessions_per_ip = 2
 max_bandwidth_kbps_per_ip = 1000
 digimodes = false

@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """Recording containers, storage, recovery and profile isolation on a local demo."""
 import asyncio
+import itertools
 import json
 import os
 from pathlib import Path
@@ -15,6 +16,15 @@ from playwright.async_api import async_playwright, expect
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / "test-results" / "recording"
 URL = "http://127.0.0.1:18104/"
+CLIENTS = itertools.count(1)
+
+
+async def recording_context(browser, **options):
+    # Independent test profiles represent separate clients. Give each a
+    # documentation-only address so the fast suite does not become an IP
+    # issuance/reconnect-flood test; tabs within that profile still share it.
+    return await browser.new_context(extra_http_headers={
+        "X-HamSDR-Client-IP": f"192.0.2.{next(CLIENTS)}"}, **options)
 
 
 def ogg_packets(data):
@@ -49,9 +59,12 @@ async def download(page, button, name):
     return path
 
 
-async def load(page):
+async def load(page, require_radio=True):
     await page.goto(URL + "?freq=7100&mode=USB")
-    await page.wait_for_function("()=>protocolReady&&recorder")
+    if require_radio:
+        await page.wait_for_function("()=>protocolReady&&recorder")
+    else:
+        await page.wait_for_function("()=>recorder")
     await page.evaluate("()=>recorder.ready")
 
 
@@ -73,7 +86,7 @@ async def stop_recording(page):
 
 
 async def profile_cases(browser, name):
-    context = await browser.new_context(viewport={"width": 390, "height": 844})
+    context = await recording_context(browser, viewport={"width": 390, "height": 844})
     page = await context.new_page()
     errors = []
     page.on("pageerror", lambda error: errors.append(str(error)))
@@ -134,7 +147,7 @@ async def profile_cases(browser, name):
 
 
 async def recovery_case(browser, name, fallback=None, profile="raw"):
-    context = await browser.new_context()
+    context = await recording_context(browser)
     if fallback:
         source = (ROOT / "web" / "recorder-worker.js").read_text()
         shim = "Object.defineProperty(navigator.storage,'getDirectory',{value:undefined});\nObject.defineProperty(crypto,'randomUUID',{value:undefined});\n"
@@ -159,7 +172,10 @@ async def recovery_case(browser, name, fallback=None, profile="raw"):
         return
     meta = await page.evaluate("()=>recorder.request('checkpoint')")
     other = await context.new_page()
-    await load(other)
+    # Recovery is browser-local and must work without another admitted stream.
+    await load(other, require_radio=False)
+    await expect(other.locator('#session-retry')).to_be_visible()
+    assert not await other.evaluate('protocolReady')
     assert meta["id"] not in await other.evaluate("recorder.records.map(record=>record.id)")
     # Simulate process loss: no stop/finalization or pagehide flush.
     meta = await page.evaluate("""async()=>{
@@ -184,7 +200,7 @@ async def recovery_case(browser, name, fallback=None, profile="raw"):
 
 
 async def quota_case(browser):
-    context = await browser.new_context()
+    context = await recording_context(browser)
     source = (ROOT / "web" / "recorder-worker.js").read_text()
     shim = """
 const originalWrite=FileSystemSyncAccessHandle.prototype.write;
@@ -216,7 +232,7 @@ self.addEventListener('message',event=>{if(event.data.triggerQuota)self.testQuot
 
 
 async def forced_profile_case(browser, name):
-    context = await browser.new_context()
+    context = await recording_context(browser)
     page = await context.new_page()
     await load(page)
     await page.locator("#audio-quality").select_option("balanced")
@@ -244,7 +260,7 @@ async def main():
     with tempfile.TemporaryDirectory(prefix="recorder-", dir=ROOT / "var") as directory:
         directory = Path(directory)
         config = directory / "site.toml"
-        config.write_text('[server]\ndigimodes = true\n[secure]\nmode = "insecure"\n')
+        config.write_text('[server]\ndigimodes = true\ntrusted_proxy = "127.0.0.1"\n[secure]\nmode = "insecure"\n')
         with (OUTPUT / "server.log").open("w") as log:
             server = subprocess.Popen([
                 str(ROOT / ".venv/bin/python"), str(ROOT / "server.py"), "--demo",
@@ -255,7 +271,7 @@ async def main():
                 for _ in range(100):
                     try:
                         with urllib.request.urlopen(URL + "health", timeout=.2) as response:
-                            assert json.load(response)["version"] == "0.9.1-dev"
+                            assert json.load(response)["version"] == "0.9.2-dev"
                         break
                     except OSError:
                         if server.poll() is not None:

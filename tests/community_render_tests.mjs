@@ -34,14 +34,17 @@ const storage=()=>{const values=new Map();return{getItem:key=>values.get(key)??n
 const context={
   document:{getElementById,createElement:tag=>new Element(tag),createDocumentFragment:()=>new Element('fragment'),
     createTextNode:text=>Object.assign(new Element('text'),{textContent:text})},
-  window:{addEventListener:(name,handler)=>handlers.set(name,handler),radioSend:message=>sent.push(message)},
+  window:{addEventListener:(name,handler)=>handlers.set(name,handler),radioSend:message=>sent.push(message),radioIdentity:{id:'f'.repeat(32)}},
   crypto:{randomUUID:()=> '01234567-89ab-cdef-0123-456789abcdef'},
   sessionStorage:storage(),localStorage:storage(),
   setTimeout:(handler,delay)=>{const id=++nextTimer;timers.set(id,{handler,delay});return id;},
   clearTimeout:id=>timers.delete(id),
 };
 vm.runInNewContext(readFileSync(new URL('../web/community.js',import.meta.url),'utf8'),context);
-const dispatch=(type,data)=>handlers.get('radio-event')({detail:{type,...data}});
+const dispatch=(type,data)=>{
+  if(type==='identified')getElementById('username').value=data.name;
+  handlers.get('radio-event')({detail:{type,...data}});
+};
 dispatch('identified',{name:''});
 assert.equal(getElementById('send-chat').disabled,true,'anonymous chat posting stays disabled');
 assert.equal(getElementById('send-log').disabled,true,'anonymous logbook posting stays disabled');
@@ -58,6 +61,8 @@ assert.equal(Object.hasOwn(sent.at(-1),'call'),false,'logbook uses the server-co
 getElementById('username').value='aa9900jhfr';
 getElementById('username').handlers.get('input')();
 assert.equal(getElementById('send-chat').disabled,true,'editing identity waits for server confirmation');
+handlers.get('radio-event')({detail:{type:'identified',name:'OA6DXV'}});
+assert.equal(getElementById('send-chat').disabled,true,'stale callsign acknowledgement cannot enable posting');
 getElementById('username').handlers.get('input')();
 const identificationTimers=[...timers.values()].filter(timer=>timer.delay===600);
 assert.equal(identificationTimers.length,1,'typing coalesces identification updates');
@@ -94,4 +99,39 @@ dispatch('ack',{event:event(1),request_id:'old-request'});
 dispatch('ack',{event:event(1),request_id:'old-request'});
 assert.equal(chat.children.length,10000,'an evicted acknowledgement must not add stale DOM rows');
 assert.equal(chat.firstElementChild.dataset.id,2,'the oldest retained event must remain first');
+// Old pending records remain drafts; only matching identity/author pairs retry.
+for(const scenario of ['legacy','different-identity','different-name','matching']){
+  elements.clear();handlers.clear();sent.length=0;timers.clear();
+  const saved=storage();
+  const draft={type:'chat',text:'Review this draft',request_id:'a'.repeat(32)};
+  if(scenario!=='legacy')Object.assign(draft,{
+    identity:scenario==='different-identity'?'b'.repeat(32):'f'.repeat(32),
+    name:scenario==='different-name'?'N0CALL':'OA6DXV',
+  });
+  saved.setItem('hamsdr-pending',JSON.stringify({chat:draft}));
+  vm.runInNewContext(readFileSync(new URL('../web/community.js',import.meta.url),'utf8'),{...context,sessionStorage:saved});
+  dispatch('identified',{name:'OA6DXV'});
+  assert.equal(getElementById('chat-text').value,draft.text);
+  assert.equal(sent.filter(message=>message.type==='chat').length,scenario==='matching'?1:0,scenario);
+  if(scenario==='matching'){
+    assert.deepEqual(Object.keys(sent[0]).sort(),['request_id','text','type'],'wire retries expose neither token nor identity metadata');
+    getElementById('username').value='OTHER';
+    getElementById('username').handlers.get('input')();
+    dispatch('identified',{name:'OTHER'});
+    assert.equal(sent.filter(message=>message.type==='chat').length,1,'rename cannot replay an older pending author');
+    assert.equal(JSON.parse(saved.getItem('hamsdr-pending')).chat.review,true,'renamed pending author becomes a durable held draft');
+    for(const timer of timers.values())if(timer.delay===10000)timer.handler();
+    assert.ok(getElementById('chat-status').textContent.startsWith('Borrador recuperado'),'an old retry timeout cannot overwrite the review notice');
+  }else{
+    assert.equal(JSON.parse(saved.getItem('hamsdr-pending')).chat.review,true,'held draft stays persisted');
+    elements.clear();handlers.clear();sent.length=0;timers.clear();
+    vm.runInNewContext(readFileSync(new URL('../web/community.js',import.meta.url),'utf8'),{...context,sessionStorage:saved});
+    dispatch('identified',{name:'OA6DXV'});
+    assert.equal(getElementById('chat-text').value,draft.text,'held draft survives a page reload');
+    assert.equal(sent.length,0,'reloading cannot silently resend a held draft');
+    getElementById('chatform').handlers.get('submit')({preventDefault(){}});
+    assert.equal(sent.at(-1).type,'chat','explicit Send releases the reviewed draft');
+    assert.notEqual(sent.at(-1).request_id,draft.request_id,'review creates a new submission ID');
+  }
+}
 console.log('community incremental rendering: ok');

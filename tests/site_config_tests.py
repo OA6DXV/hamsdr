@@ -74,7 +74,7 @@ class SiteConfigTests(unittest.TestCase):
         self.assertEqual(generic["receiver_name"], "HamSDR")
         self.assertEqual(generic["callsign"], "N0CALL")
         self.assertTrue(generic["show_admin"])
-        self.assertEqual(generic["version"], "0.9.1-dev")
+        self.assertEqual(generic["version"], "0.9.2-dev")
         self.assertFalse(generic["digimodes"])
         self.assertIsNone(logo)
         self.assertEqual(station["mobile_page"], "/")
@@ -97,6 +97,7 @@ class SiteConfigTests(unittest.TestCase):
                              (8.0, "manual", 80))
             self.assertEqual(runtime["database"], Path(directory) / "community.sqlite3")
             self.assertEqual(runtime["max_size_mb"], 50)
+            self.assertEqual(runtime["max_connections_per_identity"], 1)
             self.assertEqual(runtime["full_quality_sessions_per_ip"], 2)
             self.assertEqual(runtime["max_bandwidth_kbps_per_ip"], 1000)
             self.assertTrue(runtime["digimodes"])
@@ -109,6 +110,10 @@ class SiteConfigTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "site.toml"
             text = installation(directory).replace('bind="127.0.0.1"', 'bind="0.0.0.0"').replace('port=18093', 'port=18099')
+            for value in ('0', 'true', '21'):
+                path.write_text(text.replace('[server]', '[server]\nmax_connections_per_identity=' + value))
+                with self.assertRaisesRegex(ValueError, "connections per identity"):
+                    load_runtime_config(path)
             path.write_text(text)
             self.assertEqual(load_listen_config(path), ("0.0.0.0", 18099))
             path.write_text(text.replace('trusted_proxy=""', 'trusted_proxy="192.0.2.10"'))

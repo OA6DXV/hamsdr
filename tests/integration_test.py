@@ -29,6 +29,7 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
         await self.start_server()
         self.session=ClientSession()
         self.sockets=[]
+        self.credentials={}
 
     async def start_server(self):
         self.app=application(self.args)
@@ -45,12 +46,13 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
         await self.runner.cleanup()
         self.temp.cleanup()
 
-    async def connect(self):
+    async def connect(self, token=None):
         ws=await self.session.ws_connect(self.url+'/ws',origin=self.url)
         self.sockets.append(ws)
-        await ws.send_json({'type':'hello','protocol':1,'waterfall':2})
+        await ws.send_json({'type':'hello','protocol':2,'waterfall':2,**({'token':token} if token else {})})
         reply=await self.event(ws,'hello')
-        self.assertEqual((reply['protocol'],reply['waterfall']),(1,2))
+        self.assertEqual((reply['protocol'],reply['waterfall']),(2,2))
+        self.credentials[ws]=reply.get('token',token)
         return ws
 
     async def event(self, ws, kind, predicate=lambda x: True):
@@ -63,8 +65,8 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
                         return data
 
     async def identify(self, ws, name, key=None):
-        key = key or uuid.uuid4().hex
-        await ws.send_json({'type':'identify','name':name,'key':key})
+        key = self.credentials[ws]
+        await ws.send_json({'type':'identify','name':name})
         result=await self.event(ws,'identified')
         return key,result['id']
 
@@ -94,7 +96,7 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(gone['users']),1)
         # Restart only this isolated server and reopen the same on-disk DB.
         await bob.close();await self.runner.cleanup();await self.start_server()
-        restored=await self.connect()
+        restored=await self.connect(key)
         history=await self.event(restored,'history',lambda x:x['kind']=='chat')
         self.assertEqual([e['id'] for e in history['events']],[ack['event']['id']])
         log=await self.event(restored,'history',lambda x:x['kind']=='log')
@@ -135,7 +137,7 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('Espera',error['message'])
         # A fresh WebSocket retaining the browser session cannot reset cooldown.
         await ws.close()
-        ws=await self.connect()
+        ws=await self.connect(key)
         await self.identify(ws,'Prueba',key)
         await ws.send_json({'type':'chat','request_id':uuid.uuid4().hex,'text':'reload flood'})
         error=await self.event(ws,'error')
@@ -163,10 +165,10 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
         for kind in ('chat','log'):
             await ws.send_json({'type':kind,'request_id':uuid.uuid4().hex,'text':'Anonymous','call':'oa6dxv'})
             self.assertIn('Configura',(await self.event(ws,'error'))['message'])
-        await ws.send_json({'type':'identify','name':'A'*11,'key':key})
+        await ws.send_json({'type':'identify','name':'A'*11})
         self.assertIn('10 caracteres',(await self.event(ws,'error'))['message'])
         for name in ('A B', '<script>', 'OA6DXV!', 'ОA6DXV', 'ß'):
-            await ws.send_json({'type':'identify','name':name,'key':key})
+            await ws.send_json({'type':'identify','name':name})
             self.assertIn('Indicativo inválido',(await self.event(ws,'error'))['message'])
         await self.identify(ws,'a1\\|/@-_',key)
         await ws.send_json({'type':'log','request_id':uuid.uuid4().hex,'text':'Allowed symbols','call':'SPOOFED'})
@@ -634,7 +636,7 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
         two=await self.session.ws_connect(self.url+'/ws',origin=self.url,headers={'X-HamSDR-Client-IP':'192.0.2.2'})
         self.sockets.extend((one,two))
         for ws in (one,two):
-            await ws.send_json({'type':'hello','protocol':1,'waterfall':2})
+            await ws.send_json({'type':'hello','protocol':2,'waterfall':2})
             await self.event(ws,'hello')
 
     async def test_protocol_negotiation_rejects_incompatible_clients(self):

@@ -1,6 +1,9 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """Durable community history. Database work runs off the audio event loop."""
 import asyncio
+import hashlib
+import re
+import secrets
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import sqlite3
@@ -9,6 +12,15 @@ import unicodedata
 
 
 CALLSIGN_SYMBOLS = frozenset("\\|/@-_")
+IDENTITY_TTL = 90 * 86400
+
+
+class IdentityError(ValueError):
+    """An admission failure safe to report without exposing credentials."""
+
+    def __init__(self, code, message):
+        super().__init__(message)
+        self.code = code
 
 
 def normalize_callsign(value, allow_empty=False):
@@ -62,7 +74,7 @@ class History:
         self.db.execute("PRAGMA journal_mode=PERSIST")
         self.db.execute("PRAGMA synchronous=FULL")
         version = self.db.execute("PRAGMA user_version").fetchone()[0]
-        if version > 2:
+        if version > 3:
             raise RuntimeError("Unsupported history schema")
         self.db.executescript("""
             CREATE TABLE IF NOT EXISTS events (
@@ -93,6 +105,16 @@ class History:
                         ON CONFLICT(scope,identity,period) DO UPDATE SET count=count+1""",
                         (self.callsign_key(row['call']), day, row['time']))
                 self.db.execute("PRAGMA user_version=2")
+        # Keep the migration transactional and preserve historical authors/keys.
+        with self.db:
+            self.db.execute("BEGIN IMMEDIATE")
+            self.db.execute("""CREATE TABLE IF NOT EXISTS browser_identities (
+                id TEXT PRIMARY KEY, token_hash TEXT NOT NULL UNIQUE,
+                created REAL NOT NULL, last_seen REAL NOT NULL,
+                expires REAL NOT NULL, revoked INTEGER NOT NULL DEFAULT 0
+            )""")
+            self.db.execute("CREATE INDEX IF NOT EXISTS browser_identity_expiry ON browser_identities(expires)")
+            self.db.execute("PRAGMA user_version=3")
         page_size = self.db.execute("PRAGMA page_size").fetchone()[0]
         self.max_pages = self.max_size_bytes // page_size
         if self.max_pages < 16:
@@ -130,6 +152,36 @@ class History:
                 ).rowcount
             if not deleted:
                 return
+
+    def _identity(self, token):
+        """Resolve/issue a credential on the SQLite worker, never on the AV loop."""
+        now = time.time()
+        if token is not None:
+            if not isinstance(token, str) or not re.fullmatch(r"[a-f0-9]{64}", token):
+                raise IdentityError("identity-invalid", "Identificador inválido; vuelve a conectar")
+            digest = hashlib.sha256(token.encode("ascii")).hexdigest()
+            with self.db:
+                row = self.db.execute("SELECT * FROM browser_identities WHERE token_hash=?", (digest,)).fetchone()
+                if row is None or row['revoked'] or row['expires'] <= now:
+                    raise IdentityError("identity-invalid", "El identificador venció o fue revocado; vuelve a conectar")
+                self.db.execute("UPDATE browser_identities SET last_seen=?,expires=? WHERE id=?",
+                                (now, now + IDENTITY_TTL, row['id']))
+            return row['id'], None
+        # Expiry cleanup is bounded by the registry's independent row ceiling.
+        # Never evict valid identities to make room for an issuance flood.
+        with self.db:
+            self.db.execute("DELETE FROM browser_identities WHERE expires<=?", (now,))
+            capacity = min(10000, max(1, self.max_size_bytes // 2048))
+            if self.db.execute("SELECT COUNT(*) FROM browser_identities").fetchone()[0] >= capacity:
+                raise IdentityError("identity-capacity", "Registro de identidades completo; intenta más tarde")
+            token = secrets.token_hex(32)
+            identity = secrets.token_hex(16)
+            self.db.execute("INSERT INTO browser_identities VALUES (?,?,?,?,?,0)",
+                            (identity, hashlib.sha256(token.encode("ascii")).hexdigest(), now, now, now + IDENTITY_TTL))
+        return identity, token
+
+    async def identity(self, token=None):
+        return await self.call(self._identity, token)
 
     @staticmethod
     def public(row):
