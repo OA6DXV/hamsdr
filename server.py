@@ -25,7 +25,7 @@ from opus_codec import OPUS_AVAILABLE, OpusEncoder
 from waterfall_codec import VERSION as WATERFALL_PROTOCOL_VERSION, encode as encode_waterfall
 
 ROOT = Path(__file__).resolve().parent
-VERSION = "0.9.2-dev"
+VERSION = "0.9.3-dev"
 PROTOCOL_VERSION = 2
 MODES = {"USB": (300, 2700), "LSB": (-2700, -300), "AM": (-4000, 4000),
          "CW": (450, 950), "NFM": (-5000, 5000)}
@@ -1072,7 +1072,7 @@ class Gateway:
     def presence(self):
         colors = ["#ff4040", "#ffa000", "#c0c000", "#80ff00", "#00ff00", "#00bbbb", "#559fff", "#ff40ff"]
         self.publish(json.dumps({"type": "presence", "users": [
-            {"id": ident, "name": c["name"] or "Anónimo", "frequency": c["settings"]["frequency"],
+            {"id": ident, "name": c["name"] or "Anónimo", "anonymous": not bool(c["name"]), "frequency": c["settings"]["frequency"],
              "mode": c["settings"]["mode"], "color": colors[(ident-1) % len(colors)]}
             for ident, c in self.clients.items() if c["protocol_ready"]]}))
 
@@ -1692,7 +1692,8 @@ def application(args):
     async def asset(request):
         name = request.match_info.get("name", "index.html")
         if name in {"rtty-fldigi-worker.mjs", "rtty-fldigi.mjs", "rtty-fldigi.wasm",
-                    "recorder-core.js", "recorder.js", "recorder-worker.js", "identity.js"}:
+                    "recorder-core.js", "recorder.js", "recorder-worker.js", "identity.js",
+                    "i18n.js", "translations.js", "countries-i18n.js"}:
             return web.FileResponse(ROOT / "web" / name)
         if name not in {"index.html", "style.css", "zoom.css", "site.js", "app.js", "audio-worklet.js", "classic-audio.js", "digital-worker.js", "rtty-core.mjs", "rtty-worklet.js", "mfsk-decoder.js", "mfsk-decoder_bg.wasm", "cw-panel.js", "cw-worker.js", "cw-spectrum.mjs", "cw-detector.mjs", "cw-decoder.js", "cw-decoder_bg.wasm", "cty.dat", "waterfall-codec.js", "smeter-calibration.js", "community.js", "palette.js"}:
             raise web.HTTPNotFound()

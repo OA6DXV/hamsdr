@@ -21,7 +21,7 @@ let zoom=1, viewCenter=center, socket, retry=500, timer, tuneTimer, lastRow, vie
 let dynamicSpectrumBottom=null,dynamicSpectrumTop=null;
 let context, node, gain, audioStarting=false, audioEnabled=false, audioEverStarted=false, audioProfile='balanced', opusDecoder=null, opusSupportPromise=null, lastOpusSequence=null, spectrumFrames=0, audioPackets=0;
 let digimodesAvailable=!!siteConfig.digimodes,digitalMode=null,digitalWorker=null,digitalRows=[],digitalDownloadUrl=null,digitalDecoderNotice=false,digitalAudioCompatible=true,digitalPreviousAudioProfile=null,digitalPreviousWaterfallPreference=null,digitalWaterfallManuallyChanged=false,digitalProfilePending=false,digitalLogSized=false,digitalRenderScheduled=false;
-let digitalSort=null;
+let digitalSort=null,digitalCountries=[];
 let rttyActive=false,rttyNode=null,rttySink=null,rttyModuleLoaded=false,rttyText='';
 let rttyDecoderType='classic',rttyExperimentalWorker=null,rttyExperimentalReady=false,rttyExperimentalPending=0,rttySavedMulti=false,rttySavedMultiProfiles=false;
 let rttyNoiseFloor=null,rttyColorCeiling=null,rttySpectrumFrames=0;
@@ -353,9 +353,12 @@ function updateDigitalCountry(update){
   scheduleDigitalRowsRender();
 }
 function setDigitalCountryList(countries){
+  digitalCountries=countries||[];
   const select=$('digital-country'),selected=select.value;
   select.replaceChildren(new Option('Todos los países',''));
-  for(const country of countries||[])select.add(new Option(country,country));
+  const localized=digitalCountries.map(country=>({value:country,label:window.HamI18n.country(country)}));
+  localized.sort((a,b)=>a.label.localeCompare(b.label,window.HamI18n.language));
+  for(const country of localized){const option=new Option(country.label,country.value);option.dataset.i18nIgnore='';select.add(option);}
   select.value=selected;
 }
 function digitalCountryParts(row){
@@ -395,7 +398,7 @@ function digitalSortedRows(){
     const missingA=key==='countries'?!a:!Number.isFinite(a),missingB=key==='countries'?!b:!Number.isFinite(b);
     if(missingA!==missingB)return missingA?1:-1;
     if(!missingA){
-      const order=key==='countries'?a.localeCompare(b,'en',{sensitivity:'base'}):a-b;
+      const order=key==='countries'?window.HamI18n.country(a).localeCompare(window.HamI18n.country(b),window.HamI18n.language,{sensitivity:'base'}):a-b;
       if(order)return direction==='asc'?order:-order;
     }
     return right.index-left.index;
@@ -420,7 +423,8 @@ function renderDigitalRows(){
     if(batchBoundary)tr.classList.add('digital-batch-boundary');
     if(selectedCountry&&Object.values(digitalCountryParts(row)).includes(selectedCountry))tr.classList.add('digital-country-match');
     for(const key of ['utc','snr','dt','hz','text','countries']){
-      const cell=document.createElement('td');cell.textContent=String(row[key]??'');tr.append(cell);
+      const cell=document.createElement('td'),value=String(row[key]??'');
+      cell.textContent=key==='countries'?value.split(' → ').map(part=>window.HamI18n.t(window.HamI18n.country(part))).join(' → '):row.placeholder?window.HamI18n.t(value):value;tr.append(cell);
     }
     tr.append(document.createElement('td'));
     body.append(tr);
@@ -864,7 +868,7 @@ function drawUsers(){
     const fraction=(user.frequency-lower())/width();
     if(fraction<0||fraction>1)continue;
     const row=document.createElement('div');row.className='user';row.dataset.frequency=user.frequency;row.dataset.id=user.id;
-    const b=document.createElement('button');b.textContent=user.name;b.title=`${user.name}: ${(user.frequency/1000).toFixed(2)} kHz ${user.mode}`;
+    const b=document.createElement('button'),name=user.anonymous?window.HamI18n.t('Anónimo'):user.name;b.textContent=name;b.title=`${name}: ${(user.frequency/1000).toFixed(2)} kHz ${user.mode}`;
     b.style.left=`${Math.max(.02,Math.min(.98,fraction))*100}%`;b.style.color=user.color;
     b.onclick=()=>{frequency=user.frequency;tune();};row.append(b);$('users').append(row);
   }
@@ -1303,7 +1307,7 @@ function renderMemories(){
   drawMarkers();
 }
 function storeMemories(){try{localStorage.setItem('hamsdr-memories',JSON.stringify(memories));}catch{message('No se pudieron guardar las memorias en este navegador.');}renderMemories();}
-$('save').addEventListener('click',()=>{if(memories.length>=30){message('Máximo 30 memorias.');return;}memories.push({name:$('memory-name').value.trim()||'Memoria',frequency,mode,low,high,narrow});storeMemories();});
+$('save').addEventListener('click',()=>{if(memories.length>=30){message('Máximo 30 memorias.');return;}memories.push({name:$('memory-name').value.trim()||window.HamI18n.t('Memoria'),frequency,mode,low,high,narrow});storeMemories();});
 function recall(){const m=memories[Number($('memories').value)];if($('memories').value===''||!m||!defaults[m.mode])return;({frequency,mode,low,high}=m);narrow=!!m.narrow;$('memory-name').value=m.name;tune();}
 $('memories').addEventListener('change',recall);$('recall').onclick=recall;
 $('delete').addEventListener('click',()=>{if($('memories').value==='')return;memories.splice(Number($('memories').value),1);storeMemories();});
@@ -1342,7 +1346,7 @@ function renderRecorder(state){
   const available=state.recoveries,select=$('record-recovery-list'),previous=select.value,signature=available.map(record=>record.id+':'+record.bytes).join(',');
   if(signature!==recoveryListSignature){
     recoveryListSignature=signature;
-    select.replaceChildren(...available.map(record=>new Option(new Date(record.started).toLocaleString()+' · '+record.format.toUpperCase()+' · '+HamRecorderCore.counter(record.samples,record.rate,record.bytes),record.id)));
+    select.replaceChildren(...available.map(record=>new Option(new Date(record.started).toLocaleString(window.HamI18n.language)+' · '+record.format.toUpperCase()+' · '+HamRecorderCore.counter(record.samples,record.rate,record.bytes),record.id)));
     if(available.some(record=>record.id===previous))select.value=previous;
   }
   $('record-recovery').hidden=!available.length;
@@ -1367,6 +1371,11 @@ async function saveRecording(id){
   }catch(error){message(`No se pudo guardar la grabación: ${error.message}`);}
 }
 recorder=new RadioRecorder(renderRecorder);
+window.addEventListener('languagechange',()=>{
+  setDigitalCountryList(digitalCountries);renderDigitalRows();drawUsers();
+  // Rebuild only recording labels, preserving the active recorder and payload.
+  recoveryListSignature='';recorder.state();
+});
 $('download').onclick=()=>saveRecording(recorder.metadata?.id);
 $('record-recover').onclick=()=>saveRecording($('record-recovery-list').value);
 $('record-delete').onclick=async()=>{try{await recorder.remove($('record-recovery-list').value);}catch(error){message(error.message);}};

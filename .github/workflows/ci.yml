@@ -54,6 +54,7 @@ jobs:
           .venv/bin/python tests/cw_browser_test.py
           node tests/rtty_fldigi_tests.mjs
           .venv/bin/python tests/rtty_fldigi_browser_test.py
+          .venv/bin/python tests/i18n_browser_test.py chromium
 
   sanitizers:
     runs-on: ubuntu-24.04

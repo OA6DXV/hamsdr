@@ -113,6 +113,12 @@ then frequency/modes/memories, waterfall options, and signal/volume columns.
 Filter/recording and DSP occupy the next row, followed by chat and logbook.
 Responsive CSS reflows these same controls into a mobile column.
 
+The browser localizes UI text in Spanish, English or Brazilian Portuguese,
+using a local catalog and persistent browser preference. It translates only
+UI subtrees and attributes; received content and station customization remain
+application data. Language changes retain receiver/audio/decoder state. See
+[`TRANSLATIONS.md`](TRANSLATIONS.md) for the catalog and DXCC label contract.
+
 ## Community persistence
 
 Each WebSocket has an ephemeral public listener ID. Application protocol 2

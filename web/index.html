@@ -6,6 +6,7 @@
 <title>HamSDR</title>
 <!-- SITE_METADATA -->
 <link id="site-icon" rel="icon"><link id="site-touch-icon" rel="apple-touch-icon">
+<script src="./translations.js" defer></script><script src="./countries-i18n.js" defer></script><script src="./i18n.js" defer></script>
 <script src="./recorder-core.js" defer></script><script src="./recorder.js" defer></script>
 <link rel="stylesheet" href="./style.css"><link rel="stylesheet" href="./zoom.css"><script src="./site-config.js" defer></script><script src="./site.js" defer></script><script src="./palette.js" defer></script><script src="./waterfall-codec.js" defer></script><script src="./smeter-calibration.js" defer></script><script src="./classic-audio.js" defer></script><script src="./identity.js" defer></script><script src="./community.js" defer></script><script src="./cw-panel.js" defer></script><script src="./app.js" defer></script>
 </head>
@@ -14,7 +15,8 @@
 <ul id="site-details"></ul></header><hr>
 <div class="top-controls">
 <div class="ctl audio-control"><button id="listen" class="audio-initial" aria-pressed="false">Iniciar audio</button><span id="client-traffic" aria-label="Ancho de banda de esta conexión">— kb/s</span><span id="audio-status-top" role="status">Audio detenido</span></div>
-<div class="ctl"><b id="listeners">0</b> usuarios(s) conectados.</div></div>
+<div class="listener-language-controls"><div class="ctl"><b id="listeners">0</b> <span id="listeners-label">usuarios conectados.</span></div>
+<div class="ctl language-control"><select id="language" aria-label="Idioma"><option value="es" lang="es">Español</option><option value="en" lang="en">English</option><option value="pt-BR" lang="pt-BR">Português (Brasil)</option></select></div></div></div>
 <p id="demo" hidden>Señales de prueba: USB 7100 kHz · LSB 7090 kHz · AM 7108 kHz (tono de 1 kHz).</p>
 <section class="receiver" aria-label="Receptor">
 <div class="ctl identity-control"><label><b>Indicativo / callsign:</b> <input id="username" maxlength="10" autocomplete="off" placeholder="Ingresa tu callsign" title="Máximo 10 caracteres: letras A-Z, números 0-9 y los símbolos \ | / @ - _"></label></div>

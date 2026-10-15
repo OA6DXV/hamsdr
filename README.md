@@ -9,7 +9,17 @@ The `unstable` branch is the active experimental development line. The `dev`
 branch tracks reviewed development releases, and `main` is reserved for stable
 releases.
 
-## 0.9.2-dev (local development)
+## 0.9.3-dev (local development)
+
+- Add a persistent language selector beside the listener count: Spanish,
+  English and Brazilian Portuguese. Switching language updates controls,
+  accessibility labels, connection notices, recording and digital-mode status
+  without restarting audio or decoders.
+- Localize DXCC country labels and sorting while retaining canonical filter
+  values. Callsigns, decoded text, chat, memory names and station customization
+  remain as entered. See [interface translations](docs/TRANSLATIONS.md).
+
+## 0.9.2-dev
 
 - Add [cookie-free server-issued browser identities](docs/SESSION_IDENTITY_PLAN.md),
   persisted across reloads and shared by tabs of the same browser and origin.

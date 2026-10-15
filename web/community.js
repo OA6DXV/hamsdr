@@ -8,6 +8,7 @@
   };
   const callsignPattern=/^[A-Z0-9\\|\/@_-]{1,10}$/;
   const callsignHint='Indicativo: máximo 10 caracteres; usa letras A-Z, números 0-9 y los símbolos \\ | / @ - _.';
+  const translatedHint=()=>window.HamI18n?.t(callsignHint)||callsignHint;
   const normalizeCallsign=value=>{
     const trimmed=value.trim();
     return /^[\x00-\x7F]*$/.test(trimmed)?trimmed.toUpperCase():trimmed;
@@ -33,7 +34,7 @@
     const field=el('username'),name=normalizeCallsign(field.value);
     field.value=name;
     if(name&&!callsignPattern.test(name)){
-      field.setCustomValidity(callsignHint);ready=false;availability();
+      field.setCustomValidity(translatedHint());ready=false;availability();
       el('chat-status').textContent=callsignHint;
       if(report)field.reportValidity();
       return false;
@@ -54,7 +55,7 @@
   el('username').addEventListener('input',()=>{
     const field=el('username');
     field.value=normalizeCallsign(field.value);
-    field.setCustomValidity(field.value&&!callsignPattern.test(field.value)?callsignHint:'');
+    field.setCustomValidity(field.value&&!callsignPattern.test(field.value)?translatedHint():'');
     ready=false;availability();
     if(field.value&&!callsignPattern.test(field.value)){
       clearTimeout(identifyTimer);identifyTimer=0;el('chat-status').textContent=callsignHint;
@@ -69,13 +70,16 @@
     const field=el('username'),name=normalizeCallsign(field.value);
     field.value=name;
     if(name&&!callsignPattern.test(name)){
-      field.setCustomValidity(callsignHint);el('chat-status').textContent=callsignHint;field.reportValidity();return;
+      field.setCustomValidity(translatedHint());el('chat-status').textContent=callsignHint;field.reportValidity();return;
     }
     field.setCustomValidity('');
     try{localStorage.setItem('hamsdr-name',name);}catch{}
     identify(true);
   });
   window.addEventListener('radio-open',()=>{ready=false;availability();identify();});
+  window.addEventListener('languagechange',()=>{
+    const field=el('username');field.setCustomValidity(field.value&&!callsignPattern.test(field.value)?translatedHint():'');
+  });
   window.addEventListener('radio-close',()=>{ready=false;availability();el('chat-status').textContent='Desconectado · recuperando conexión e historial…';});
   function eventRow(kind,e){
     const row=document.createElement('div');row.className='chat-entry';row.dataset.id=e.id;

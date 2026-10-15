@@ -16,4 +16,4 @@ main{width:100%}
 .identity-control label{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.identity-control #username{flex:1;min-width:150px;max-width:360px}
 .audio-control{display:flex;align-items:center;gap:9px}#client-traffic{font-variant-numeric:tabular-nums;white-space:nowrap}
 #audio-status-top{font-size:12px;color:#555}
-@media(max-width:650px){.top-controls{display:grid;grid-template-columns:1fr auto}.audio-control{min-width:0}#audio-status-top{display:none}.identity-control label{font-size:13px}.identity-control #username{max-width:none}}
+@media(max-width:650px){.top-controls{display:grid;grid-template-columns:minmax(0,1fr)}.audio-control{min-width:0;flex-wrap:wrap}#audio-status-top{display:none}.identity-control label{font-size:13px}.identity-control #username{max-width:none}}
