@@ -9,6 +9,7 @@ from pathlib import Path
 import sqlite3
 import time
 import unicodedata
+from moderation import require_clean
 
 
 CALLSIGN_SYMBOLS = frozenset("\\|/@-_")
@@ -23,7 +24,7 @@ class IdentityError(ValueError):
         self.code = code
 
 
-def normalize_callsign(value, allow_empty=False):
+def normalize_callsign(value, allow_empty=False, *, moderator=None):
     """Trim and uppercase a callsign while enforcing its wire format."""
     if not isinstance(value, str):
         raise ValueError("El indicativo debe ser texto")
@@ -39,6 +40,7 @@ def normalize_callsign(value, allow_empty=False):
         raise ValueError("El indicativo admite como máximo 10 caracteres")
     if any(not (char.isalnum() or char in CALLSIGN_SYMBOLS) for char in value):
         raise ValueError("Indicativo inválido: usa letras A-Z, números 0-9 y los símbolos \\ | / @ - _")
+    (moderator.require_clean if moderator is not None else require_clean)(value, "name")
     return value
 
 
@@ -54,29 +56,47 @@ def plain_text(value, limit, allow_empty=False):
 
 
 class History:
-    def __init__(self, path, max_size_mb=50):
+    def __init__(self, path, max_size_mb=50, *, history_path=None):
         self.path = Path(path)
+        self.history_path = (Path(history_path) if history_path is not None else
+                             self.path.with_name(self.path.stem + '-history' + self.path.suffix))
+        if (self.path.resolve() == self.history_path.resolve() or
+                self.path.exists() and self.history_path.exists() and self.path.samefile(self.history_path)):
+            raise ValueError("State and history databases must be different files")
         self.max_size_bytes = max_size_mb * 1024 * 1024
         self.max_pages = 0
         self.worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="history")
         self.db = None
+        self.events_db = None
 
     async def call(self, method, *args):
         return await asyncio.get_running_loop().run_in_executor(self.worker, method, *args)
 
-    def _open(self):
-        self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        self.db = sqlite3.connect(self.path, timeout=3)
-        self.db.row_factory = sqlite3.Row
+    @staticmethod
+    def _connect(path):
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        db = sqlite3.connect(path, timeout=3, uri=True)
+        db.row_factory = sqlite3.Row
         # PERSIST keeps the journal file allocated, so a hardened service can
         # grant write access to only the database and journal, not its entire
         # configuration directory.
-        self.db.execute("PRAGMA journal_mode=PERSIST")
-        self.db.execute("PRAGMA synchronous=FULL")
+        try:
+            db.execute("PRAGMA journal_mode=PERSIST")
+            db.execute("PRAGMA synchronous=FULL")
+        except BaseException:
+            db.close()
+            raise
+        return db
+
+    def _open(self):
+        self.db = self._connect(self.path)
         version = self.db.execute("PRAGMA user_version").fetchone()[0]
-        if version > 3:
+        if version > 4:
+            raise RuntimeError("Unsupported state schema")
+        self.events_db = self._connect(self.history_path)
+        if self.events_db.execute("PRAGMA user_version").fetchone()[0] > 1:
             raise RuntimeError("Unsupported history schema")
-        self.db.executescript("""
+        self.events_db.executescript("""
             CREATE TABLE IF NOT EXISTS events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 kind TEXT NOT NULL CHECK(kind IN ('chat','log')),
@@ -86,6 +106,11 @@ class History:
                 UNIQUE(client_key, request_id)
             );
             CREATE INDEX IF NOT EXISTS events_kind_id ON events(kind,id);
+            PRAGMA user_version=1;
+        """)
+        legacy_events = self.db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='events'").fetchone() is not None
+        self.db.executescript("""
             CREATE TABLE IF NOT EXISTS posting_limits (
                 scope TEXT NOT NULL, identity TEXT NOT NULL, period INTEGER NOT NULL,
                 count INTEGER NOT NULL, updated REAL NOT NULL,
@@ -96,7 +121,7 @@ class History:
         if version < 2:
             # Existing logbook entries count toward today's allowance too.
             day = int(time.time()) // 86400
-            rows = self.db.execute(
+            rows = (self.db if legacy_events else self.events_db).execute(
                 "SELECT call,time FROM events WHERE kind='log' AND time>=? AND time<?",
                 (day * 86400, (day + 1) * 86400)).fetchall()
             with self.db:
@@ -114,40 +139,87 @@ class History:
                 expires REAL NOT NULL, revoked INTEGER NOT NULL DEFAULT 0
             )""")
             self.db.execute("CREATE INDEX IF NOT EXISTS browser_identity_expiry ON browser_identities(expires)")
-            self.db.execute("PRAGMA user_version=3")
-        page_size = self.db.execute("PRAGMA page_size").fetchone()[0]
-        self.max_pages = self.max_size_bytes // page_size
-        if self.max_pages < 16:
+            self.db.execute("""CREATE TABLE IF NOT EXISTS pending_publication (
+                id INTEGER PRIMARY KEY CHECK(id=1),
+                client_key TEXT NOT NULL, request_id TEXT NOT NULL,
+                scope TEXT NOT NULL, identity TEXT NOT NULL, period INTEGER NOT NULL,
+                previous_count INTEGER, previous_updated REAL
+            )""")
+        if legacy_events:
+            self._migrate_events()
+        with self.db:
+            self.db.execute("PRAGMA user_version=4")
+        self._recover_pending()
+        self.max_pages = self._configure_size(self.events_db, evict=True)
+        self._configure_size(self.db, evict=False)
+        self._make_room()
+
+    def _migrate_events(self):
+        """Commit and verify the copy before removing the old table.
+
+        A restart between these independent commits safely repeats the copy.
+        The source attachment is read-only; no cross-file write transaction or
+        super-journal in the protected customization directory is needed.
+        """
+        self.events_db.execute("ATTACH DATABASE ? AS legacy", (self.path.resolve().as_uri() + '?mode=ro',))
+        try:
+            with self.events_db:
+                self.events_db.execute("INSERT OR IGNORE INTO events SELECT * FROM legacy.events")
+                if self.events_db.execute(
+                        "SELECT * FROM legacy.events EXCEPT SELECT * FROM events LIMIT 1").fetchone():
+                    raise RuntimeError("History migration conflict; original events preserved")
+                old_sequence = self.events_db.execute(
+                    "SELECT seq FROM legacy.sqlite_sequence WHERE name='events'").fetchone()
+                if old_sequence:
+                    current = self.events_db.execute("SELECT seq FROM sqlite_sequence WHERE name='events'").fetchone()
+                    if current:
+                        self.events_db.execute("UPDATE sqlite_sequence SET seq=MAX(seq,?) WHERE name='events'", (old_sequence[0],))
+                    else:
+                        self.events_db.execute("INSERT INTO sqlite_sequence(name,seq) VALUES ('events',?)", (old_sequence[0],))
+        finally:
+            self.events_db.execute("DETACH DATABASE legacy")
+        with self.db:
+            self.db.execute("DROP TABLE events")
+
+    def _configure_size(self, db, *, evict):
+        page_size = db.execute("PRAGMA page_size").fetchone()[0]
+        max_pages = self.max_size_bytes // page_size
+        if max_pages < 16:
             raise ValueError("Community database size must allow at least 16 SQLite pages")
-        current_pages = self.db.execute("PRAGMA page_count").fetchone()[0]
-        while current_pages > self.max_pages:
-            rows = self.db.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+        current_pages = db.execute("PRAGMA page_count").fetchone()[0]
+        if current_pages > max_pages and not evict:
+            db.execute("VACUUM")
+            current_pages = db.execute("PRAGMA page_count").fetchone()[0]
+            if current_pages > max_pages:
+                raise ValueError("State database exceeds its size maximum")
+        while current_pages > max_pages:
+            rows = db.execute("SELECT COUNT(*) FROM events").fetchone()[0]
             if not rows:
                 raise ValueError("Community database maximum is smaller than its schema")
-            proportional = (rows * (current_pages - self.max_pages) + current_pages - 1) // current_pages
+            proportional = (rows * (current_pages - max_pages) + current_pages - 1) // current_pages
             delete_count = min(rows, max(1, proportional + max(1, rows // 20)))
-            with self.db:
-                self.db.execute(
+            with db:
+                db.execute(
                     "DELETE FROM events WHERE id IN (SELECT id FROM events ORDER BY id LIMIT ?)",
                     (delete_count,))
-            self.db.execute("VACUUM")
-            current_pages = self.db.execute("PRAGMA page_count").fetchone()[0]
-        configured_pages = self.db.execute(f"PRAGMA max_page_count={self.max_pages}").fetchone()[0]
-        if configured_pages != self.max_pages:
+            db.execute("VACUUM")
+            current_pages = db.execute("PRAGMA page_count").fetchone()[0]
+        configured_pages = db.execute(f"PRAGMA max_page_count={max_pages}").fetchone()[0]
+        if configured_pages != max_pages:
             raise RuntimeError("Could not apply community database size limit")
-        self._make_room()
+        return max_pages
 
     def _make_room(self):
         """Keep free pages for the next event, removing the oldest rows first."""
         reserve = min(8, max(2, self.max_pages // 20))
         target = self.max_pages - reserve
         while True:
-            pages = self.db.execute("PRAGMA page_count").fetchone()[0]
-            free = self.db.execute("PRAGMA freelist_count").fetchone()[0]
+            pages = self.events_db.execute("PRAGMA page_count").fetchone()[0]
+            free = self.events_db.execute("PRAGMA freelist_count").fetchone()[0]
             if pages - free <= target:
                 return
-            with self.db:
-                deleted = self.db.execute(
+            with self.events_db:
+                deleted = self.events_db.execute(
                     "DELETE FROM events WHERE id IN (SELECT id FROM events ORDER BY id LIMIT 256)"
                 ).rowcount
             if not deleted:
@@ -191,52 +263,83 @@ class History:
     def callsign_key(call):
         return unicodedata.normalize("NFKC", call).strip().casefold()
 
+    def _recover_pending(self):
+        """Repair a quota reservation interrupted before/after history commit."""
+        pending = self.db.execute("SELECT * FROM pending_publication WHERE id=1").fetchone()
+        if pending is None:
+            return
+        saved = self.events_db.execute("SELECT 1 FROM events WHERE client_key=? AND request_id=?",
+                                       (pending['client_key'], pending['request_id'])).fetchone()
+        with self.db:
+            if saved is None:
+                key = (pending['scope'], pending['identity'], pending['period'])
+                if pending['previous_count'] is None:
+                    self.db.execute("DELETE FROM posting_limits WHERE scope=? AND identity=? AND period=?", key)
+                else:
+                    self.db.execute("INSERT OR REPLACE INTO posting_limits VALUES (?,?,?,?,?)",
+                                    (*key, pending['previous_count'], pending['previous_updated']))
+            self.db.execute("DELETE FROM pending_publication WHERE id=1")
+
+    def _reserve_publication(self, event):
+        """Durably reserve allowance before storing an event in the other DB."""
+        with self.db:
+            now = time.time()
+            day = int(now) // 86400
+            self.db.execute("DELETE FROM posting_limits WHERE scope='chat' AND updated<=?", (now - 1,))
+            self.db.execute("DELETE FROM posting_limits WHERE scope='log' AND updated<?", (day * 86400,))
+            scope = event['kind']
+            identity = event['client_key'] if scope == 'chat' else self.callsign_key(event['call'])
+            period = 0 if scope == 'chat' else day
+            limit = self.db.execute("SELECT count,updated FROM posting_limits WHERE scope=? AND identity=? AND period=?",
+                                    (scope, identity, period)).fetchone()
+            if limit is not None:
+                if scope == 'chat' and now - limit['updated'] < 1:
+                    raise ValueError("Espera un segundo antes de volver a enviar un mensaje")
+                if scope == 'log' and limit['count'] >= 2:
+                    raise ValueError("Máximo dos entradas diarias por indicativo en el logbook (UTC)")
+            self.db.execute("INSERT INTO pending_publication VALUES (1,?,?,?,?,?,?,?)",
+                            (event['client_key'], event['request_id'], scope, identity, period,
+                             limit['count'] if limit else None, limit['updated'] if limit else None))
+            self.db.execute("""INSERT INTO posting_limits VALUES (?,?,?,1,?)
+                ON CONFLICT(scope,identity,period) DO UPDATE SET count=count+1,updated=excluded.updated""",
+                            (scope, identity, period, now))
+
     def _append(self, event, enforce_limits=False):
+        self._recover_pending()
         # Retries must acknowledge the original event without spending allowance.
-        row = self.db.execute("SELECT * FROM events WHERE client_key=? AND request_id=?",
+        row = self.events_db.execute("SELECT * FROM events WHERE client_key=? AND request_id=?",
                               (event['client_key'], event['request_id'])).fetchone()
         if row is not None:
             return self.public(row), False
         self._make_room()
-        with self.db:
-            if enforce_limits:
-                now = time.time()
-                day = int(now) // 86400
-                # Retain only active cooldowns and the current UTC day's quota.
-                self.db.execute("DELETE FROM posting_limits WHERE scope='chat' AND updated<=?", (now - 1,))
-                self.db.execute("DELETE FROM posting_limits WHERE scope='log' AND updated<?", (day * 86400,))
-                scope = event['kind']
-                identity = event['client_key'] if scope == 'chat' else self.callsign_key(event['call'])
-                period = 0 if scope == 'chat' else day
-                limit = self.db.execute(
-                    "SELECT count,updated FROM posting_limits WHERE scope=? AND identity=? AND period=?",
-                    (scope, identity, period)).fetchone()
-                if limit is not None:
-                    if scope == 'chat' and now - limit['updated'] < 1:
-                        raise ValueError("Espera un segundo antes de volver a enviar un mensaje")
-                    if scope == 'log' and limit['count'] >= 2:
-                        raise ValueError("Máximo dos entradas diarias por indicativo en el logbook (UTC)")
-                self.db.execute("""INSERT INTO posting_limits VALUES (?,?,?,1,?)
-                    ON CONFLICT(scope,identity,period) DO UPDATE SET count=count+1,updated=excluded.updated""",
-                    (scope, identity, period, now))
-            cursor = self.db.execute("""INSERT OR IGNORE INTO events
-                (kind,time,name,text,frequency,mode,call,client_key,request_id)
-                VALUES (?,?,?,?,?,?,?,?,?)""", tuple(event[k] for k in (
-                    "kind", "time", "name", "text", "frequency", "mode", "call", "client_key", "request_id")))
-            created = cursor.rowcount == 1
-            row = self.db.execute("SELECT * FROM events WHERE client_key=? AND request_id=?",
-                                  (event["client_key"], event["request_id"])).fetchone()
+        if enforce_limits:
+            self._reserve_publication(event)
+        try:
+            with self.events_db:
+                cursor = self.events_db.execute("""INSERT INTO events
+                    (kind,time,name,text,frequency,mode,call,client_key,request_id)
+                    VALUES (?,?,?,?,?,?,?,?,?)""", tuple(event[k] for k in (
+                        "kind", "time", "name", "text", "frequency", "mode", "call", "client_key", "request_id")))
+                row = self.events_db.execute("SELECT * FROM events WHERE id=?", (cursor.lastrowid,)).fetchone()
+        except sqlite3.Error:
+            self._recover_pending()
+            raise
+        self._recover_pending()
         self._make_room()
-        return self.public(row), created
+        return self.public(row), True
 
     def _history(self, kind, before):
-        rows = self.db.execute("SELECT * FROM events WHERE kind=? AND id < ? ORDER BY id DESC LIMIT 201",
+        rows = self.events_db.execute("SELECT * FROM events WHERE kind=? AND id < ? ORDER BY id DESC LIMIT 201",
                                (kind, before or 9223372036854775807)).fetchall()
         return {"type": "history", "kind": kind, "events": [self.public(r) for r in reversed(rows[:200])],
                 "more": len(rows) > 200, "before": before}
 
     async def open(self):
-        await self.call(self._open)
+        try:
+            await self.call(self._open)
+        except BaseException:
+            await self.close()
+            raise
 
     async def append(self, event, enforce_limits=False):
         return await self.call(self._append, event, enforce_limits)
@@ -245,6 +348,12 @@ class History:
         return await self.call(self._history, kind, before)
 
     async def close(self):
-        if self.db:
-            await self.call(self.db.close)
+        def close_connections():
+            for name in ('db', 'events_db'):
+                connection = getattr(self, name)
+                if connection is not None:
+                    connection.close()
+                    setattr(self, name, None)
+        if self.db is not None or self.events_db is not None:
+            await self.call(close_connections)
         self.worker.shutdown(wait=True)

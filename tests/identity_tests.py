@@ -58,7 +58,7 @@ class RegistryTests(unittest.IsolatedAsyncioTestCase):
                 row = db.execute('SELECT * FROM browser_identities').fetchone()
                 self.assertNotIn(token, row)
                 self.assertEqual(row[1], hashlib.sha256(token.encode()).hexdigest())
-                self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 3)
+                self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 4)
             history = History(path)
             await history.open()
             try:

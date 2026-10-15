@@ -38,6 +38,7 @@ jobs:
           .venv/bin/python tests/site_config_tests.py -v
           .venv/bin/python tests/opus_codec_tests.py -v
           .venv/bin/python tests/history_tests.py -v
+          .venv/bin/python tests/moderation_tests.py -v
           .venv/bin/python tests/waterfall_codec_tests.py -v
           .venv/bin/python tests/tls_tests.py -v
           .venv/bin/python tests/smeter_calibration_tests.py -v

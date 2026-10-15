@@ -1,0 +1,27 @@
+# HamSDR exact identifier-only exceptions: one callsign per line (UTF-8).
+# Blank lines and lines starting with # are ignored; no inline comments.
+# Copy into working_directory as callsigns.txt before customizing.
+# Your copy REPLACES this entire default list. Restart HamSDR after editing.
+# Exceptions do NOT exempt chat/logbook text or prove callsign ownership.
+# Only valid identifiers of at most 10 ASCII letters/digits or \ | / @ - _.
+# Source: https://lotw.arrl.org/lotw-user-activity.csv
+# Snapshot: 2026-10-15
+
+K1IKE
+LA/SP1C/P
+N1GGA
+NI9A
+SP1C
+SP1C/P
+SP1IC
+VE3RGA
+W3ON
+W3ONA
+W4NK
+W4NK/0
+W4NK/9
+W4NNK
+
+# Additional exact collisions observed after the 2026-10-15 vocabulary expansion.
+F4GET
+M0FOS

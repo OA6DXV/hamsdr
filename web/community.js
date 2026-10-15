@@ -161,7 +161,13 @@
         delete pending[kind];savePending();availability();
       }
       el('chat-status').textContent='Guardado y enviado';
-    }else if(m.type==='error'){availability();el('chat-status').textContent=m.message;}
+    }else if(m.type==='error'){
+      if(['offensive-language','repeated-character'].includes(m.code)&&['chat','log'].includes(m.kind)&&pending[m.kind]?.request_id===m.request_id){
+        // Keep a rejected submission as a draft. Reconnect must not retry it.
+        pending[m.kind].review=true;savePending();
+      }
+      availability();el('chat-status').textContent=m.message;
+    }
   });
   for(const kind of ['chat','log']){
     el(kind==='chat'?'chatform':'logform').addEventListener('submit',e=>{

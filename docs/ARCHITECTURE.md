@@ -174,15 +174,20 @@ limits supplement rather than replace existing IP and global controls.
 Presence includes name, frequency, mode and color, updated after a tune,
 rename, connection or disconnection.
 
-History is SQLite schema version 3, PERSIST journal + synchronous FULL. A single executor
-thread owns the database connection, keeping fsync and queries off the audio
-event loop. Chat/log events are committed before acknowledgement; the unique
+Persistence uses two SQLite files, both with PERSIST journal + synchronous FULL.
+The state database (`storage.database`, schema 4) contains browser identities,
+posting limits and a single interrupted-publication recovery marker. The history
+database (`storage.history_database`, schema 1) contains only chat/logbook events
+and their indexes. Both are filename-only references inside working_directory,
+outside the source tree, and survive restarts/updates. One executor thread owns
+both connections, keeping fsync and queries off the audio event loop.
+Chat/log events are committed before acknowledgement; the unique
 (client_key, request_id) pair deduplicates reconnect retries. New `client_key`
 values are server-assigned internal identity IDs; historical rows remain intact.
 `browser_identities` stores SHA-256 token hashes, independent IDs, timestamps,
 expiry and revocation, never raw tokens. The registry expires after 90 days
 without a successful token lookup, and caps at 10,000 rows (or one row per
-2 KiB of the database budget, whichever is smaller). It shares the SQLite
+2 KiB of the database budget, whichever is smaller). It shares the state SQLite
 size ceiling and rejects issuance if full instead of evicting valid identities.
 Issuance uses a global 30-token bucket refilling at one per second, plus a
 per-IP six-token bucket refilling at one per ten seconds; its IP map caps at
@@ -196,8 +201,18 @@ separate queue of 64 messages, prioritized for delivery. A stalled reliable
 queue closes the connection and the browser reloads persisted history. Chat
 allows one new message per second per browser session, plus the global publication
 bucket. Logbook submissions allow two entries per normalized callsign per UTC day.
-SQLite persists these limits across reloads, reconnects and server restarts;
-idempotent retries do not consume additional allowance. Callsign changes retain
+SQLite persists these limits across reloads, reconnects and server restarts.
+Publication reserves its quota in the state file before committing history.
+A bounded recovery marker stores only request identity and the previous quota,
+not message text. On success it is finalized; on write failure/restart it refunds
+the quota only if no matching history event exists. A committed event retains
+its allowance and deduplicated acknowledgement even after interruption. This
+avoids pretending two separate SQLite commits are an atomic transaction and
+does not require super-journal creation in the protected configuration directory.
+Legacy combined databases are migrated by committing and verifying an exact
+copy of events/IDs/sequence before removing the old table. An interrupted copy
+can safely repeat; conflicting data fails startup with originals preserved.
+Idempotent retries do not consume additional allowance. Callsign changes retain
 the same identity/cooldown; old messages keep their original authors. Pending
 messages retain identity and author metadata: only matching, acknowledged
 identity/name pairs are retried. Legacy/mismatching submissions become drafts
@@ -209,8 +224,28 @@ containing only letters, digits, or `\ | / @ - _`; it is normalized to
 uppercase. Anonymous listeners can still receive streams and read history.
 Logbook callsigns come from that session identification. The logbook form has
 no separate callsign field.
-Only plain text is rendered. Records
-do not expire by age. The database-size ceiling defaults to 50 MB; when space
+Only plain text is rendered. New submissions are moderated before publication:
+an offline whole-word/phrase filter checks
+Spanish, English and Brazilian Portuguese together, including callsign changes.
+Rejections precede persistence, broadcast and posting quotas; a private
+`error` with code `offensive-language` identifies the field and, for messages,
+the kind/request ID. The client retains a held editable draft and does not
+retry it on reconnect. Historical records are not retroactively filtered.
+See [`MODERATION.md`](MODERATION.md) for vocabulary and matching limitations.
+Reviewed source additions and bounded ASCII-gesture detection use the same
+Python path. A small set of exact known-callsign collisions is exempt only
+in the identification field, after its normal syntax validation. Message
+bodies remain moderated. Complete input is checked without a result cache;
+no Node worker or browser moderation library is required. More than ten
+consecutive identical NFC characters in the original submission are rejected
+with private code `repeated-character`, before whitespace normalization for
+storage; the same draft-holding behavior applies. Each gateway loads its own
+word/phrase and exact-callsign exception lists at startup. Optional UTF-8
+`moderation-words.txt` and `callsigns.txt` files directly in the
+configured working directory each replace their packaged `data/` default,
+including when intentionally empty; there is no process-global policy mutation
+between instances. Invalid files fail startup. These lists are not web assets.
+Records do not expire by age. Each database has an independent 50 MiB ceiling; when history space
 must be reused, the oldest chat or logbook records are removed first. Browser
 history maps remain capped at 10,000 entries.
 

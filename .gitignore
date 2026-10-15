@@ -10,6 +10,8 @@ __pycache__/
 *.sqlite3*
 /site.json
 /site.toml
+/moderation-words.txt
+/callsigns.txt
 /wasm/mfsk-decoder/target/
 /wasm/cw-decoder/target/
 /wasm/cw-decoder/pkg/

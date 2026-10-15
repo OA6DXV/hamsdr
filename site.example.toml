@@ -1,6 +1,9 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # Every installation-specific file must be placed directly in this directory.
 working_directory = "/etc/hamsdr"
+# Optional editable lists in this directory: moderation-words.txt and
+# callsigns.txt. Copy them from data/ and restart after editing.
+# Each local file replaces its shipped default; updates never overwrite it.
 
 # HTTP listener
 [server]
@@ -60,5 +63,9 @@ enable = false
 tag = ""
 
 [storage]
+# Browser identities, posting limits and interrupted-publication recovery.
 database = "community.sqlite3"
+# Chat/logbook entries only; both files live in working_directory.
+history_database = "chat-logbook.sqlite3"
+# Independent size ceiling for each SQLite database, in MiB.
 max_size_mb = 50

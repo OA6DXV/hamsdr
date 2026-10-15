@@ -74,7 +74,7 @@ class SiteConfigTests(unittest.TestCase):
         self.assertEqual(generic["receiver_name"], "HamSDR")
         self.assertEqual(generic["callsign"], "N0CALL")
         self.assertTrue(generic["show_admin"])
-        self.assertEqual(generic["version"], "0.9.3-dev")
+        self.assertEqual(generic["version"], "0.9.4-dev")
         self.assertFalse(generic["digimodes"])
         self.assertIsNone(logo)
         self.assertEqual(station["mobile_page"], "/")
@@ -96,6 +96,7 @@ class SiteConfigTests(unittest.TestCase):
             self.assertEqual((runtime["receiver_gain"], runtime["gain_mode"], runtime["gain_tenth_db"]),
                              (8.0, "manual", 80))
             self.assertEqual(runtime["database"], Path(directory) / "community.sqlite3")
+            self.assertEqual(runtime["history_database"], Path(directory) / "chat-logbook.sqlite3")
             self.assertEqual(runtime["max_size_mb"], 50)
             self.assertEqual(runtime["max_connections_per_identity"], 1)
             self.assertEqual(runtime["full_quality_sessions_per_ip"], 2)
@@ -124,6 +125,16 @@ class SiteConfigTests(unittest.TestCase):
             path.write_text(text.replace('bind="0.0.0.0"', 'bind="not-an-address"'))
             with self.assertRaisesRegex(ValueError, "server bind"):
                 load_listen_config(path)
+
+    def test_history_database_must_be_a_separate_working_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'site.toml'
+            for value in ('"../outside.sqlite3"', '"/tmp/outside.sqlite3"', '""', 'false', '"community.sqlite3"'):
+                path.write_text(installation(directory).replace('[storage]', '[storage]\nhistory_database=' + value))
+                with self.assertRaises(ValueError):
+                    load_runtime_config(path)
+            path.write_text(installation(directory).replace('[storage]', '[storage]\nhistory_database="messages.sqlite3"'))
+            self.assertEqual(load_runtime_config(path)['history_database'], Path(directory) / 'messages.sqlite3')
 
     def test_secure_modes_and_working_files(self):
         with tempfile.TemporaryDirectory() as directory:

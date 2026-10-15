@@ -1,0 +1,978 @@
+# HamSDR moderation vocabulary: one word or phrase per line (UTF-8).
+# Blank lines and lines starting with # are ignored; no inline comments.
+# Copy into working_directory as moderation-words.txt before customizing.
+# Your copy REPLACES this entire default list. Restart HamSDR after editing.
+# Keep source attribution below when redistributing derived lists.
+# Matching: whole words/phrases, case/accent/leet insensitive.
+# Source: https://github.com/LDNOOBW/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words
+# Revision: 5faf2ba42d7b1c0977169ec3611df25a3c08eb13
+# Copyright 2012–2020 Shutterstock, Inc.; license: CC-BY-4.0
+# License text: licenses/CC-BY-4.0.txt
+
+# languages / en
+apeshit
+arsehole
+asshole
+assmunch
+bastard
+bitch
+bitches
+blowjob
+blow job
+bollocks
+bullshit
+butthole
+clusterfuck
+cock
+cocks
+cunt
+fag
+faggot
+fuck
+fuckin
+fucking
+fucktards
+jack off
+jerk off
+jigaboo
+jiggaboo
+jiggerboo
+kike
+motherfucker
+nigga
+nigger
+nig nog
+paki
+piece of shit
+pussy
+raghead
+shit
+shitty
+slut
+spic
+towelhead
+twat
+wank
+wetback
+whore
+
+# languages / es
+bastardo
+Bollera
+Cabrón
+Chupapollas
+Concha de tu madre
+Coño
+Follador
+Follar
+Gilipichis
+Gilipollas
+Hacer una paja
+Hija de puta
+Hijaputa
+Hijo de puta
+Hijoputa
+Idiota
+Imbécil
+Jilipollas
+Kapullo
+Lameculos
+Marica
+Maricón
+Mariconazo
+Mierda
+Pendejo
+Puta
+Soplagaitas
+Soplapollas
+Verga
+vete a la mierda
+
+# languages / pt
+biscate
+boceta
+bosta
+cabrao
+cacete
+cagar
+caralho
+chochota
+colhoes
+cona
+corno
+dar o rabo
+esporra
+filho da puta
+foda
+foda-se
+foder
+merda
+paneleiro
+porra
+puta que pariu
+puta que te pariu
+sacanagem
+vadia
+vai-te foder
+vai tomar no cu
+xana
+xochota
+
+# additions / en
+assholes
+bastards
+dickhead
+dickheads
+dipshit
+dipshits
+dumbass
+dumbasses
+fucked
+fucker
+fuckers
+idiot
+idiots
+moron
+morons
+motherfuckers
+shithead
+shitheads
+sluts
+whores
+
+# additions / es
+cabrona
+cabrones
+cabronas
+cojudo
+cojuda
+cojudos
+cojudas
+conchatumadre
+conchesumadre
+huevon
+huevona
+huevones
+huevonas
+huevada
+huevadas
+webon
+webona
+weon
+weona
+gilipolla
+estupido
+estupida
+estupidos
+estupidas
+idiotas
+imbeciles
+joder
+jodete
+chinga tu madre
+chingada
+chingado
+culero
+culera
+maricones
+mierdas
+pendeja
+pendejos
+pendejas
+putas
+puto
+putos
+reconchatumadre
+
+# additions / pt
+babaca
+babacas
+cabrão
+cabrões
+caralhos
+cuzão
+cuzões
+arrombado
+arrombada
+desgraçado
+desgraçada
+filha da puta
+filhos da puta
+otario
+otaria
+otarios
+otarias
+putaria
+vagabunda
+vagabundas
+vai se foder
+
+# Source: https://github.com/mod-tc/profanity
+# License: MIT
+# Revision: db99278fc4c2e5238a4285558fb072cc21420e04
+# Notice: licenses/Moderation-MIT.txt
+# Reviewed / en
+arsefuck
+arsefucker
+assfuck
+assfucker
+assfuckers
+assmuncher
+bitchfuck
+bitchhole
+buttfuck
+buttfucker
+buttfuckers
+clusterfucked
+clusterfucker
+clusterfucking
+clusterfucks
+cockeater
+cockface
+cockheads
+cocklicker
+cockmonger
+cockmunch
+cockshit
+cocksmoker
+cocksuck
+cocksucked
+cocksucker
+cocksuckers
+cocksucking
+cocksucks
+cuntbag
+cuntlicker
+cuntlickers
+cunts
+cunty
+dickface
+dickfucker
+dicklicker
+dickmuncher
+dicksmoker
+dicksucker
+dumbfucks
+fuckass
+fuckasses
+fuckbag
+fuckboy
+fuckface
+fuckfaces
+fuckhead
+fuckheaded
+fuckheads
+fucks
+fuckshit
+fuckshitface
+fuckshithead
+fuckstick
+fucktard
+fuckup
+fuckwad
+fuckwhore
+mothafuck
+mothafucka
+mothafuckas
+mothafucked
+mothafucker
+mothafuckers
+mothafuckin
+mothafucking
+mothafucks
+motherfuck
+motherfucked
+motherfuckin
+motherfucking
+motherfuckings
+motherfucks
+muthafucka
+muthafuckers
+mutherfucker
+mutherfuckers
+pigfucker
+pigfuckers
+pigfucking
+shitass
+shitasses
+shitbag
+shitbrain
+shitdick
+shitdicks
+shitface
+shitfuck
+shitfucker
+shitfucks
+trashbitch
+twatface
+
+# Source: https://github.com/FlacSy/BadWords
+# License: MIT
+# Revision: 48e2827b6ff77177a6b353e94ca3999f39e4a82c
+# Notice: licenses/Moderation-MIT.txt
+# Reviewed / es
+agilipollada
+agilipolladas
+agilipollado
+agilipollados
+boluda
+boludas
+boludo
+boludos
+cabezapolla
+cabronaza
+cabronazas
+cabronazo
+cabronazos
+cagamierda
+caraculo
+caraculos
+carajo
+carajos
+caramierda
+caramierdas
+carapolla
+carapollas
+chingatumadre
+chulomierda
+chulomierdas
+chupaculos
+chupahuevos
+comecoño
+comecoños
+comemierda
+comemierdas
+comepolla
+comepollas
+comepoyas
+gilipolleces
+gilipollez
+gilipoyas
+hideputa
+hideputas
+hijadeperra
+hijadeperras
+hijadeputa
+hijadeputas
+hijaeputa
+hijaeputas
+hijaputas
+hijodeperra
+hijodeperras
+hijodeputa
+hijodeputas
+hijoeputa
+hijoeputas
+hijoputas
+jilipolla
+jilipolleces
+jilipollez
+jilipoyas
+lamecoños
+lamehuevos
+lamepollas
+malaputa
+pelotuda
+pelotudas
+pelotudo
+pelotudos
+pendejada
+putamadre
+putaza
+putazas
+putita
+putitas
+putito
+putitos
+putona
+putonas
+putones
+putorra
+putorras
+putón
+quetefollen
+quetejodan
+tocacojones
+tontadelculo
+tontodelculo
+tuputamadre
+vetealamierda
+
+# Reviewed / pt
+bostas
+buceta
+cacetes
+curalho
+fodais
+fodam
+fodamos
+fodao
+fodas
+fodasse
+fode
+fodeis
+fodem
+fodemos
+fodendo
+fodera
+foderam
+foderas
+foderei
+foderem
+foderemos
+foderia
+foderiam
+foderias
+foderá
+foderás
+foderão
+fodes
+fodesse
+fodessem
+fodeste
+fodestes
+fodeu
+fodi
+fodia
+fodiam
+fodias
+fodo
+fodão
+fudendo
+fuder
+fudeu
+fudida
+fudidas
+fudido
+fudidos
+merdas
+merdimbuca
+putarias
+putão
+putões
+sefoda
+
+# Source: https://github.com/jfreddypuentes/spanlp
+# License: MIT
+# Revision: fdc2209362de503603c0204563750f90fffae40d
+# Notice: licenses/Moderation-MIT.txt
+# Reviewed / es
+chupapinga
+conchetumadre
+conchatumare
+hijueputa
+malparido
+
+# Source: HamSDR maintainers: explicit plurals of reviewed source terms
+# License: GPL-3.0-only
+# Reviewed / es
+hijueputas
+malparidos
+malparida
+malparidas
+chupapingas
+
+# Reviewed / pt
+bucetas
+
+# Expansion 2026-10-15: individually reviewed regional insults and evasions.
+# Discovery/diagnostics: retained real social-comment and forum reference snapshot.
+# Only selected licensed lexicon entries are distributed; no comments or user data.
+
+# Source: https://github.com/FlacSy/BadWords
+# Revision: 48e2827b6ff77177a6b353e94ca3999f39e4a82c
+# License: MIT
+# Notice: licenses/Moderation-MIT.txt
+# Expanded / en
+assbag
+assclown
+asshat
+asswipe
+batshit
+beotch
+biatch
+biatches
+biotch
+bitchass
+bitched
+bitchface
+bitching
+bitchy
+blowjobs
+bollock
+bullshits
+bullshitted
+bullshitter
+bullshitters
+bullshitting
+buttfucked
+buttfucking
+buttholes
+bytch
+cock sucker
+cockhead
+cocksucka
+cockwomble
+cumbag
+cumslut
+cumstain
+cuntface
+cunthole
+dafuq
+dickbag
+dickbreath
+dickfaces
+dickhole
+dickish
+dickwad
+dickwads
+dickweed
+dogshit
+douche
+douchebag
+douchebags
+douchey
+dumbfuck
+dumbshit
+fagget
+faggots
+fagot
+fagots
+fags
+fck
+fcked
+fcker
+fcking
+fucc
+fuckboi
+fuckboys
+fuckedup
+fuckery
+fuckings
+fuckoff
+fuckups
+fuckwit
+fuckwits
+fuckyou
+fuk
+fuked
+fukin
+fuking
+fukk
+fukker
+fukking
+fuks
+fuq
+fuqed
+fuqing
+horseshit
+jackass
+jackasses
+jackoff
+jerkoff
+kikes
+knobhead
+mofo
+mofos
+muthafucker
+niggah
+niggas
+niggaz
+niggers
+nigguh
+pakis
+phuck
+phucked
+phucker
+phucking
+pricks
+pussies
+ragheads
+scumbag
+scumbags
+shat
+shite
+shitbags
+shitfaced
+shithole
+shitholes
+shits
+shitstain
+shitted
+shitter
+shitters
+shittier
+shittiest
+shittin
+shitting
+shyt
+skanks
+skanky
+slutbag
+slutty
+son of a bitch
+sonofabitch
+sonsofbitches
+spics
+stfu
+towelheads
+twats
+wanker
+wankers
+wanking
+wanks
+wankstain
+wetbacks
+whored
+whoring
+
+# Source: https://github.com/FlacSy/BadWords
+# Revision: 48e2827b6ff77177a6b353e94ca3999f39e4a82c
+# License: MIT
+# Notice: licenses/Moderation-MIT.txt
+# Expanded / es
+agilipollas
+agilipollo
+agueonado
+cabronaca
+cabronacas
+cabronaco
+cabronacos
+calientapollas
+calientaverga
+caraeculo
+careculo
+chuloputa
+chuloputas
+chupamela
+chupamipenga
+chupapene
+chupapoyas
+chupar la polla
+comechocho
+comechochos
+comelefa
+comenabos
+comerrabos
+conchadetumadre
+conchetumare
+coñoemadre
+follaculos
+follamadres
+folladora
+folladoras
+folladores
+follando
+follado
+follados
+folladas
+gilipichas
+gordocabrón
+hijadeputilla
+hijaputilla
+hijodeputilla
+hijoputilla
+ijodeputa
+ijosdeputa
+jilipichas
+jilipichis
+jodemadres
+jodeputas
+lamechochos
+lamerrabos
+malafolla
+malfollada
+malfolladas
+malfollado
+malfollados
+mamahuevo
+mecagoenlaputa
+mecagoenlaputadeoros
+mecagoenlaputavirgen
+putada
+putadas
+putazo
+putazos
+puteada
+puteado
+puteador
+puteadora
+puteadoras
+puteadores
+putear
+putilla
+putillas
+tontalculo
+tontolculo
+tragalefa
+tragapollas
+wevon
+zampalefa
+zampapollas
+
+# Source: https://github.com/FlacSy/BadWords
+# Revision: 48e2827b6ff77177a6b353e94ca3999f39e4a82c
+# License: MIT
+# Notice: licenses/Moderation-MIT.txt
+# Expanded / pt
+boquete
+caceta
+cacetas
+cagalhao
+fodei
+foderdes
+fodereis
+foderes
+fodermos
+foderíamos
+foderíeis
+fodesses
+fodete
+fodido
+fodinha
+fodêramos
+fodêsseis
+fodêssemos
+fodíamos
+fodíeis
+fudecao
+fudedor
+pqp
+punheta
+putariinha
+putariona
+putães
+putãos
+vagabundo
+vadias
+
+# Source: https://github.com/kyriosdata/palavrao
+# Revision: 87004212ab63ffbdf465bc24b7cb8f2fe9e1932e
+# License: Apache-2.0
+# Notice: licenses/Apache-2.0.txt
+# Expanded / pt
+arrombadas
+baba-ovo
+babaovo
+boqueteira
+boqueteiro
+boquetero
+boquetes
+bosseta
+bostana
+bronha
+bucetao
+bucetasso
+bucetinha
+bucetinhas
+bucetonas
+busseta
+caralha
+caralhudo
+cornuda
+cornudo
+cuzinho
+cuzinhos
+cuzuda
+cuzudo
+mocrea
+mocreia
+ot-ria
+ot-rio
+paspalhao
+paspalho
+paspalha
+piroca
+piroco
+punhetao
+safada
+safado
+xaninha
+xota
+xoxota
+
+# Source: https://github.com/jfreddypuentes/spanlp
+# Revision: fdc2209362de503603c0204563750f90fffae40d
+# License: MIT
+# Notice: licenses/Moderation-MIT.txt
+# Expanded / es
+agueonao
+ahueonao
+ahuevonado
+aweonao
+awevado
+cara de pija
+cara de verga
+carapijo
+caremonda
+careverga
+chuchesumadre
+chupame la raja
+chupapija
+chupe verga
+chupeme la picha
+cochesumadre
+coma mierda
+come mierda
+conchesumare
+culiao
+culeao
+culia
+culiabierto
+doblehijueputa
+follada
+grantriplehijueputa
+guebon
+guevon
+guevona
+hijuelaverga
+hijueperra
+hueon
+huevonada
+joputa
+jueputa
+lameculo
+malfollao
+malparia
+malpario
+mama culo
+mama huevo
+mama picha
+mama vicho
+mamagueva
+mamagueveteo
+mamaguevo
+mamavicho
+me llegas al pincho
+me pelas la pija
+mierdoza
+mierdozo
+moromierda
+piroba
+pirobo
+recochesumadre
+reconchesumare
+reconchetumadre
+recontraputa
+relambechupaverga
+reputa
+reputisima
+sopendejo
+socabron
+tragaleche
+triplehijueputa
+wepota
+wueon
+
+# Source: https://github.com/mod-tc/profanity
+# Revision: db99278fc4c2e5238a4285558fb072cc21420e04
+# License: MIT
+# Notice: licenses/Moderation-MIT.txt
+# Expanded / en
+basturd
+bassturd
+batshite
+beeotch
+beyotch
+biotches
+bitchasses
+bitchez
+bitchslap
+bollox
+bullshite
+butt fuck
+butt fucker
+butt-fuckers
+c*nt
+c*ntface
+c*nts
+c*nty
+cock head
+cock jockey
+cock knocker
+cock licker
+cock munch
+cock smoker
+cock suck
+cock sucking
+cock-gobbler
+cockgobbler
+cockhed
+cockmuncher
+cocksuccer
+cocksukka
+cocsuck
+coksucka
+cumdumpster
+cuntlick
+cuntz
+dipshat
+dipshite
+dipshitter
+dipshitty
+dogshits
+dog shit
+doosh
+douche bag
+dumasses
+fack
+fagshit
+fckin
+fcks
+fcuk
+fcuked
+fcuker
+fcukers
+fcuking
+fcuks
+focker
+fooker
+fuccers
+fuccing
+fuccs
+fuckem
+fuker
+fukked
+fukkers
+fuku
+fukwit
+fvck
+fvcka
+fvcker
+fvckers
+fvckin
+fvcking
+fxck
+fxcked
+fxcker
+fxcking
+gobshite
+groid
+jackarse
+jackoffs
+jagoff
+jerkoffs
+knobgobbler
+knobheads
+mofucker
+motherfcking
+motherfukker
+motherfvcker
+niggahs
+niggerz
+niglet
+nignog
+phaggot
+phaggots
+phucks
+phuk
+phuking
+phukker
+shites
+shittastic
+shittyfuck
+sonofbitches
+sons of bitches
+sumbitch
+twatt
+wnker

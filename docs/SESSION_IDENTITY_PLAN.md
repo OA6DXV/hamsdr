@@ -36,14 +36,15 @@ separate action. The protocol contract is in [ARCHITECTURE.md](ARCHITECTURE.md).
   are serialized, rate-limited and bounded; see the architecture contract.
 - Pending handshakes count against total/per-IP ceilings and expire after five
   seconds. Existing 20-second server heartbeat and audio buffering are unchanged.
-- The registry persists in SQLite schema 3 on the history executor. Its migration
-  is transactional and preserves existing events/limits. Credential lookups
+- The registry persists in state SQLite schema 4 on the shared storage executor;
+  chat/logbook history now uses a separate SQLite file. State migration is
+  transactional; history splitting is restartable and verified. Credential lookups
   renew a 90-day inactivity expiry. The row cap is 10,000 or database budget
   divided by 2 KiB, whichever is smaller. Database failures deny admission.
 - Issuance is separately bounded globally (burst 30, refill 1/s) and per IP
   (burst 6, refill 1/10 s); the IP table holds at most 4096 entries. Expired
   identities are removed during issuance; valid identities are never evicted
-  to satisfy an issuance flood. The registry shares the existing SQLite budget.
+  to satisfy an issuance flood. The registry uses the state database's SQLite budget.
 
 ## Community migration
 

@@ -34,6 +34,25 @@ build or runtime. Compiled browser decoders and the CTY database are included.
 - Big CTY (`web/cty.dat.gz`) by Jim Reisert, AD1C, MIT License, for offline
   DXCC entity and prefix lookups in decoded digital messages. Its copyright
   and permission notice are reproduced below.
+- LDNOOBW, Copyright 2012–2020 Shutterstock, Inc., CC-BY-4.0, for selected
+  Spanish, English and Portuguese moderation vocabulary in `data/moderation-words.txt`.
+  Source: https://github.com/LDNOOBW/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words
+  at revision `5faf2ba42d7b1c0977169ec3611df25a3c08eb13`. HamSDR selects terms
+  and adds regional insults/plurals; it does not use the unmodified full lists.
+  Attribution license: `licenses/CC-BY-4.0.txt`. The matching code is GPL-3.0-only.
+- Selected moderation vocabulary in `data/moderation-words.txt` also uses
+  Surge AI's Obscenity List, FlacSy/BadWords and jfreddypuentes/spanlp under
+  their MIT notices, reproduced in `licenses/Moderation-MIT.txt`. Pinned
+  revisions, original sources and the selected terms are recorded in text-file comments.
+  Ordinary words and ambiguous entries from the full lists are not imported.
+  Additional explicitly derived plurals are HamSDR contributions.
+- Selected Portuguese moderation entries also come from kyriosdata/palavrao,
+  Apache-2.0, revision `87004212ab63ffbdf465bc24b7cb8f2fe9e1932e`.
+  Source: https://github.com/kyriosdata/palavrao, `fontes/palavroes.txt`.
+  HamSDR selects a subset, deduplicates and combines it with the other reviewed
+  lists. The license is included in `licenses/Apache-2.0.txt`; no runtime code
+  from that project is used. Real social comments/forum corpora used to guide
+  review and evaluate false positives are not distributed with HamSDR.
 
 ## Big CTY notice
 

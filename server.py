@@ -21,11 +21,12 @@ from urllib.parse import urlsplit
 
 from aiohttp import web, WSMsgType
 from community import History, IdentityError, normalize_callsign, plain_text
+from moderation import ModerationError, ModerationFilter
 from opus_codec import OPUS_AVAILABLE, OpusEncoder
 from waterfall_codec import VERSION as WATERFALL_PROTOCOL_VERSION, encode as encode_waterfall
 
 ROOT = Path(__file__).resolve().parent
-VERSION = "0.9.3-dev"
+VERSION = "0.9.4-dev"
 PROTOCOL_VERSION = 2
 MODES = {"USB": (300, 2700), "LSB": (-2700, -300), "AM": (-4000, 4000),
          "CW": (450, 950), "NFM": (-5000, 5000)}
@@ -338,10 +339,16 @@ def load_runtime_config(requested=None, allow_unconfigured=False):
     if not isinstance(storage, dict):
         raise ValueError("site config: invalid storage")
     database = storage.get("database", "community.sqlite3")
+    history_database = storage.get("history_database", "chat-logbook.sqlite3")
     max_size_mb = storage.get("max_size_mb", 50)
     if not isinstance(database, str) or not database.strip() or "\0" in database:
         raise ValueError("site config: invalid database path")
     database = working_file(root, database, "database", {".sqlite", ".sqlite3", ".db"})
+    if not isinstance(history_database, str) or not history_database.strip():
+        raise ValueError("site config: invalid history database path")
+    history_database = working_file(root, history_database, "history database", {".sqlite", ".sqlite3", ".db"})
+    if database == history_database:
+        raise ValueError("site config: state and history databases must be different files")
     if (isinstance(max_size_mb, bool) or not isinstance(max_size_mb, int) or
             not 1 <= max_size_mb <= 1048576):
         raise ValueError("site config: database maximum must be 1..1048576 MB")
@@ -361,7 +368,7 @@ def load_runtime_config(requested=None, allow_unconfigured=False):
         "center_frequency": center_frequency, "sample_rate": sample_rate,
         "initial_frequency": round(center_frequency / 1000) * 1000,
         "station": station, "bands": bands, "receiverbook": receiverbook,
-        "database": database, "max_size_mb": max_size_mb,
+        "database": database, "history_database": history_database, "max_size_mb": max_size_mb,
     }
 
 def load_listen_config(requested=None):
@@ -438,6 +445,9 @@ def load_site_config(requested=None):
 class Gateway:
     def __init__(self, args):
         self.args = args
+        data, config_path = read_site_config(getattr(args, "site_config", None))
+        moderation_root = getattr(args, "working_directory", None) or working_directory(data, config_path)
+        self.moderation = ModerationFilter.from_directory(moderation_root)
         self.center_frequency = int(getattr(args, "center_frequency", 7100500))
         self.sample_rate = int(getattr(args, "sample_rate", 1024000))
         self.band_lower = self.center_frequency - self.sample_rate // 2
@@ -457,7 +467,8 @@ class Gateway:
         self.task = None
         self.lock = asyncio.Lock()
         self.history = History(getattr(args, "database", ROOT / "var/community.sqlite3"),
-                               getattr(args, "max_size_mb", 50))
+                               getattr(args, "max_size_mb", 50),
+                               history_path=getattr(args, "history_database", None))
         self.community_lock = asyncio.Lock()
         self.community_tokens, self.community_last = 30.0, time.monotonic()
         self.history_tokens, self.history_last = 8.0, time.monotonic()
@@ -1134,7 +1145,7 @@ class Gateway:
         if kind == "identify":
             if "key" in update or "token" in update:
                 raise ValueError("La identidad de la conexión no puede cambiar")
-            name = normalize_callsign(update.get("name", ""), allow_empty=True)
+            name = normalize_callsign(update.get("name", ""), allow_empty=True, moderator=self.moderation)
             changed = client["name"] != name
             client["name"] = name
             self.publish(json.dumps({"type": "identified", "id": ident, "name": client["name"]}), ident)
@@ -1160,7 +1171,9 @@ class Gateway:
         request_id = update.get("request_id", "")
         if not isinstance(request_id, str) or not re.fullmatch(r"[a-f0-9]{32}", request_id):
             raise ValueError("Identificador de mensaje inválido")
-        text = plain_text(update.get("text"), 500)
+        submitted_text = update.get("text")
+        text = plain_text(submitted_text, 500)
+        self.moderation.require_clean(submitted_text)
         # Use the single identified callsign; ignore any second identity field.
         call = client["name"] if kind == "log" else ""
         now = time.monotonic()
@@ -1608,6 +1621,16 @@ class Gateway:
                     await ws.close(code=4409 if error.code == "identity-active" else 4401,
                                    message=b"Identity admission rejected")
                     break
+                except ModerationError as error:
+                    packet = {"type": "error", "code": error.code, "field": error.field,
+                              "message": str(error)}
+                    # Correlate a permanent rejection without echoing text or tokens.
+                    if update.get("type") in ("chat", "log"):
+                        packet["kind"] = update["type"]
+                        request_id = update.get("request_id")
+                        if isinstance(request_id, str) and re.fullmatch(r"[a-f0-9]{32}", request_id):
+                            packet["request_id"] = request_id
+                    self.publish(json.dumps(packet), ident)
                 except (TypeError, ValueError, OverflowError, RecursionError) as error:
                     self.publish(json.dumps({"type": "error", "message": str(error) or "Parámetros inválidos"}), ident)
                 except sqlite3.Error:
@@ -1738,10 +1761,13 @@ if __name__ == "__main__":
     parser.add_argument("--tls-certificate", type=Path, help="PEM certificate chain (overrides site config)")
     parser.add_argument("--tls-private-key", type=Path, help="PEM private key (overrides site config)")
     parser.add_argument("--demo", action="store_true")
-    parser.add_argument("--database", type=Path, help="Community database path (overrides site config)")
-    parser.add_argument("--max-size-mb", type=int, help="Community database maximum size in MB")
+    parser.add_argument("--database", type=Path, help="Identity/state database path (overrides site config)")
+    parser.add_argument("--history-database", type=Path, help="Chat/logbook database path (overrides site config)")
+    parser.add_argument("--max-size-mb", type=int, help="Maximum size of each community database in MiB")
     parser.add_argument("--site-config", type=Path, help="Site configuration TOML (defaults to ./site.toml, then generic example)")
     args = parser.parse_args()
+    if args.database is not None and args.history_database is None:
+        args.history_database = args.database.with_name(args.database.stem + '-history' + args.database.suffix)
     try:
         configured = load_runtime_config(args.site_config, allow_unconfigured=args.demo)
     except ValueError as error:

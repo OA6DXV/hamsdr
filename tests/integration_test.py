@@ -25,6 +25,7 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
         self.args.digimodes=False
         self.args.site_config=Path(__file__).resolve().parents[1]/'site.example.toml'
         self.temp = tempfile.TemporaryDirectory()
+        self.args.working_directory=Path(self.temp.name)
         self.args.database=Path(self.temp.name)/'community.sqlite3'
         await self.start_server()
         self.session=ClientSession()
@@ -70,6 +71,86 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
         result=await self.event(ws,'identified')
         return key,result['id']
 
+    async def test_moderation_rejects_direct_ws_submissions_before_history_and_quotas(self):
+        alice = await self.connect()
+        await self.identify(alice, 'OA6DXV')
+        for name in ('PENDEJO', 'FUCK', 'CARALHO', '8---D', 'P3ND3J0'):
+            await alice.send_json({'type':'identify', 'name':name})
+            error = await self.event(alice, 'error')
+            self.assertEqual((error['code'], error['field']), ('offensive-language', 'name'))
+        for kind in ('chat', 'log'):
+            for text in ('eres un pendejo', 'f.u.c.k', 'filho da puta', '8===D',
+                         'joputa', 'STFU', 'pqp'):
+                request_id = uuid.uuid4().hex
+                await alice.send_json({'type':kind, 'request_id':request_id, 'text':text})
+                error = await self.event(alice, 'error')
+                self.assertEqual((error['code'], error['field'], error['kind'], error['request_id']),
+                                 ('offensive-language', 'text', kind, request_id))
+                self.assertNotIn(text, json.dumps(error))
+            self.assertEqual((await self.app[GATEWAY].history.history(kind))['events'], [])
+        # A real callsign collision is accepted only in the identification field.
+        await self.identify(alice, 'W4NK')
+        await alice.send_json({'type':'chat', 'request_id':uuid.uuid4().hex, 'text':'fuck'})
+        self.assertEqual((await self.event(alice, 'error'))['code'], 'offensive-language')
+        await self.identify(alice, 'OA6DXV')
+        # Rejections do not spend the chat cooldown or either daily log entry.
+        for kind in ('chat', 'log', 'log'):
+            request_id = uuid.uuid4().hex
+            await alice.send_json({'type':kind, 'request_id':request_id, 'text':'CQ, 73 de OA6DXV ' + '=' * 10})
+            ack = await self.event(alice, 'ack')
+            self.assertEqual(ack['request_id'], request_id)
+            self.assertEqual(ack['event']['name'], 'OA6DXV', 'Rejected renames retain the old identity')
+        for kind, count in (('chat', 1), ('log', 2)):
+            self.assertEqual(len((await self.app[GATEWAY].history.history(kind))['events']), count)
+
+    async def test_custom_moderation_lists_apply_to_identification_chat_and_log(self):
+        root = Path(self.temp.name)
+        words = root / 'moderation-words.txt'
+        callsigns = root / 'callsigns.txt'
+        words.write_text('blocked\n', encoding='utf-8')
+        callsigns.write_text('BL0CKED\n', encoding='utf-8')
+        await self.runner.cleanup()
+        await self.start_server()
+        alice = await self.connect()
+        await alice.send_json({'type':'identify', 'name':'BLOCKED'})
+        self.assertEqual((await self.event(alice, 'error'))['field'], 'name')
+        await self.identify(alice, 'BL0CKED')
+        for kind in ('chat', 'log'):
+            await alice.send_json({'type':kind, 'request_id':uuid.uuid4().hex, 'text':'blocked'})
+            self.assertEqual((await self.event(alice, 'error'))['code'], 'offensive-language')
+            self.assertEqual((await self.app[GATEWAY].history.history(kind))['events'], [])
+            # Identifiers and bodies both use the custom policy, not defaults.
+            await alice.send_json({'type':kind, 'request_id':uuid.uuid4().hex, 'text':'idiot'})
+            self.assertEqual((await self.event(alice, 'ack'))['event']['text'], 'idiot')
+        await alice.close()
+        callsigns.write_text('', encoding='utf-8')
+        await self.runner.cleanup()
+        await self.start_server()
+        bob = await self.connect()
+        await bob.send_json({'type':'identify', 'name':'BL0CKED'})
+        self.assertEqual((await self.event(bob, 'error'))['field'], 'name')
+        words.write_text('', encoding='utf-8')
+        await bob.close()
+        await self.runner.cleanup()
+        await self.start_server()
+        restored = await self.connect()
+        await self.identify(restored, 'BL0CKED')
+
+    async def test_repeated_characters_rejected_before_normalization_and_quotas(self):
+        alice = await self.connect()
+        await self.identify(alice, 'OA6DXV')
+        for kind in ('chat', 'log'):
+            for text in ('=' * 11, 'CQ' + ' ' * 11 + '73', '📻' * 11):
+                request_id = uuid.uuid4().hex
+                await alice.send_json({'type':kind, 'request_id':request_id, 'text':text})
+                error = await self.event(alice, 'error')
+                self.assertEqual((error['code'], error['field'], error['kind'], error['request_id']),
+                                 ('repeated-character', 'text', kind, request_id))
+            self.assertEqual((await self.app[GATEWAY].history.history(kind))['events'], [])
+            text = 'CQ ' + '=' * 10
+            await alice.send_json({'type':kind, 'request_id':uuid.uuid4().hex, 'text':text})
+            self.assertEqual((await self.event(alice, 'ack'))['event']['text'], text)
+
     async def test_presence_chat_log_restart_and_idempotence(self):
         alice,bob=await self.connect(),await self.connect()
         key,alice_id=await self.identify(alice,'TESTER')
@@ -106,7 +187,7 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
         repeated=await self.event(restored,'ack')
         self.assertEqual(repeated['event']['id'],ack['event']['id'])
         await asyncio.sleep(1.01)
-        unicode_message='📻'*500
+        unicode_message='📻📡'*250
         await restored.send_json({'type':'chat','request_id':uuid.uuid4().hex,'text':unicode_message})
         unicode_ack=await self.event(restored,'ack')
         self.assertEqual(unicode_ack['event']['text'],unicode_message)
@@ -143,6 +224,7 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
         error=await self.event(ws,'error')
         self.assertIn('Espera',error['message'])
         async with self.session.get(self.url+'/community.sqlite3') as response:self.assertEqual(response.status,404)
+        async with self.session.get(self.url+'/chat-logbook.sqlite3') as response:self.assertEqual(response.status,404)
 
     async def test_logbook_daily_limit_across_sessions_and_case(self):
         first,second=await self.connect(),await self.connect()

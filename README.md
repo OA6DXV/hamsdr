@@ -9,7 +9,25 @@ The `unstable` branch is the active experimental development line. The `dev`
 branch tracks reviewed development releases, and `main` is reserved for stable
 releases.
 
-## 0.9.3-dev (local development)
+## 0.9.4-dev (local development)
+
+- Extend the Python moderator with reviewed multilingual compound/regional
+  vocabulary, explicit ASCII gestures and exact known-callsign collision
+  exceptions. Keep moderation authoritative on the server and avoid a second
+  runtime or prefix-based decision cache.
+
+- Reject offensive callsigns, chat messages and logbook submissions using a
+  lightweight offline Spanish/English/Brazilian Portuguese filter on the server.
+  All three vocabularies apply regardless of the selected UI language.
+- Keep rejected messages as editable drafts without automatic reconnect retries;
+  translate feedback in all three languages. Existing history is preserved.
+  Separate editable UTF-8 word and callsign lists in the working directory
+  replace the shipped defaults and survive source updates. Restart after edits.
+  Reviewed vocabulary expansion uses the retained social/forum reference,
+  with exact identifier exceptions for newly observed real-callsign collisions.
+  See [community moderation](docs/MODERATION.md) for scope and limitations.
+
+## 0.9.3-dev
 
 - Add a persistent language selector beside the listener count: Spanish,
   English and Brazilian Portuguese. Switching language updates controls,
@@ -417,15 +435,21 @@ multi-client relay may ignore these commands; a classic or controlling
 `rtl_tcp` connection applies them before HamSDR consumes the IQ stream.
 
 `working_directory` must be absolute. Certificates, the station flag and the
-SQLite database are filename-only references and must live directly inside
+SQLite databases are filename-only references and must live directly inside
 that directory; subdirectories, absolute per-file paths and traversal are
 rejected. Flags may be SVG, PNG, JPEG or WebP up to 2 MB. Equivalent
 command-line options override the file when supplied. An external configuration
 may be supplied with:
 
-`[storage].max_size_mb` limits the main SQLite community database and defaults
-to 50 MB. Events do not expire by age. When space is needed, HamSDR removes the
-oldest chat or logbook entries first and SQLite reuses the released pages.
+`[storage].database` holds identities and posting controls; `history_database`
+(default `chat-logbook.sqlite3`) holds only chat/logbook entries. Both survive
+updates when kept in the external working directory. Legacy combined databases
+are automatically copied, verified and split while preserving event IDs,
+browser identities and quotas. Back up the old database before the first start.
+`[storage].max_size_mb` applies independently to each file and defaults to
+50 MiB each. Events do not expire by age. When history space is needed, HamSDR
+removes the oldest chat/logbook entries, never valid identities. See
+[community storage](docs/COMMUNITY_STORAGE.md) for migration and backup details.
 
 ```sh
 .venv/bin/python server.py --site-config /etc/hamsdr/site.toml

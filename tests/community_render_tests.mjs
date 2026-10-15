@@ -134,4 +134,27 @@ for(const scenario of ['legacy','different-identity','different-name','matching'
     assert.notEqual(sent.at(-1).request_id,draft.request_id,'review creates a new submission ID');
   }
 }
-console.log('community incremental rendering: ok');
+// Permanent moderation rejections preserve the form without automatic replay.
+for(const code of ['offensive-language','repeated-character'])
+for(const kind of ['chat','log']){
+  elements.clear();handlers.clear();sent.length=0;timers.clear();
+  const saved=storage();
+  vm.runInNewContext(readFileSync(new URL('../web/community.js',import.meta.url),'utf8'),{...context,sessionStorage:saved});
+  dispatch('identified',{name:'OA6DXV'});
+  getElementById(kind+'-text').value='Rejected draft';
+  getElementById(kind==='chat'?'chatform':'logform').handlers.get('submit')({preventDefault(){}});
+  const request=sent.at(-1);
+  dispatch('error',{code,field:'text',kind,request_id:'unrelated',message:'Rejected'});
+  assert.equal(JSON.parse(saved.getItem('hamsdr-pending'))[kind].review,undefined,'unrelated error cannot hold a new submission');
+  dispatch('error',{code,field:'text',kind,request_id:request.request_id,message:'Rejected'});
+  assert.equal(getElementById(kind+'-text').value,'Rejected draft');
+  assert.equal(JSON.parse(saved.getItem('hamsdr-pending'))[kind].review,true);
+  for(const timer of timers.values())if(timer.delay===10000)timer.handler();
+  assert.equal(getElementById('chat-status').textContent,'Rejected','retry timeout cannot hide rejection');
+  sent.length=0;dispatch('identified',{name:'OA6DXV'});
+  assert.equal(sent.length,0,'reconnect cannot retry a moderated draft');
+  getElementById(kind+'-text').value='Corrected text';
+  getElementById(kind==='chat'?'chatform':'logform').handlers.get('submit')({preventDefault(){}});
+  assert.equal(sent.at(-1).text,'Corrected text');
+}
+console.log('community incremental rendering and moderation drafts: ok');
