@@ -1058,7 +1058,7 @@ async function connect(){
         if(digitalMode)$('digital-state').textContent=audioEnabled?'Esperando muestras de 12 kHz…':'Inicia audio para decodificar.';
       }else if(msg.type==='resource-policy')applyResourcePolicy(msg);
       else if(msg.type==='resource-limit')message(msg.message);
-      else if(msg.type==='error')message(msg.message);
+      else if(msg.type==='error'&&!['chat','log'].includes(msg.kind)&&!['offensive-language','repeated-character','chat-cooldown'].includes(msg.code))message(msg.message);
       else if(msg.type==='tuned'){$('frequency').dataset.confirmed=String(msg.frequency);}
       return;
     }

@@ -11,10 +11,70 @@ import time
 import unittest
 from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from community import History
+from community import ChatCooldownError, History
 
 
 class HistoryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_chat_moderation_escalates_by_identity_and_resets_after_quiet_period(self):
+        with tempfile.TemporaryDirectory() as directory, patch('community.time.time', return_value=1800000000.) as clock:
+            history = History(Path(directory)/'community.sqlite3')
+            await history.open()
+            try:
+                for _ in range(4):
+                    self.assertEqual(await history.chat_moderation('a'*32, rejected=True),
+                                     {'remaining_ms': 0, 'duration_ms': 0})
+                for seconds in (1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 512):
+                    penalty = await history.chat_moderation('a'*32, rejected=True)
+                    self.assertEqual(penalty, {'remaining_ms': seconds*1000, 'duration_ms': seconds*1000})
+                    # Flooding during a penalty neither doubles nor extends it.
+                    clock.return_value += .25
+                    unchanged = await history.chat_moderation('a'*32, rejected=True)
+                    self.assertEqual(unchanged['duration_ms'], seconds*1000)
+                    self.assertEqual(unchanged['remaining_ms'], seconds*1000-250)
+                    self.assertEqual((await history.chat_moderation('b'*32))['remaining_ms'], 0)
+                    clock.return_value += seconds
+                clock.return_value += 600
+                for _ in range(4):
+                    self.assertEqual((await history.chat_moderation('a'*32, rejected=True))['duration_ms'], 0)
+                self.assertEqual((await history.chat_moderation('a'*32, rejected=True))['duration_ms'], 1000)
+                # Partial strike counts also reset at exactly ten quiet minutes.
+                await history.chat_moderation('b'*32, rejected=True)
+                clock.return_value += 600
+                for _ in range(4):
+                    self.assertEqual((await history.chat_moderation('b'*32, rejected=True))['duration_ms'], 0)
+                self.assertEqual((await history.chat_moderation('b'*32, rejected=True))['duration_ms'], 1000)
+            finally:
+                await history.close()
+
+    async def test_chat_moderation_survives_restart_and_blocks_atomic_writes_without_quotas(self):
+        with tempfile.TemporaryDirectory() as directory, patch('community.time.time', return_value=1800000000.) as clock:
+            path = Path(directory)/'community.sqlite3'
+            history = History(path)
+            await history.open()
+            try:
+                for _ in range(5):
+                    await history.chat_moderation('a'*32, rejected=True)
+                await history.close()
+                history = History(path)
+                await history.open()
+                self.assertEqual((await history.chat_moderation('a'*32))['remaining_ms'], 1000)
+                with self.assertRaises(ChatCooldownError):
+                    await history.append(self.event(), enforce_limits=True)
+                self.assertEqual((await history.history('chat'))['events'], [])
+                self.assertEqual(await history.call(lambda: history.db.execute(
+                    "SELECT COUNT(*) FROM posting_limits WHERE scope='chat'").fetchone()[0]), 0)
+                # Neither logbook nor another identity inherits the sanction.
+                await history.append(self.event('2', 'log'), enforce_limits=True)
+                await history.append({**self.event('3'), 'client_key': 'b'*32}, enforce_limits=True)
+                clock.return_value += 1
+                await history.append(self.event(), enforce_limits=True)
+                # A clean submission does not erase the escalation.
+                self.assertEqual((await history.chat_moderation('a'*32, rejected=True))['duration_ms'], 2000)
+                self.assertEqual((await history.append(self.event(), enforce_limits=True))[1], False,
+                                 'An acknowledgement retry must remain idempotent during a sanction')
+            finally:
+                await history.close()
+
     @staticmethod
     def event(request='1', kind='chat'):
         return {'kind':kind,'time':int(time.time()),'name':'Test','text':'Preserved',

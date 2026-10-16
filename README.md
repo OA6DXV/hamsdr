@@ -9,7 +9,18 @@ The `unstable` branch is the active experimental development line. The `dev`
 branch tracks reviewed development releases, and `main` is reserved for stable
 releases.
 
-## 0.9.4-dev (local development)
+## 0.9.5-dev (local development)
+
+- Add identity-scoped escalating chat cooldowns after repeated moderation
+  rejections. Delays grow exponentially, persist across reconnects and reloads,
+  and reset after ten quiet minutes. The send control shows the remaining delay.
+- Expand multilingual moderation normalization and the editable default word
+  list while keeping enforcement on the server. Show rejection feedback only
+  beneath the chat input and preserve rejected drafts for user correction.
+- Keep the 0.9.4-dev moderation and split community-storage behavior described
+  below.
+
+## 0.9.4-dev
 
 - Extend the Python moderator with reviewed multilingual compound/regional
   vocabulary, explicit ASCII gestures and exact known-callsign collision

@@ -20,13 +20,13 @@ import tomllib
 from urllib.parse import urlsplit
 
 from aiohttp import web, WSMsgType
-from community import History, IdentityError, normalize_callsign, plain_text
+from community import ChatCooldownError, History, IdentityError, normalize_callsign, plain_text
 from moderation import ModerationError, ModerationFilter
 from opus_codec import OPUS_AVAILABLE, OpusEncoder
 from waterfall_codec import VERSION as WATERFALL_PROTOCOL_VERSION, encode as encode_waterfall
 
 ROOT = Path(__file__).resolve().parent
-VERSION = "0.9.4-dev"
+VERSION = "0.9.5-dev"
 PROTOCOL_VERSION = 2
 MODES = {"USB": (300, 2700), "LSB": (-2700, -300), "AM": (-4000, 4000),
          "CW": (450, 950), "NFM": (-5000, 5000)}
@@ -1173,7 +1173,18 @@ class Gateway:
             raise ValueError("Identificador de mensaje inválido")
         submitted_text = update.get("text")
         text = plain_text(submitted_text, 500)
-        self.moderation.require_clean(submitted_text)
+        if kind == "chat":
+            cooldown = await self.history.chat_moderation(client["key"])
+            if cooldown["remaining_ms"]:
+                raise ChatCooldownError(cooldown)
+        try:
+            self.moderation.require_clean(submitted_text)
+        except ModerationError as error:
+            if kind == "chat":
+                error.chat_cooldown = await self.history.chat_moderation(client["key"], rejected=True)
+                for owner in tuple(self.identity_owners.get(client["key"], ())):
+                    self.publish(json.dumps({"type": "chat-cooldown", **error.chat_cooldown}), owner)
+            raise
         # Use the single identified callsign; ignore any second identity field.
         call = client["name"] if kind == "log" else ""
         now = time.monotonic()
@@ -1499,6 +1510,8 @@ class Gateway:
                         self.publish(json.dumps({"type":"hello", "protocol":PROTOCOL_VERSION,
                             "waterfall":WATERFALL_PROTOCOL_VERSION, "identity":identity,
                             **({"token":issued} if issued else {})}), ident)
+                        self.publish(json.dumps({"type": "chat-cooldown",
+                            **await self.history.chat_moderation(identity)}), ident)
                         self.enforce_address_limits(address)
                         await self.command(self.settings_command(ident, settings))
                         self.status()
@@ -1624,6 +1637,8 @@ class Gateway:
                 except ModerationError as error:
                     packet = {"type": "error", "code": error.code, "field": error.field,
                               "message": str(error)}
+                    if hasattr(error, "chat_cooldown"):
+                        packet["chat_cooldown"] = error.chat_cooldown
                     # Correlate a permanent rejection without echoing text or tokens.
                     if update.get("type") in ("chat", "log"):
                         packet["kind"] = update["type"]

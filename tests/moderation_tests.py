@@ -93,9 +93,50 @@ class ModerationTests(unittest.TestCase):
 
     def test_simple_obfuscation(self):
         for text in ("P3ND3J0", "PÚTÁ", "ＰＵＴＡ", "p.u.t.a", "f u c k",
-                     "miiiieeerdaaa", "p0rr@", "FÜCK", "f\u200buck", "🖕"):
+                     "miiiieeerdaaa", "mie rda", "ca raj o", "p0rr@", "FÜCK",
+                     "f\u200buck", "🖕"):
             with self.subTest(text=text), self.assertRaises(ModerationError):
                 require_clean(text)
+
+    def test_mixed_script_confusables_and_invisible_format_characters(self):
+        for text in ("p\u03c5t\u0430",       # Greek upsilon and Cyrillic a
+                     "\u0440uta",           # Cyrillic small er for Latin p
+                     "\u03c1uta",           # Greek rho for Latin p
+                     "p\u0435nd\u0435j0",  # mixed Cyrillic and numeric substitutions
+                     "f\u2060u\u200b c\u200d k",  # invisible format chars and spacing
+                     "p\u202e.u.t.a",       # bidi control plus punctuation
+                     "m\u0456erda"):        # Cyrillic i
+            with self.subTest(text=text), self.assertRaises(ModerationError):
+                require_clean(text)
+        # Do not transliterate wholly non-Latin text as though it were Latin.
+        for text in ("Привет, это радиолюбительская сеть.",
+                     "Ελληνικά: καλή ακρόαση στον σταθμό."):
+            with self.subTest(text=text):
+                require_clean(text)
+
+    def test_generated_character_level_evasions_for_shipped_vocabulary(self):
+        policy = ModerationFilter()
+        leet = str.maketrans("01345789@$!", "oieastbgasi")
+        confusables = {"a": "\u0430", "e": "\u0435", "o": "\u043e",
+                       "p": "\u0440", "c": "\u0441", "y": "\u0443",
+                       "i": "\u0456"}
+        tested = 0
+        for word in policy.words:
+            if len(word) < 4 or not word.isascii() or not word.isalpha():
+                continue
+            variants = [".".join(word), " ".join(word)]
+            translated = word.translate(leet)
+            if translated != word:
+                variants.append(translated)
+            for index, char in enumerate(word):
+                if char in confusables:
+                    variants.append(word[:index] + confusables[char] + word[index + 1:])
+                    break
+            for variant in variants:
+                with self.subTest(variant=variant), self.assertRaises(ModerationError):
+                    policy.require_clean(variant)
+                tested += 1
+        self.assertGreaterEqual(tested, 1000)
 
     def test_expanded_regional_vocabulary_and_online_evasions(self):
         for text in ("eres un joputa", "aweonao", "mamaguevo", "me llegas al pincho",
@@ -175,7 +216,10 @@ class ModerationTests(unittest.TestCase):
                      "Piso de ruido negro, concha de antena, 10 dB de ruido",
                      "Soy gay, ella es lesbiana", "I am gay", "Sou gay e bissexual",
                      "AS IS, CW, RTTY, FT8, AM, USB", "Q S O en A B C",
-                     "📻📡" * 250, "AB" * 250):
+                     "📻📡" * 250, "AB" * 250,
+                     "That was a put-on, but we are on the right frequency.",
+                     "Con o sin el filtro, la señal sigue limpia.",
+                     "A Mari con su antena; who're you calling on 40m?"):
             with self.subTest(text=text):
                 self.assertIsNone(require_clean(text))
 

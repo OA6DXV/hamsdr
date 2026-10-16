@@ -15,6 +15,8 @@
   };
   const events={chat:new Map(),log:new Map()}, pending={};
   let ready=false,identifyTimer=0,acknowledgedName='';
+  const waiting={chat:false,log:false};
+  let cooldownEnd=0,cooldownDuration=0,cooldownTimer=0;
   try{
     const name=localStorage.getItem('hamsdr-name')||'';
     const normalized=normalizeCallsign(name);
@@ -51,7 +53,29 @@
       identify();
     },600);
   }
-  function availability(){for(const kind of ['chat','log'])el('send-'+kind).disabled=!ready;}
+  const cooling=()=>cooldownEnd>performance.now();
+  function availability(){
+    for(const kind of ['chat','log'])el('send-'+kind).disabled=!ready||waiting[kind]||(kind==='chat'&&cooling());
+  }
+  function errorMessage(kind,text=''){
+    const target=el(kind+'-error');target.textContent=text;target.hidden=!text;
+  }
+  function drawCooldown(){
+    clearTimeout(cooldownTimer);cooldownTimer=0;
+    const remaining=Math.max(0,cooldownEnd-performance.now()),button=el('send-chat');
+    button.dataset.cooldown=remaining>0?'true':'false';
+    button.style.setProperty('--cooldown-progress',`${cooldownDuration?Math.min(100,Math.max(0,100*(1-remaining/cooldownDuration))):100}%`);
+    availability();
+    if(remaining>0)cooldownTimer=setTimeout(drawCooldown,50);
+  }
+  function applyCooldown(state){
+    if(!state||!Number.isFinite(state.remaining_ms)||!Number.isFinite(state.duration_ms)||state.remaining_ms<0||state.duration_ms<0)return;
+    cooldownDuration=state.duration_ms;cooldownEnd=performance.now()+state.remaining_ms;
+    if(state.remaining_ms>0&&!el('chat-error').textContent)errorMessage('chat','Chat temporalmente deshabilitado por intentos de envío bloqueados.');
+    drawCooldown();
+  }
+  window.addEventListener('pageshow',drawCooldown);
+  document.addEventListener('visibilitychange',drawCooldown);
   el('username').addEventListener('input',()=>{
     const field=el('username');
     field.value=normalizeCallsign(field.value);
@@ -80,7 +104,7 @@
   window.addEventListener('languagechange',()=>{
     const field=el('username');field.setCustomValidity(field.value&&!callsignPattern.test(field.value)?translatedHint():'');
   });
-  window.addEventListener('radio-close',()=>{ready=false;availability();el('chat-status').textContent='Desconectado · recuperando conexión e historial…';});
+  window.addEventListener('radio-close',()=>{ready=false;waiting.chat=waiting.log=false;availability();el('chat-status').textContent='Desconectado · recuperando conexión e historial…';});
   function eventRow(kind,e){
     const row=document.createElement('div');row.className='chat-entry';row.dataset.id=e.id;
     const stamp=document.createElement('span');stamp.className='chat-time';stamp.textContent=new Date(e.time*1000).toISOString().replace('T',' ').slice(0,19)+' UTC ';
@@ -129,16 +153,19 @@
     if(!pending[kind]||!ready)return;
     if(pending[kind].review||pending[kind].identity!==window.radioIdentity?.id||pending[kind].name!==acknowledgedName){
       // Retain held drafts across reloads, but never retry them automatically.
-      pending[kind].review=true;savePending();
+      pending[kind].review=true;waiting[kind]=false;savePending();availability();
       el('chat-status').textContent='Borrador recuperado: revisa el texto y pulsa Enviar para publicarlo con tu identidad actual.';
       return;
     }
+    if(waiting[kind]||(kind==='chat'&&cooling()))return;
     const {type,text,request_id}=pending[kind];
-    window.radioSend({type,text,request_id});el('send-'+kind).disabled=true;
-    setTimeout(()=>{if(pending[kind]?.request_id===request_id&&!pending[kind].review){el('send-'+kind).disabled=!ready;el('chat-status').textContent='Sin confirmación todavía. Puedes volver a enviar; no se duplicará el mensaje.';}},10000);
+    waiting[kind]=true;window.radioSend({type,text,request_id});availability();
+    setTimeout(()=>{if(pending[kind]?.request_id===request_id&&!pending[kind].review){waiting[kind]=false;availability();el('chat-status').textContent='Sin confirmación todavía. Puedes volver a enviar; no se duplicará el mensaje.';}},10000);
   }
   window.addEventListener('radio-event',({detail:m})=>{
-    if(m.type==='identified'){
+    if(m.type==='chat-cooldown'){
+      applyCooldown(m);
+    }else if(m.type==='identified'){
       // An acknowledgement for earlier input must not enable posting while
       // the user is still editing a newer callsign.
       if(m.name!==normalizeCallsign(el('username').value))return;
@@ -158,22 +185,29 @@
       renderEvent(m.event);
       for(const kind of ['chat','log'])if(pending[kind]?.request_id===m.request_id){
         if(el(kind+'-text').value===pending[kind].text)el(kind+'-text').value='';
-        delete pending[kind];savePending();availability();
+        delete pending[kind];waiting[kind]=false;errorMessage(kind);savePending();availability();
       }
       el('chat-status').textContent='Guardado y enviado';
     }else if(m.type==='error'){
-      if(['offensive-language','repeated-character'].includes(m.code)&&['chat','log'].includes(m.kind)&&pending[m.kind]?.request_id===m.request_id){
+      if(['offensive-language','repeated-character','chat-cooldown'].includes(m.code)&&['chat','log'].includes(m.kind)&&pending[m.kind]?.request_id===m.request_id){
         // Keep a rejected submission as a draft. Reconnect must not retry it.
         pending[m.kind].review=true;savePending();
       }
-      availability();el('chat-status').textContent=m.message;
+      if(m.chat_cooldown)applyCooldown(m.chat_cooldown);
+      if(['chat','log'].includes(m.kind)){
+        if(pending[m.kind]?.request_id===m.request_id)waiting[m.kind]=false;
+        errorMessage(m.kind,m.message);
+        if(m.kind==='chat')el('chat-status').textContent='';
+      }else el('chat-status').textContent=m.message;
+      availability();
     }
   });
   for(const kind of ['chat','log']){
     el(kind==='chat'?'chatform':'logform').addEventListener('submit',e=>{
-      e.preventDefault();if(!ready)return;
+      e.preventDefault();if(!ready||waiting[kind]||(kind==='chat'&&cooling()))return;
       const text=el(kind+'-text').value.trim();
       if(!text)return;
+      errorMessage(kind);
       // Keep the id on retry of the exact same submission, including reconnects.
       if(!pending[kind]||pending[kind].review||pending[kind].text!==text||pending[kind].identity!==window.radioIdentity?.id||pending[kind].name!==acknowledgedName)
         pending[kind]={type:kind,text,request_id:random(),identity:window.radioIdentity?.id,name:acknowledgedName};

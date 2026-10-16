@@ -12,7 +12,8 @@ history_database = "chat-logbook.sqlite3"
 max_size_mb = 50
 ```
 
-- `database`: browser identities/token hashes, posting quotas and a bounded
+- `database`: browser identities/token hashes, posting quotas, identity-scoped
+  chat moderation strikes/sanctions in `posting_limits`, and a bounded
   interrupted-publication recovery marker. No chat/logbook bodies remain here.
 - `history_database`: only chat/logbook events, indexes and SQLite's sequence.
 - `max_size_mb`: independent ceiling for each database, in MiB. Oldest events

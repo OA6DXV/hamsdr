@@ -9,6 +9,7 @@ import struct
 import sys
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 import tempfile
 import uuid
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -71,7 +72,8 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
         result=await self.event(ws,'identified')
         return key,result['id']
 
-    async def test_moderation_rejects_direct_ws_submissions_before_history_and_quotas(self):
+    @patch('community.time.time', return_value=1800000000.)
+    async def test_moderation_rejects_direct_ws_submissions_before_history_and_quotas(self, clock):
         alice = await self.connect()
         await self.identify(alice, 'OA6DXV')
         for name in ('PENDEJO', 'FUCK', 'CARALHO', '8---D', 'P3ND3J0'):
@@ -87,11 +89,14 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual((error['code'], error['field'], error['kind'], error['request_id']),
                                  ('offensive-language', 'text', kind, request_id))
                 self.assertNotIn(text, json.dumps(error))
+                clock.return_value += error.get('chat_cooldown', {}).get('remaining_ms', 0)/1000 + .01
             self.assertEqual((await self.app[GATEWAY].history.history(kind))['events'], [])
         # A real callsign collision is accepted only in the identification field.
         await self.identify(alice, 'W4NK')
         await alice.send_json({'type':'chat', 'request_id':uuid.uuid4().hex, 'text':'fuck'})
-        self.assertEqual((await self.event(alice, 'error'))['code'], 'offensive-language')
+        error = await self.event(alice, 'error')
+        self.assertEqual(error['code'], 'offensive-language')
+        clock.return_value += error.get('chat_cooldown', {}).get('remaining_ms', 0)/1000 + .01
         await self.identify(alice, 'OA6DXV')
         # Rejections do not spend the chat cooldown or either daily log entry.
         for kind in ('chat', 'log', 'log'):
@@ -102,6 +107,65 @@ class RadioTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(ack['event']['name'], 'OA6DXV', 'Rejected renames retain the old identity')
         for kind, count in (('chat', 1), ('log', 2)):
             self.assertEqual(len((await self.app[GATEWAY].history.history(kind))['events']), count)
+
+    @patch('community.time.time', return_value=1800000000.)
+    async def test_chat_sanctions_restore_on_reconnect_and_rename_without_affecting_other_identities(self, clock):
+        alice = await self.connect()
+        token = self.credentials[alice]
+        await self.identify(alice, 'OA6DXV')
+        repeated_request = uuid.uuid4().hex
+        for index, text in enumerate(('fuck', 'caralho', 'pendejo', 'fuck', '='*11), 1):
+            await alice.send_json({'type': 'chat', 'request_id': repeated_request, 'text': text})
+            error = await self.event(alice, 'error')
+            self.assertEqual(error['code'], 'repeated-character' if index == 5 else 'offensive-language')
+            self.assertEqual(error['chat_cooldown']['remaining_ms'], 1000 if index == 5 else 0)
+        await alice.send_json({'type': 'chat', 'request_id': uuid.uuid4().hex, 'text': 'CQ 73'})
+        self.assertEqual((await self.event(alice, 'error'))['code'], 'chat-cooldown')
+        await self.identify(alice, 'N0CALL')
+        await alice.close()
+        alice = await self.connect(token)
+        restored = await self.event(alice, 'chat-cooldown')
+        self.assertEqual(restored['remaining_ms'], 1000)
+        await self.identify(alice, 'N0CALL')
+        bob = await self.connect()
+        self.assertEqual((await self.event(bob, 'chat-cooldown'))['remaining_ms'], 0)
+        await self.identify(bob, 'TESTER')
+        await bob.send_json({'type': 'chat', 'request_id': uuid.uuid4().hex, 'text': 'CQ 73'})
+        self.assertEqual((await self.event(bob, 'ack'))['event']['name'], 'TESTER')
+        clock.return_value += 1
+        await alice.send_json({'type': 'chat', 'request_id': uuid.uuid4().hex, 'text': 'caralho'})
+        error = await self.event(alice, 'error')
+        self.assertEqual((error['code'], error['chat_cooldown']['duration_ms']), ('offensive-language', 2000))
+        clock.return_value += 600
+        for _ in range(4):
+            await alice.send_json({'type': 'chat', 'request_id': uuid.uuid4().hex, 'text': 'fuck'})
+            self.assertEqual((await self.event(alice, 'error'))['chat_cooldown']['remaining_ms'], 0)
+        await alice.send_json({'type': 'chat', 'request_id': uuid.uuid4().hex, 'text': 'pendejo'})
+        self.assertEqual((await self.event(alice, 'error'))['chat_cooldown']['duration_ms'], 1000)
+        records = (await self.app[GATEWAY].history.history('chat'))['events']
+        self.assertEqual([row['text'] for row in records], ['CQ 73'])
+
+    @patch('community.time.time', return_value=1800000000.)
+    async def test_chat_sanction_is_shared_across_allowed_connections_of_one_identity(self, clock):
+        self.args.max_connections_per_identity = 2
+        alice = await self.connect()
+        bob = await self.connect(self.credentials[alice])
+        await self.identify(alice, 'OA6DXV')
+        await self.identify(bob, 'N0CALL')
+        for index in range(5):
+            ws = alice if index % 2 == 0 else bob
+            await ws.send_json({'type': 'chat', 'request_id': uuid.uuid4().hex, 'text': 'fuck'})
+            self.assertEqual((await self.event(ws, 'error'))['code'], 'offensive-language')
+        state = await self.event(bob, 'chat-cooldown', lambda packet: packet['remaining_ms'] > 0)
+        self.assertEqual(state['duration_ms'], 1000)
+        await bob.send_json({'type': 'chat', 'request_id': uuid.uuid4().hex, 'text': 'CQ 73'})
+        self.assertEqual((await self.event(bob, 'error'))['code'], 'chat-cooldown')
+        clock.return_value += 1
+        for ws in (alice, bob):
+            await ws.send_json({'type': 'chat', 'request_id': uuid.uuid4().hex, 'text': 'caralho'})
+        errors = await asyncio.gather(self.event(alice, 'error'), self.event(bob, 'error'))
+        self.assertEqual([error['chat_cooldown']['duration_ms'] for error in errors], [2000, 2000])
+        self.assertEqual((await self.app[GATEWAY].history.history('chat'))['events'], [])
 
     async def test_custom_moderation_lists_apply_to_identification_chat_and_log(self):
         root = Path(self.temp.name)

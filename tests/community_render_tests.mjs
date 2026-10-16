@@ -5,7 +5,7 @@ import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
 
 class Element {
-  constructor(tag='div'){this.tag=tag;this.children=[];this.dataset={};this.style={};this.value='';this.scrollTop=0;this.clientHeight=10;this.replacements=0;}
+  constructor(tag='div'){this.tag=tag;this.children=[];this.dataset={};this.style={setProperty(name,value){this[name]=value;}};this.value='';this.scrollTop=0;this.clientHeight=10;this.replacements=0;}
   addEventListener(name,handler){(this.handlers??=new Map()).set(name,handler);}
   setCustomValidity(message){this.validationMessage=message;}
   reportValidity(){return !this.validationMessage;}
@@ -30,13 +30,15 @@ const getElementById=id=>{if(!elements.has(id))elements.set(id,new Element());re
 const handlers=new Map();
 const sent=[];
 const timers=new Map();let nextTimer=0;
+let testTime=0;
 const storage=()=>{const values=new Map();return{getItem:key=>values.get(key)??null,setItem:(key,value)=>values.set(key,value)};};
 const context={
-  document:{getElementById,createElement:tag=>new Element(tag),createDocumentFragment:()=>new Element('fragment'),
+  document:{getElementById,addEventListener(){},createElement:tag=>new Element(tag),createDocumentFragment:()=>new Element('fragment'),
     createTextNode:text=>Object.assign(new Element('text'),{textContent:text})},
   window:{addEventListener:(name,handler)=>handlers.set(name,handler),radioSend:message=>sent.push(message),radioIdentity:{id:'f'.repeat(32)}},
   crypto:{randomUUID:()=> '01234567-89ab-cdef-0123-456789abcdef'},
   sessionStorage:storage(),localStorage:storage(),
+  performance:{now:()=>testTime},
   setTimeout:(handler,delay)=>{const id=++nextTimer;timers.set(id,{handler,delay});return id;},
   clearTimeout:id=>timers.delete(id),
 };
@@ -135,7 +137,7 @@ for(const scenario of ['legacy','different-identity','different-name','matching'
   }
 }
 // Permanent moderation rejections preserve the form without automatic replay.
-for(const code of ['offensive-language','repeated-character'])
+for(const code of ['offensive-language','repeated-character','chat-cooldown'])
 for(const kind of ['chat','log']){
   elements.clear();handlers.clear();sent.length=0;timers.clear();
   const saved=storage();
@@ -144,17 +146,44 @@ for(const kind of ['chat','log']){
   getElementById(kind+'-text').value='Rejected draft';
   getElementById(kind==='chat'?'chatform':'logform').handlers.get('submit')({preventDefault(){}});
   const request=sent.at(-1);
+  getElementById('chat-status').textContent='Guardado y enviado';
   dispatch('error',{code,field:'text',kind,request_id:'unrelated',message:'Rejected'});
   assert.equal(JSON.parse(saved.getItem('hamsdr-pending'))[kind].review,undefined,'unrelated error cannot hold a new submission');
   dispatch('error',{code,field:'text',kind,request_id:request.request_id,message:'Rejected'});
+  if(kind==='chat')assert.equal(getElementById('chat-status').textContent,'','a rejection must clear a stale saved confirmation');
   assert.equal(getElementById(kind+'-text').value,'Rejected draft');
   assert.equal(JSON.parse(saved.getItem('hamsdr-pending'))[kind].review,true);
   for(const timer of timers.values())if(timer.delay===10000)timer.handler();
-  assert.equal(getElementById('chat-status').textContent,'Rejected','retry timeout cannot hide rejection');
+  assert.equal(getElementById(kind+'-error').textContent,'Rejected','retry timeout cannot hide rejection');
   sent.length=0;dispatch('identified',{name:'OA6DXV'});
   assert.equal(sent.length,0,'reconnect cannot retry a moderated draft');
   getElementById(kind+'-text').value='Corrected text';
   getElementById(kind==='chat'?'chatform':'logform').handlers.get('submit')({preventDefault(){}});
   assert.equal(sent.at(-1).text,'Corrected text');
 }
-console.log('community incremental rendering and moderation drafts: ok');
+
+// Sanctions disable only chat, including programmatic form submission. UI
+// timers, identity changes and unrelated ACKs cannot re-enable it early.
+elements.clear();handlers.clear();sent.length=0;timers.clear();testTime=0;
+vm.runInNewContext(readFileSync(new URL('../web/community.js',import.meta.url),'utf8'),{...context,sessionStorage:storage(),localStorage:storage()});
+dispatch('identified',{name:'OA6DXV'});
+dispatch('chat-cooldown',{remaining_ms:4000,duration_ms:4000});
+assert.equal(getElementById('send-chat').disabled,true);
+assert.equal(getElementById('send-log').disabled,false);
+assert.equal(getElementById('send-chat').style['--cooldown-progress'],'0%');
+getElementById('chat-text').value='CQ 73';
+getElementById('chatform').handlers.get('submit')({preventDefault(){}});
+assert.equal(sent.length,0,'the form handler enforces the UI sanction too');
+dispatch('identified',{name:'OTHER'});
+dispatch('ack',{event:event(10001),request_id:'unrelated'});
+assert.equal(getElementById('send-chat').disabled,true,'rename and unrelated ACK cannot clear sanctions');
+testTime=2000;handlers.get('pageshow')();
+assert.equal(getElementById('send-chat').style['--cooldown-progress'],'50%');
+getElementById('username').value='INVALID!';getElementById('username').handlers.get('input')();
+testTime=4000;handlers.get('pageshow')();
+assert.equal(getElementById('send-chat').dataset.cooldown,'false');
+assert.equal(getElementById('send-chat').disabled,true,'expired penalty does not override invalid identification');
+dispatch('identified',{name:'OA6DXV'});
+assert.equal(getElementById('send-chat').disabled,false);
+assert.equal(getElementById('send-chat').style['--cooldown-progress'],'100%');
+console.log('community incremental rendering, moderation drafts and cooldown: ok');

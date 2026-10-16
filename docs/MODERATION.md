@@ -11,6 +11,36 @@ instead of automatically retried after reconnect. Only an explicit Send
 submits it again. Rejected renames preserve the previous server-side identity.
 Feedback is available in Spanish, English and Brazilian Portuguese.
 
+## Repeated rejected chat submissions
+
+Chat counts `offensive-language` and `repeated-character` rejections per
+server-issued browser identity, regardless of the text or current callsign.
+The first four rejections show feedback; the fifth starts a one-second chat
+sanction. Each later rejected submission after that sanction expires doubles
+the duration: 2, 4, 8 seconds, up to 512 seconds. During a sanction all new chat
+submissions are rejected, including clients that bypass HTML controls. Attempts
+during the sanction do not extend it or advance the counter. Audio, waterfall,
+reading history, and the separate logbook quota remain available. Logbook and
+callsign rejections do not increment this chat-specific counter.
+
+Ten minutes without a moderation rejection reset both the counter and its
+escalation. A successful message does not reset strikes. The existing state
+database stores this information in `posting_limits` with scope
+`chat-moderation`, independently of the normal chat cooldown and logbook quota.
+There is no schema change or message-body storage. Reloading, reconnecting,
+renaming, transferring a session, or restarting the server retains the sanction;
+a different browser identity is independent, even behind the same public IP.
+
+The private `chat-cooldown` packet reports `remaining_ms` and `duration_ms` on
+admission and after a moderated chat attempt. Correlated moderation errors carry
+the same `chat_cooldown` state; requests during a sanction use error code
+`chat-cooldown`. Only that identity's connections receive its state. The button
+fills blue against a pale background as time passes and is enabled again on
+expiry if the connection and callsign are ready. Client timing uses a monotonic
+clock; the server remains authoritative. Rejected drafts never auto-retry.
+Feedback appears below the corresponding form in bold red and is not duplicated
+in the global receiver notice.
+
 Chat and logbook submissions also reject more than ten consecutive identical
 Unicode characters after NFC normalization, including punctuation and spaces.
 This checks the original input before storage whitespace normalization, not the
@@ -51,6 +81,10 @@ disabling moderation. The repetition and explicit-gesture rules are independent
 of both lists and remain active even when the words file is empty. This change
 does not install the full external research/reference database.
 
+Python module changes also require restarting the corresponding server.
+Development serves static assets from disk, so a refreshed interface can show
+new JavaScript while an old process still runs the previous moderation logic.
+
 ## Vocabulary provenance and behavior
 
 The words file contains a curated selection from LDNOOBW plus regional terms
@@ -60,8 +94,16 @@ Ambiguous vocabulary (colors, sexual orientation, ordinary objects and radio
 abbreviations) is deliberately excluded. Match whole words and phrases rather
 than substrings, so a normal callsign such as K4ASS remains valid. Comparison
 handles case, accents, compatibility forms, common numeric/symbol substitutions,
-elongated words and simple letter-by-letter punctuation/space evasions.
-The submitted text is never rewritten. No runtime downloads, API keys, remote
+elongated words, invisible format characters, a small mixed-script homoglyph map,
+and punctuation/space inserted within words, including fragments
+such as `mie rda` and `ca raj o`. When whitespace separates fragments, common
+function-word sequences are protected to reduce cross-language collisions;
+ambiguous boundaries such as `put on` have explicit benign exceptions. Literal
+blocked terms and configured multi-word rules remain checked.
+The mixed-script map is deliberately limited and does not transliterate wholly
+Cyrillic/Greek text. It is not a complete Unicode-confusables implementation;
+structural changes such as transposition or deletion may still evade it. The
+submitted text is never rewritten. No runtime downloads, API keys, remote
 moderation service, neural model or additional Python package is required.
 
 The same words file includes individually selected explicit insults, compound
@@ -112,7 +154,8 @@ The existing connection, message-rate, length and daily-log limits still apply.
 Moderation does not replace plain-text rendering or XSS protections.
 
 Checks: `tests/moderation_tests.py`, the moderation case in
-`tests/integration_test.py`, `tests/community_render_tests.mjs`, and the
+`tests/integration_test.py`, `tests/community_render_tests.mjs`,
+`tests/moderation_cooldown_browser_test.py` (Chromium/WebKit), and the
 moderation browser scenario in `tests/i18n_browser_test.py`. All server/browser
 tests use an isolated demo receiver and a temporary database.
 

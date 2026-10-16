@@ -149,10 +149,10 @@ async def check(browser, url, gateway, engine):
     for language,notice in repetition_notices.items():
         await page.locator('#language').select_option(language)
         for kind in ('chat','log'):
-            await page.locator('#chat-status').evaluate('(element)=>element.textContent=""')
+            await page.locator('#'+kind+'-error').evaluate('(element)=>element.textContent=""')
             await page.locator('#'+kind+'-text').fill('='*11)
             await page.locator('#send-'+kind).click()
-            await page.wait_for_function('({notice,kind})=>document.getElementById("chat-status").textContent===notice&&JSON.parse(sessionStorage.getItem("hamsdr-pending"))[kind].review===true',arg={'notice':notice,'kind':kind})
+            await page.wait_for_function('({notice,kind})=>document.getElementById(kind+"-error").textContent===notice&&JSON.parse(sessionStorage.getItem("hamsdr-pending"))[kind].review===true',arg={'notice':notice,'kind':kind})
             assert await page.locator('#'+kind+'-text').input_value()=='='*11
             assert await page.evaluate('(kind)=>JSON.parse(sessionStorage.getItem("hamsdr-pending"))[kind].review',kind)
     notices={
@@ -165,7 +165,7 @@ async def check(browser, url, gateway, engine):
         for kind in ('chat','log'):
             await page.locator('#'+kind+'-text').fill(offensive)
             await page.locator('#send-'+kind).click()
-            await page.wait_for_function('({notice,kind})=>document.getElementById("chat-status").textContent===notice&&JSON.parse(sessionStorage.getItem("hamsdr-pending"))[kind].review===true',arg={'notice':notices[language],'kind':kind})
+            await page.wait_for_function('({notice,kind})=>document.getElementById(kind+"-error").textContent===notice&&JSON.parse(sessionStorage.getItem("hamsdr-pending"))[kind].review===true',arg={'notice':notices[language],'kind':kind})
             assert await page.locator('#'+kind+'-text').input_value()==offensive
             assert await page.evaluate('(kind)=>JSON.parse(sessionStorage.getItem("hamsdr-pending"))[kind].review',kind)
     assert not (await gateway.history.history('chat'))['events']

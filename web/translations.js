@@ -6,6 +6,7 @@ window.HamTranslations=[
 ['No repitas el mismo carácter más de 10 veces seguidas.','Do not repeat the same character more than 10 times in a row.','Não repita o mesmo caractere mais de 10 vezes seguidas.'],
 ['El indicativo contiene lenguaje ofensivo; elige otro.','The callsign contains offensive language; choose another.','O indicativo contém linguagem ofensiva; escolha outro.'],
 ['El mensaje contiene lenguaje ofensivo. Revisa el texto antes de enviarlo.','The message contains offensive language. Review the text before sending it.','A mensagem contém linguagem ofensiva. Revise o texto antes de enviá-la.'],
+['Chat temporalmente deshabilitado por intentos de envío bloqueados.','Chat temporarily disabled after repeated blocked submissions.','Chat temporariamente desativado após repetidas tentativas de envio bloqueadas.'],
 ['Idioma','Language','Idioma'],
 ['usuario conectado.','listener connected.','ouvinte conectado.'],
 ['usuarios conectados.','listeners connected.','ouvintes conectados.'],

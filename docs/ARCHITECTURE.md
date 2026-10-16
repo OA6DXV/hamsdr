@@ -202,6 +202,12 @@ queue closes the connection and the browser reloads persisted history. Chat
 allows one new message per second per browser session, plus the global publication
 bucket. Logbook submissions allow two entries per normalized callsign per UTC day.
 SQLite persists these limits across reloads, reconnects and server restarts.
+The same state table also stores independent chat moderation strikes per browser
+identity. Five rejected chat submissions trigger a one-second sanction; subsequent
+rejections double it up to 512 seconds. Ten minutes without a rejection reset the
+counter. A private `chat-cooldown` packet restores button progress after reconnect;
+the server rejects submissions during a sanction without extending it. See
+[`MODERATION.md`](MODERATION.md) for the state and error contract.
 Publication reserves its quota in the state file before committing history.
 A bounded recovery marker stores only request identity and the previous quota,
 not message text. On success it is finalized; on write failure/restart it refunds

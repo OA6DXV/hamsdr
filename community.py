@@ -2,6 +2,7 @@
 """Durable community history. Database work runs off the audio event loop."""
 import asyncio
 import hashlib
+import math
 import re
 import secrets
 from concurrent.futures import ThreadPoolExecutor
@@ -9,11 +10,24 @@ from pathlib import Path
 import sqlite3
 import time
 import unicodedata
-from moderation import require_clean
+from moderation import ModerationError, require_clean
 
 
 CALLSIGN_SYMBOLS = frozenset("\\|/@-_")
 IDENTITY_TTL = 90 * 86400
+CHAT_MODERATION_RESET = 600
+CHAT_MODERATION_THRESHOLD = 5
+CHAT_MODERATION_MAX_SECONDS = 512
+
+
+class ChatCooldownError(ModerationError):
+    """A private, identity-scoped restriction on new chat submissions."""
+
+    code = "chat-cooldown"
+
+    def __init__(self, cooldown):
+        super().__init__("text", "Chat temporalmente deshabilitado por intentos de envío bloqueados.")
+        self.chat_cooldown = cooldown
 
 
 class IdentityError(ValueError):
@@ -255,6 +269,41 @@ class History:
     async def identity(self, token=None):
         return await self.call(self._identity, token)
 
+    def _chat_moderation(self, identity, rejected=False):
+        """Persist strikes in the existing identity-scoped quota table.
+
+        Requests during a sanction neither advance strikes nor extend it.
+        Read and update run on the single database executor, including when
+        more than one connection per identity is configured.
+        """
+        now = time.time()
+        row = self.db.execute("SELECT count,updated FROM posting_limits "
+                              "WHERE scope='chat-moderation' AND identity=? AND period=0",
+                              (identity,)).fetchone()
+        if row is not None and now - row['updated'] >= CHAT_MODERATION_RESET:
+            with self.db:
+                self.db.execute("DELETE FROM posting_limits WHERE scope='chat-moderation' AND identity=?",
+                                (identity,))
+            row = None
+        count = row['count'] if row is not None else 0
+        duration = (min(2 ** min(count - CHAT_MODERATION_THRESHOLD, 9), CHAT_MODERATION_MAX_SECONDS)
+                    if count >= CHAT_MODERATION_THRESHOLD else 0)
+        remaining = min(duration, max(0, duration - (now - row['updated']))) if row is not None else 0
+        if rejected and not remaining:
+            count = min(count + 1, CHAT_MODERATION_THRESHOLD + 9)
+            duration = 2 ** (count - CHAT_MODERATION_THRESHOLD) if count >= CHAT_MODERATION_THRESHOLD else 0
+            remaining = duration
+            with self.db:
+                self.db.execute("DELETE FROM posting_limits WHERE scope='chat-moderation' AND updated<=?",
+                                (now - CHAT_MODERATION_RESET,))
+                self.db.execute("""INSERT INTO posting_limits VALUES ('chat-moderation',?,0,?,?)
+                    ON CONFLICT(scope,identity,period) DO UPDATE SET count=excluded.count,updated=excluded.updated""",
+                    (identity, count, now))
+        return {"remaining_ms": math.ceil(remaining * 1000), "duration_ms": duration * 1000}
+
+    async def chat_moderation(self, identity, rejected=False):
+        return await self.call(self._chat_moderation, identity, rejected)
+
     @staticmethod
     def public(row):
         return {key: row[key] for key in ("id", "kind", "time", "name", "text", "frequency", "mode", "call")}
@@ -311,6 +360,10 @@ class History:
                               (event['client_key'], event['request_id'])).fetchone()
         if row is not None:
             return self.public(row), False
+        if enforce_limits and event['kind'] == 'chat':
+            cooldown = self._chat_moderation(event['client_key'])
+            if cooldown['remaining_ms']:
+                raise ChatCooldownError(cooldown)
         self._make_room()
         if enforce_limits:
             self._reserve_publication(event)
